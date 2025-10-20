@@ -99,7 +99,6 @@
 	/* Nutzt die Akzentfarbe deines Obsidian-Themes */
 	background-color: var(--interactive-accent);
 	color: var(--text-on-accent);
-	color: deeppink;
 	padding: 2px 8px;
 	border-radius: 5px;
 	cursor: pointer;

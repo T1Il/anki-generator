@@ -15,8 +15,16 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		// KORREKTUR: Der Klassenname wurde von AnkiGeneratorTab zu AnkiGeneratorSettingTab geändert.
 		this.addSettingTab(new AnkiGeneratorSettingTab(this.app, this));
+
+		this.addRibbonIcon('brain-circuit', 'Anki-Karten generieren', (evt: MouseEvent) => {
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (activeView) {
+				this.triggerCardGeneration(activeView.editor);
+			} else {
+				new Notice('Bitte öffnen Sie eine Notiz, um Karten zu generieren.');
+			}
+		});
 
 		this.registerMarkdownCodeBlockProcessor('anki-cards', async (source, el, ctx) => {
 			el.empty();
@@ -45,17 +53,34 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 			el.createEl('h4', { text: 'Anki-Karten' });
 
+			// ### START DER ÜBERARBEITETEN ANZEIGE-LOGIK ###
 			if (deckName) {
 				const synchronizedCount = cards.filter(card => card.id !== null).length;
 				const unsynchronizedCount = cards.length - synchronizedCount;
+
+				// Lokale Informationen werden immer angezeigt
+				const localStatusText = `✅ ${synchronizedCount} Synchronisiert | 📝 ${unsynchronizedCount} Ausstehend`;
+				let ankiStatusText = '';
+				let errorClass = '';
+
 				try {
+					// Versuche, Anki-Informationen abzurufen
 					const totalAnkiCount = await getCardCountForDeck(deckName);
-					const text = `📈 ${totalAnkiCount} in Anki | ✅ ${synchronizedCount} Synchronisiert | 📝 ${unsynchronizedCount} Ausstehend`;
-					el.createEl('p', { text: text, cls: 'anki-card-count' });
+					ankiStatusText = `📈 ${totalAnkiCount} in Anki | `;
 				} catch (e) {
-					el.createEl('p', { text: '⚠️ Anki-Verbindung für Kartenzahl fehlgeschlagen.', cls: 'anki-card-count anki-error' });
+					// Bei Fehler wird eine Warnung angezeigt
+					ankiStatusText = '⚠️ Anki-Verbindung fehlgeschlagen | ';
+					errorClass = 'anki-error';
+				}
+
+				// Kombiniere und zeige den finalen Text an
+				const fullText = ankiStatusText + localStatusText;
+				const pEl = el.createEl('p', { text: fullText, cls: 'anki-card-count' });
+				if (errorClass) {
+					pEl.addClass(errorClass);
 				}
 			}
+			// ### ENDE DER ÜBERARBEITETEN ANZEIGE-LOGIK ###
 
 			const buttonContainer = el.createDiv({ cls: 'anki-button-container' });
 
