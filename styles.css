@@ -21,8 +21,8 @@
 
 /* Make the modal window wider for better overview */
 .anki-preview-modal-wide .modal-content {
-	width: 90%;
-	max-width: 1000px; /* Increased max-width */
+	width: 100%;
+	max-width: 1200px;
 }
 
 .anki-preview-container {
@@ -40,8 +40,8 @@
 	background-color: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 8px;
-	margin-bottom: 20px; /* Increased space between cards */
-	padding: 20px; /* Increased padding inside the card */
+	margin-bottom: 20px;
+	padding: 20px;
 	display: flex;
 	flex-direction: column;
 	transition: background-color 0.2s ease-in-out;
@@ -54,29 +54,29 @@
 .anki-preview-content .anki-preview-question {
 	font-weight: 500;
 	font-size: 1.1em;
-	margin-bottom: 15px; /* Increased margin for clarity */
+	margin-bottom: 15px;
 }
 
 .anki-preview-content .anki-preview-separator {
 	border: none;
 	border-top: 1px solid var(--background-modifier-border);
-	margin: 15px 0; /* Increased margin for clear separation */
+	margin: 15px 0;
 }
 
 .anki-preview-content .anki-preview-answer {
 	color: var(--text-muted);
 	font-size: 1em;
-	line-height: 1.5; /* Improved readability */
+	line-height: 1.5;
 }
 
 /* Container for edit/delete buttons, clearly at the bottom */
 .anki-card-actions {
 	display: flex;
-	justify-content: flex-end; /* Align buttons to the right */
+	justify-content: flex-end;
 	gap: 10px;
-	margin-top: 25px; /* Clear separation from the content */
+	margin-top: 25px;
 	border-top: 1px solid var(--background-modifier-border-hover);
-	padding-top: 15px; /* Space above buttons */
+	padding-top: 15px;
 }
 
 	.anki-card-actions button {
@@ -93,3 +93,21 @@
 			border-color: var(--background-modifier-error);
 			color: var(--text-on-accent);
 		}
+
+/* --- NEU: Styles für den Button in der Statusleiste --- */
+.anki-generate-button {
+	/* Nutzt die Akzentfarbe deines Obsidian-Themes */
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	color: deeppink;
+	padding: 2px 8px;
+	border-radius: 5px;
+	cursor: pointer;
+	font-weight: 500;
+	margin: 0 10px; /* Fügt etwas Abstand hinzu */
+	transition: background-color 0.2s ease-in-out;
+}
+
+	.anki-generate-button:hover {
+		background-color: var(--interactive-accent-hover);
+	}

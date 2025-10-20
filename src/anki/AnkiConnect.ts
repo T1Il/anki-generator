@@ -24,14 +24,31 @@ export async function getCardCountForDeck(deckName: string): Promise<number> {
 	return result ? result.length : 0;
 }
 
-export async function findAnkiNoteId(deckName: string, front: string): Promise<number | null> {
+// Sucht global, um Ankis Verhalten nachzuahmen
+export async function findAnkiNoteId(front: string): Promise<number | null> {
 	const escapedFront = front.replace(/"/g, '\\"');
-	const query = `deck:"${deckName}" "${escapedFront}"`;
+	const query = `"${escapedFront}"`; // Sucht in allen relevanten Feldern
 	const noteIds = await ankiConnectRequest('findNotes', { query });
 	if (noteIds && noteIds.length > 0) {
 		return noteIds[0];
 	}
 	return null;
+}
+
+// Sucht global, um Ankis Verhalten nachzuahmen
+export async function findAnkiClozeNoteId(questionText: string): Promise<number | null> {
+	const searchQuery = questionText.replace(/____/g, '*').replace(/"/g, '\\"');
+	const query = `"*${searchQuery}*"`; // Sucht in allen relevanten Feldern
+	const noteIds = await ankiConnectRequest('findNotes', { query });
+	if (noteIds && noteIds.length > 0) {
+		return noteIds[0];
+	}
+	return null;
+}
+
+export async function deleteAnkiNotes(noteIds: number[]): Promise<void> {
+	if (noteIds.length === 0) return;
+	return ankiConnectRequest('deleteNotes', { notes: noteIds });
 }
 
 export async function createAnkiDeck(deckName: string): Promise<void> {
@@ -65,6 +82,15 @@ export async function updateAnkiNoteFields(id: number, front: string, back: stri
 		note: {
 			id,
 			fields: { Front: front, Back: back }
+		}
+	});
+}
+
+export async function updateAnkiClozeNoteFields(id: number, textWithCloze: string): Promise<void> {
+	return ankiConnectRequest('updateNoteFields', {
+		note: {
+			id,
+			fields: { Text: textWithCloze }
 		}
 	});
 }

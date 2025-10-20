@@ -4,14 +4,13 @@ import { CardEditModal } from './CardEditModal';
 
 export class CardPreviewModal extends Modal {
 	cards: Card[];
-	onSave: (cards: Card[]) => void;
+	onSave: (cards: Card[], deletedCardIds: number[]) => void;
+	deletedCardIds: number[] = []; // Speichert die IDs der gelöschten Karten
 
-	constructor(app: App, cards: Card[], onSave: (cards: Card[]) => void) {
+	constructor(app: App, cards: Card[], onSave: (cards: Card[], deletedCardIds: number[]) => void) {
 		super(app);
 		this.cards = [...cards];
 		this.onSave = onSave;
-
-		// Add a class to the modal window itself for a wider layout
 		this.modalEl.addClass('anki-preview-modal-wide');
 	}
 
@@ -28,7 +27,7 @@ export class CardPreviewModal extends Modal {
 		buttonContainer.createEl('button', { text: '➕ Neue Karte hinzufügen' }).addEventListener('click', () => {
 			new CardEditModal(this.app, {}, (newCard) => {
 				this.cards.push(newCard);
-				this.render(); // Re-render the view with the new card
+				this.render();
 			}).open();
 		});
 
@@ -38,34 +37,35 @@ export class CardPreviewModal extends Modal {
 		}
 
 		this.cards.forEach((card, index) => {
-			// Main container for each card "embed"
 			const cardEl = container.createDiv({ cls: 'anki-preview-card' });
-
-			// Content part of the card (Question and Answer)
 			const content = cardEl.createDiv({ cls: 'anki-preview-content' });
 			content.createEl('div', { cls: 'anki-preview-question', text: card.q });
 			content.createEl('hr', { cls: 'anki-preview-separator' });
 			content.createEl('div', { cls: 'anki-preview-answer', text: card.a });
 
-			// Action buttons are now clearly separated at the bottom of the card
 			const actions = cardEl.createDiv({ cls: 'anki-card-actions' });
 			actions.createEl('button', { text: '✏️ Bearbeiten' }).addEventListener('click', () => {
 				new CardEditModal(this.app, card, (updatedCard) => {
-					this.cards[index] = updatedCard; // Update the card in the array
+					this.cards[index] = updatedCard;
 					this.render();
 				}).open();
 			});
 
 			actions.createEl('button', { text: '🗑️ Löschen', cls: 'anki-delete-button' }).addEventListener('click', () => {
-				this.cards.splice(index, 1); // Remove the card from the array
+				// Karte aus der lokalen Liste entfernen
+				const [deletedCard] = this.cards.splice(index, 1);
+				// Wenn die Karte eine ID hatte, diese für die Löschung in Anki vormerken
+				if (deletedCard && deletedCard.id) {
+					this.deletedCardIds.push(deletedCard.id);
+				}
 				this.render();
 			});
 		});
 	}
 
 	onClose() {
-		// When closing, pass the (potentially modified) list of cards back to be saved
-		this.onSave(this.cards);
+		// Beim Schließen die aktualisierte Kartenliste UND die Liste der gelöschten IDs zurückgeben
+		this.onSave(this.cards, this.deletedCardIds);
 		this.contentEl.empty();
 	}
 }
