@@ -239,6 +239,9 @@ export default class AnkiGeneratorPlugin extends Plugin {
 				});
 
 				const generatedText = response.json.candidates[0].content.parts[0].text.trim();
+
+				console.log(generatedText);
+
 				const fullDeckPath = `${this.settings.mainDeck}::${newSubdeck}`;
 
 				const fileContent = editor.getValue();

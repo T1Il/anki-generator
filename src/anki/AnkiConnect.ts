@@ -10,10 +10,13 @@ async function ankiConnectRequest(action: string, params: object): Promise<any> 
 		});
 		const json = response.json;
 		if (json.error) {
+			console.log(json);
 			throw new Error(json.error);
 		}
 		return json.result;
 	} catch (e) {
+		console.log(params);
+		console.log(e.body);
 		console.error("Rohes Fehlerobjekt von ankiConnectRequest:", e);
 		throw new Error(`AnkiConnect-Anfrage fehlgeschlagen. Ursprünglicher Fehler: ${e.message}`);
 	}
