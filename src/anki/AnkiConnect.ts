@@ -3,23 +3,68 @@ import { requestUrl } from 'obsidian';
 async function ankiConnectRequest(action: string, params: object): Promise<any> {
 	try {
 		const response = await requestUrl({
-			url: 'http://127.0.0.1:8765',
+			url: 'http://localhost:8765',
 			method: 'POST',
 			body: JSON.stringify({ action, version: 6, params }),
 			headers: { 'Content-Type': 'application/json' },
 		});
 		const json = response.json;
-		if (json.error) { throw new Error(json.error); }
+		if (json.error) {
+			throw new Error(json.error);
+		}
 		return json.result;
 	} catch (e) {
-		throw new Error("Konnte AnkiConnect nicht erreichen. Läuft Anki im Hintergrund?");
+		console.error("Rohes Fehlerobjekt von ankiConnectRequest:", e);
+		throw new Error(`AnkiConnect-Anfrage fehlgeschlagen. Ursprünglicher Fehler: ${e.message}`);
 	}
 }
 
-export async function addAnkiNote(deckName: string, front: string, back: string): Promise<number> {
-	return ankiConnectRequest('addNote', { note: { deckName, modelName: "Basic", fields: { Front: front, Back: back }, tags: [] } });
+export async function getCardCountForDeck(deckName: string): Promise<number> {
+	const result = await ankiConnectRequest('findCards', { query: `deck:"${deckName}"` });
+	return result ? result.length : 0;
+}
+
+export async function findAnkiNoteId(deckName: string, front: string): Promise<number | null> {
+	const escapedFront = front.replace(/"/g, '\\"');
+	const query = `deck:"${deckName}" "${escapedFront}"`;
+	const noteIds = await ankiConnectRequest('findNotes', { query });
+	if (noteIds && noteIds.length > 0) {
+		return noteIds[0];
+	}
+	return null;
+}
+
+export async function createAnkiDeck(deckName: string): Promise<void> {
+	return ankiConnectRequest('createDeck', { deck: deckName });
+}
+
+export async function addAnkiNote(deckName: string, modelName: string, front: string, back: string): Promise<number> {
+	return ankiConnectRequest('addNote', {
+		note: {
+			deckName,
+			modelName,
+			fields: { Front: front, Back: back },
+			tags: []
+		}
+	});
+}
+
+export async function addAnkiClozeNote(deckName: string, modelName: string, text: string): Promise<number> {
+	return ankiConnectRequest('addNote', {
+		note: {
+			deckName,
+			modelName,
+			fields: { Text: text },
+			tags: []
+		}
+	});
 }
 
 export async function updateAnkiNoteFields(id: number, front: string, back: string): Promise<void> {
-	return ankiConnectRequest('updateNoteFields', { note: { id, fields: { Front: front, Back: back } } });
+	return ankiConnectRequest('updateNoteFields', {
+		note: {
+			id,
+			fields: { Front: front, Back: back }
+		}
+	});
 }

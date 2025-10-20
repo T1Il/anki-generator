@@ -1,0 +1,86 @@
+/* General styles for buttons in anki-cards block */
+.anki-button-container {
+	display: flex;
+	gap: 10px;
+	margin-top: 15px;
+}
+
+/* Live card count from Anki */
+.anki-card-count {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	margin-top: -10px;
+	margin-bottom: 15px;
+}
+
+.anki-error {
+	color: var(--text-error);
+}
+
+/* --- Styles for the Card Preview Modal --- */
+
+/* Make the modal window wider */
+.anki-preview-modal-wide {
+	width: 80%;
+	max-width: 900px;
+}
+
+.anki-preview-container {
+	max-height: 60vh;
+	overflow-y: auto;
+	padding-right: 10px;
+}
+
+.anki-preview-button-container {
+	margin-bottom: 20px;
+}
+
+/* Individual card "embed" style */
+.anki-preview-card {
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	margin-bottom: 15px;
+	padding: 15px;
+	display: flex;
+	flex-direction: row; /* Arrange content and buttons side-by-side */
+	justify-content: space-between;
+	align-items: center;
+}
+
+.anki-preview-content {
+	flex-grow: 1; /* Allow content to take up available space */
+}
+
+	.anki-preview-content .anki-preview-question {
+		font-weight: 500;
+		margin-bottom: 8px; /* Reduced margin */
+	}
+
+	.anki-preview-content .anki-preview-separator {
+		border: none;
+		border-top: 1px solid var(--background-modifier-border);
+		margin: 8px 0; /* Reduced margin */
+	}
+
+	.anki-preview-content .anki-preview-answer {
+		color: var(--text-muted);
+		font-size: 0.95em;
+	}
+
+/* Container for edit/delete buttons */
+.anki-card-actions {
+	display: flex;
+	flex-direction: column; /* Stack buttons vertically */
+	gap: 8px;
+	margin-left: 20px; /* Space between content and buttons */
+}
+
+	.anki-card-actions button {
+		background-color: var(--background-modifier-hover);
+		min-width: 100px; /* Give buttons a consistent width */
+	}
+
+	.anki-card-actions .anki-delete-button {
+		color: var(--text-error);
+	}
