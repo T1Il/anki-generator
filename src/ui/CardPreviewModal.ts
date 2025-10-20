@@ -11,7 +11,7 @@ export class CardPreviewModal extends Modal {
 		this.cards = [...cards];
 		this.onSave = onSave;
 
-		// Add a class to the modal window itself for wider layout
+		// Add a class to the modal window itself for a wider layout
 		this.modalEl.addClass('anki-preview-modal-wide');
 	}
 
@@ -28,7 +28,7 @@ export class CardPreviewModal extends Modal {
 		buttonContainer.createEl('button', { text: '➕ Neue Karte hinzufügen' }).addEventListener('click', () => {
 			new CardEditModal(this.app, {}, (newCard) => {
 				this.cards.push(newCard);
-				this.render();
+				this.render(); // Re-render the view with the new card
 			}).open();
 		});
 
@@ -38,31 +38,34 @@ export class CardPreviewModal extends Modal {
 		}
 
 		this.cards.forEach((card, index) => {
+			// Main container for each card "embed"
 			const cardEl = container.createDiv({ cls: 'anki-preview-card' });
 
+			// Content part of the card (Question and Answer)
 			const content = cardEl.createDiv({ cls: 'anki-preview-content' });
 			content.createEl('div', { cls: 'anki-preview-question', text: card.q });
 			content.createEl('hr', { cls: 'anki-preview-separator' });
 			content.createEl('div', { cls: 'anki-preview-answer', text: card.a });
 
+			// Action buttons are now clearly separated at the bottom of the card
 			const actions = cardEl.createDiv({ cls: 'anki-card-actions' });
 			actions.createEl('button', { text: '✏️ Bearbeiten' }).addEventListener('click', () => {
 				new CardEditModal(this.app, card, (updatedCard) => {
-					this.cards[index] = updatedCard;
+					this.cards[index] = updatedCard; // Update the card in the array
 					this.render();
 				}).open();
 			});
 
 			actions.createEl('button', { text: '🗑️ Löschen', cls: 'anki-delete-button' }).addEventListener('click', () => {
-				this.cards.splice(index, 1);
+				this.cards.splice(index, 1); // Remove the card from the array
 				this.render();
 			});
 		});
 	}
 
 	onClose() {
+		// When closing, pass the (potentially modified) list of cards back to be saved
 		this.onSave(this.cards);
 		this.contentEl.empty();
 	}
 }
-
