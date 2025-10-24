@@ -127,6 +127,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 				new CardPreviewModal(this.app, cards, onSave).open();
 			};
 
+			// --- START: MODIFIZIERTER SYNC-BUTTON ---
 			const syncButton = buttonContainer.createEl('button', { text: 'Mit Anki synchronisieren' });
 			syncButton.onclick = async () => {
 				const notice = new Notice('Synchronisiere mit Anki...', 0);
@@ -139,9 +140,11 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 					const newLines = [`TARGET DECK: ${deckName}`, ''];
 
+					// --- START DER MODIFIZIERTEN LOGIK ---
 					for (const card of cards) {
 						let ankiNoteId = card.id;
 
+						// 1. Versuche ID zu finden, falls sie fehlt (z.B. bei manuell hinzugefügten Karten)
 						if (!ankiNoteId) {
 							if (card.type === 'Basic') {
 								ankiNoteId = await findAnkiNoteId(card.q);
@@ -150,14 +153,31 @@ export default class AnkiGeneratorPlugin extends Plugin {
 							}
 						}
 
+						// 2. Versuche, die Karte zu aktualisieren, falls eine ID (alt oder gefunden) existiert
 						if (ankiNoteId) {
-							if (card.type === 'Basic') {
-								await updateAnkiNoteFields(ankiNoteId, card.q, card.a);
-							} else if (card.type === 'Cloze') {
-								const clozeText = card.q.replace('____', `{{c1::${card.a}}}`);
-								await updateAnkiClozeNoteFields(ankiNoteId, clozeText);
+							try {
+								if (card.type === 'Basic') {
+									await updateAnkiNoteFields(ankiNoteId, card.q, card.a);
+								} else if (card.type === 'Cloze') {
+									const clozeText = card.q.replace('____', `{{c1::${card.a}}}`);
+									await updateAnkiClozeNoteFields(ankiNoteId, clozeText);
+								}
+							} catch (e) {
+								// 3. FANGE DEN "NOT FOUND" FEHLER AB
+								// Wenn die ID in Obsidian existiert, aber nicht mehr in Anki
+								if (e.message && (e.message.includes("Note was not found") || e.message.includes(ankiNoteId.toString()))) {
+									new Notice(`Karte ${ankiNoteId} nicht in Anki gefunden. Erstelle sie neu.`);
+									// Setze die ID zurück, damit die "Erstellen"-Logik greift
+									ankiNoteId = null;
+								} else {
+									// Es war ein anderer Fehler (z.B. AnkiConnect offline), wirf ihn erneut
+									throw e;
+								}
 							}
-						} else {
+						}
+
+						// 4. Erstelle die Karte, falls keine ID vorhanden oder sie zurückgesetzt wurde
+						if (!ankiNoteId) {
 							if (card.type === 'Basic') {
 								ankiNoteId = await addAnkiNote(deckName, this.settings.basicModelName, card.q, card.a);
 							} else if (card.type === 'Cloze') {
@@ -166,6 +186,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 							}
 						}
 
+						// 5. Schreibe die (potenziell neue) ID zurück in den Code-Block
 						if (card.type === 'Basic') {
 							newLines.push(`Q: ${card.q}`);
 							newLines.push(`A: ${card.a}`);
@@ -176,6 +197,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 						}
 						newLines.push(`ID: ${ankiNoteId}`);
 					}
+					// --- ENDE DER MODIFIZIERTEN LOGIK ---
 
 					const fileContent = await this.app.vault.read(file);
 					const newBlockContent = newLines.join('\n');
@@ -191,6 +213,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 					console.error("Anki-Sync Fehler:", error);
 				}
 			};
+			// --- ENDE: MODIFIZIERTER SYNC-BUTTON ---
 		});
 
 		this.addCommand({
@@ -228,8 +251,6 @@ export default class AnkiGeneratorPlugin extends Plugin {
 				const finalPrompt = this.settings.prompt
 					.replace('{{noteContent}}', noteContent)
 					.replace('{{existingCards}}', existingCards);
-
-				console.log(finalPrompt);
 
 				const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${this.settings.geminiApiKey}`;
 				const requestBody = { contents: [{ parts: [{ text: finalPrompt }] }] };

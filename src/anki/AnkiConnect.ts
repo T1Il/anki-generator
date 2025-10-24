@@ -27,10 +27,12 @@ export async function getCardCountForDeck(deckName: string): Promise<number> {
 	return result ? result.length : 0;
 }
 
-// Sucht global, um Ankis Verhalten nachzuahmen
+// --- MODIFIZIERTE SUCHE ---
+// Sucht nun gezielt im "Front"-Feld nach einer exakten Übereinstimmung.
 export async function findAnkiNoteId(front: string): Promise<number | null> {
 	const escapedFront = front.replace(/"/g, '\\"');
-	const query = `"${escapedFront}"`; // Sucht in allen relevanten Feldern
+	// Anki's Duplikat-Check für "Basic"-Karten prüft standardmäßig das "Front"-Feld.
+	const query = `Front:"${escapedFront}"`;
 	const noteIds = await ankiConnectRequest('findNotes', { query });
 	if (noteIds && noteIds.length > 0) {
 		return noteIds[0];
@@ -38,16 +40,21 @@ export async function findAnkiNoteId(front: string): Promise<number | null> {
 	return null;
 }
 
-// Sucht global, um Ankis Verhalten nachzuahmen
+// --- MODIFIZIERTE SUCHE ---
+// Sucht nun gezielt im "Text"-Feld.
 export async function findAnkiClozeNoteId(questionText: string): Promise<number | null> {
+	// Ersetzt ____ mit der Anki-Wildcard *
 	const searchQuery = questionText.replace(/____/g, '*').replace(/"/g, '\\"');
-	const query = `"*${searchQuery}*"`; // Sucht in allen relevanten Feldern
+	// Anki's Duplikat-Check für "Cloze"-Karten prüft das "Text"-Feld (das erste Feld).
+	// Diese Suche ist viel genauer als die alte `"*...*"`-Suche.
+	const query = `Text:"${searchQuery}"`;
 	const noteIds = await ankiConnectRequest('findNotes', { query });
 	if (noteIds && noteIds.length > 0) {
 		return noteIds[0];
 	}
 	return null;
 }
+// --- ENDE DER MODIFIKATIONEN ---
 
 export async function deleteAnkiNotes(noteIds: number[]): Promise<void> {
 	if (noteIds.length === 0) return;
