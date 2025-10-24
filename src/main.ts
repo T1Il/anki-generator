@@ -229,6 +229,8 @@ export default class AnkiGeneratorPlugin extends Plugin {
 					.replace('{{noteContent}}', noteContent)
 					.replace('{{existingCards}}', existingCards);
 
+				console.log(finalPrompt);
+
 				const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${this.settings.geminiApiKey}`;
 				const requestBody = { contents: [{ parts: [{ text: finalPrompt }] }] };
 
