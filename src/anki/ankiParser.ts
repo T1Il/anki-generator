@@ -60,7 +60,7 @@ export function parseAnkiSection(editor: Editor, mainDeck: string): AnkiInfo | n
 			existingCardsLines.push(lines[i]); // 'xxx'
 
 			// Suche nach Antwort (die Zeile nach 'xxx')
-			if (lines[i + 1] && !lines[i + 1].trim().startsWith('ID:')) {
+			if (lines[i + 1] && !lines[i + 1].trim().startsWith('ID:') && lines[i + 1].trim().length > 0) {
 				i++;
 				existingCardsLines.push(lines[i]); // Lückentext-Antwort
 			}
