@@ -2,6 +2,7 @@ import { App, Editor, MarkdownView, Notice, Plugin, requestUrl } from 'obsidian'
 import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings } from './settings';
 import { SubdeckModal } from './ui/SubdeckModal';
 import { CardPreviewModal } from './ui/CardPreviewModal';
+import { DebugModal } from './ui/DebugModal';
 import {
 	addAnkiNote, addAnkiClozeNote, updateAnkiNoteFields, createAnkiDeck,
 	findAnkiNoteId, getCardCountForDeck, findAnkiClozeNoteId, updateAnkiClozeNoteFields,
@@ -35,52 +36,91 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			const cards: Card[] = [];
 			for (let i = 0; i < lines.length; i++) {
 				const line = lines[i];
+				if (!line) continue;
+
 				if (line.startsWith('Q:')) {
 					const q = line.substring(3).trim();
-					let a = '', id = null;
-					if (lines[i + 1]?.startsWith('A:')) { a = lines[i + 1].substring(3).trim(); i++; }
-					if (lines[i + 1]?.startsWith('ID:')) { id = parseInt(lines[i + 1].substring(4).trim(), 10) || null; i++; }
-					cards.push({ type: 'Basic', q, a, id });
-				} else if (lines[i + 1]?.trim() === 'xxx') {
-					const q = line.trim();
-					const a = lines[i + 2]?.trim() || '';
+					let a = '';
 					let id = null;
-					if (lines[i + 3]?.startsWith('ID:')) { id = parseInt(lines[i + 3].substring(4).trim(), 10) || null; i++; }
-					cards.push({ type: 'Cloze', q, a, id });
-					i += 2;
+
+					if (lines[i + 1]?.startsWith('A:')) {
+						i++;
+						a = lines[i].substring(3).trim();
+
+						let j = i + 1;
+						while (j < lines.length &&
+							!lines[j].startsWith('Q:') &&
+							!lines[j].startsWith('ID:') &&
+							lines[j].trim() !== 'xxx') {
+
+							if (a.length > 0 || lines[j].trim().length > 0) {
+								a += (a.length > 0 ? '\n' : '') + lines[j];
+							}
+							j++;
+						}
+						i = j - 1;
+					}
+
+					if (lines[i + 1]?.startsWith('ID:')) {
+						i++;
+						id = parseInt(lines[i].substring(4).trim(), 10) || null;
+					}
+
+					cards.push({ type: 'Basic', q, a: a.trim(), id });
+				}
+				else if (lines[i + 1]?.trim() === 'xxx') {
+					const q = line.trim();
+					i++;
+
+					let a = '';
+					let id = null;
+
+					let j = i + 1;
+					while (j < lines.length &&
+						!lines[j].startsWith('Q:') &&
+						!lines[j].startsWith('ID:') &&
+						lines[j].trim() !== 'xxx') {
+
+						if (a.length > 0 || lines[j].trim().length > 0) {
+							a += (a.length > 0 ? '\n' : '') + lines[j];
+						}
+						j++;
+					}
+					i = j - 1;
+
+					if (lines[i + 1]?.startsWith('ID:')) {
+						i++;
+						id = parseInt(lines[i].substring(4).trim(), 10) || null;
+					}
+
+					cards.push({ type: 'Cloze', q, a: a.trim(), id });
 				}
 			}
 
 			el.createEl('h4', { text: 'Anki-Karten' });
 
-			// ### START DER ÜBERARBEITETEN ANZEIGE-LOGIK ###
 			if (deckName) {
 				const synchronizedCount = cards.filter(card => card.id !== null).length;
 				const unsynchronizedCount = cards.length - synchronizedCount;
 
-				// Lokale Informationen werden immer angezeigt
 				const localStatusText = `✅ ${synchronizedCount} Synchronisiert | 📝 ${unsynchronizedCount} Ausstehend`;
 				let ankiStatusText = '';
 				let errorClass = '';
 
 				try {
-					// Versuche, Anki-Informationen abzurufen
 					const totalAnkiCount = await getCardCountForDeck(deckName);
 					ankiStatusText = `📈 ${totalAnkiCount} in Anki | `;
 				} catch (e) {
-					// Bei Fehler wird eine Warnung angezeigt
 					ankiStatusText = '⚠️ Anki-Verbindung fehlgeschlagen | ';
 					errorClass = 'anki-error';
 				}
 
-				// Kombiniere und zeige den finalen Text an
 				const fullText = ankiStatusText + localStatusText;
 				const pEl = el.createEl('p', { text: fullText, cls: 'anki-card-count' });
 				if (errorClass) {
 					pEl.addClass(errorClass);
 				}
 			}
-			// ### ENDE DER ÜBERARBEITETEN ANZEIGE-LOGIK ###
 
 			const buttonContainer = el.createDiv({ cls: 'anki-button-container' });
 
@@ -127,7 +167,6 @@ export default class AnkiGeneratorPlugin extends Plugin {
 				new CardPreviewModal(this.app, cards, onSave).open();
 			};
 
-			// --- START: MODIFIZIERTER SYNC-BUTTON ---
 			const syncButton = buttonContainer.createEl('button', { text: 'Mit Anki synchronisieren' });
 			syncButton.onclick = async () => {
 				const notice = new Notice('Synchronisiere mit Anki...', 0);
@@ -140,11 +179,10 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 					const newLines = [`TARGET DECK: ${deckName}`, ''];
 
-					// --- START DER MODIFIZIERTEN LOGIK ---
 					for (const card of cards) {
 						let ankiNoteId = card.id;
 
-						// 1. Versuche ID zu finden, falls sie fehlt (z.B. bei manuell hinzugefügten Karten)
+						// 1. FINDEN
 						if (!ankiNoteId) {
 							if (card.type === 'Basic') {
 								ankiNoteId = await findAnkiNoteId(card.q);
@@ -153,7 +191,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 							}
 						}
 
-						// 2. Versuche, die Karte zu aktualisieren, falls eine ID (alt oder gefunden) existiert
+						// 2. AKTUALISIEREN
 						if (ankiNoteId) {
 							try {
 								if (card.type === 'Basic') {
@@ -163,30 +201,46 @@ export default class AnkiGeneratorPlugin extends Plugin {
 									await updateAnkiClozeNoteFields(ankiNoteId, clozeText);
 								}
 							} catch (e) {
-								// 3. FANGE DEN "NOT FOUND" FEHLER AB
-								// Wenn die ID in Obsidian existiert, aber nicht mehr in Anki
 								if (e.message && (e.message.includes("Note was not found") || e.message.includes(ankiNoteId.toString()))) {
 									new Notice(`Karte ${ankiNoteId} nicht in Anki gefunden. Erstelle sie neu.`);
-									// Setze die ID zurück, damit die "Erstellen"-Logik greift
 									ankiNoteId = null;
 								} else {
-									// Es war ein anderer Fehler (z.B. AnkiConnect offline), wirf ihn erneut
 									throw e;
 								}
 							}
 						}
 
-						// 4. Erstelle die Karte, falls keine ID vorhanden oder sie zurückgesetzt wurde
+						// 3. ERSTELLEN
 						if (!ankiNoteId) {
-							if (card.type === 'Basic') {
-								ankiNoteId = await addAnkiNote(deckName, this.settings.basicModelName, card.q, card.a);
-							} else if (card.type === 'Cloze') {
-								const clozeText = card.q.replace('____', `{{c1::${card.a}}}`);
-								ankiNoteId = await addAnkiClozeNote(deckName, this.settings.clozeModelName, clozeText);
+							try {
+								if (card.type === 'Basic') {
+									ankiNoteId = await addAnkiNote(deckName, this.settings.basicModelName, card.q, card.a);
+								} else if (card.type === 'Cloze') {
+									const clozeText = card.q.replace('____', `{{c1::${card.a}}}`);
+									ankiNoteId = await addAnkiClozeNote(deckName, this.settings.clozeModelName, clozeText);
+								}
+							} catch (e) {
+								// 4. DUPLIKAT ABFANGEN
+								if (e.message && e.message.includes("cannot create note because it is a duplicate")) {
+									new Notice(`Karte ist Duplikat. Suche ID...`, 3000);
+									if (card.type === 'Basic') {
+										ankiNoteId = await findAnkiNoteId(card.q);
+									} else if (card.type === 'Cloze') {
+										ankiNoteId = await findAnkiClozeNoteId(card.q);
+									}
+
+									if (!ankiNoteId) {
+										throw new Error(`Karte "${card.q.substring(0, 20)}..." ist ein Duplikat, ID konnte aber nicht gefunden werden. Sync gestoppt.`);
+									} else {
+										new Notice(`ID ${ankiNoteId} für Duplikat gefunden. ID wird gespeichert.`);
+									}
+								} else {
+									throw e;
+								}
 							}
 						}
 
-						// 5. Schreibe die (potenziell neue) ID zurück in den Code-Block
+						// 5. IN DATEI SCHREIBEN
 						if (card.type === 'Basic') {
 							newLines.push(`Q: ${card.q}`);
 							newLines.push(`A: ${card.a}`);
@@ -197,7 +251,6 @@ export default class AnkiGeneratorPlugin extends Plugin {
 						}
 						newLines.push(`ID: ${ankiNoteId}`);
 					}
-					// --- ENDE DER MODIFIZIERTEN LOGIK ---
 
 					const fileContent = await this.app.vault.read(file);
 					const newBlockContent = newLines.join('\n');
@@ -213,7 +266,6 @@ export default class AnkiGeneratorPlugin extends Plugin {
 					console.error("Anki-Sync Fehler:", error);
 				}
 			};
-			// --- ENDE: MODIFIZIERTER SYNC-BUTTON ---
 		});
 
 		this.addCommand({
@@ -244,6 +296,9 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		new SubdeckModal(this.app, this.settings.mainDeck, initialSubdeck, async (newSubdeck) => {
 			const notice = new Notice('Anki-Karten werden generiert...', 0);
+
+			let requestBodyString = "";
+
 			try {
 				const noteContent = editor.getValue();
 				const existingCards = ankiInfo ? ankiInfo.existingCardsText : 'Keine.';
@@ -253,12 +308,14 @@ export default class AnkiGeneratorPlugin extends Plugin {
 					.replace('{{existingCards}}', existingCards);
 
 				const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${this.settings.geminiApiKey}`;
+
 				const requestBody = { contents: [{ parts: [{ text: finalPrompt }] }] };
+				requestBodyString = JSON.stringify(requestBody, null, 2);
 
 				const response = await requestUrl({
 					url: apiUrl, method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(requestBody)
+					body: requestBodyString
 				});
 
 				const generatedText = response.json.candidates[0].content.parts[0].text.trim();
@@ -275,12 +332,16 @@ export default class AnkiGeneratorPlugin extends Plugin {
 					const lastMatch = matches[matches.length - 1];
 					if (lastMatch.index !== undefined) {
 						const insertionPoint = lastMatch.index + lastMatch[0].length - 3;
-						editor.replaceRange(`\n\n${generatedText}`, editor.offsetToPos(insertionPoint));
+
+						const textBeforeInsertion = editor.getRange(editor.offsetToPos(0), editor.offsetToPos(insertionPoint)).trimEnd();
+						const prefix = textBeforeInsertion.length === 0 ? '' : '\n\n';
+
+						editor.replaceRange(`${prefix}${generatedText}`, editor.offsetToPos(insertionPoint));
 					} else {
 						throw new Error("Konnte die Position des letzten anki-cards Blocks nicht bestimmen.");
 					}
 				} else {
-					const output = `\n\n## Anki\n\n\`\`\`anki-cards\nTARGET DECK: ${fullDeckPath}\n\n${generatedText}\n\`\`\``;
+					const output = `n\n## Anki\n\n\`\`\`anki-cards\nTARGET DECK: ${fullDeckPath}\n\n${generatedText}\n\`\`\``;
 					const lastLine = editor.lastLine();
 					const endOfDocument = { line: lastLine, ch: editor.getLine(lastLine).length };
 					editor.replaceRange(output, endOfDocument);
@@ -288,11 +349,54 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 				notice.hide();
 				new Notice('Anki-Block wurde aktualisiert/hinzugefügt.');
+
+				// --- START: MODIFIZIERTER CATCH-BLOCK (FÜR VERBESSERTE NOTICE) ---
 			} catch (error) {
 				notice.hide();
-				console.error("Fehler bei der Kartengenerierung:", error);
-				new Notice('Fehler bei der Kartengenerierung. Prüfe die Konsole.');
+				console.error("Fehler bei der Kartengenerierung (rohes Objekt):", error);
+
+				let errorDetails = "Keine detaillierte Antwort vom Server erhalten.";
+				let userFriendlyMessage = "API Fehler. Details im Debug-Modal."; // Standard-Notice
+
+				// @ts-ignore
+				if (error.body) {
+					// @ts-ignore
+					errorDetails = `--- STATUS ---\n${error.status}\n\n--- BODY ---\n${error.body}`;
+
+					// (NEU) Versuche, die spezifische Nachricht für die Notice zu parsen
+					try {
+						// @ts-ignore
+						const errorJson = JSON.parse(error.body);
+						if (errorJson.error && errorJson.error.message) {
+							// Wir haben die exakte Nachricht!
+							userFriendlyMessage = `API Fehler (503): ${errorJson.error.message}`;
+						}
+					} catch (e) {
+						// Body war kein JSON, bleibe bei der Standard-Notice
+						// @ts-ignore
+						userFriendlyMessage = `API Fehler: Status ${error.status}. Details im Modal.`;
+					}
+					// @ts-ignore
+				} else if (error.message) {
+					// @ts-ignore
+					errorDetails = `--- MESSAGE ---\n${error.message}\n\n--- STACK ---\n${error.stack}`;
+					// @ts-ignore
+					userFriendlyMessage = error.message; // z.B. "Request failed, status 503"
+				} else {
+					try {
+						errorDetails = JSON.stringify(error, null, 2);
+					} catch (e) {
+						errorDetails = "Fehlerobjekt konnte nicht stringifiziert werden.";
+					}
+				}
+
+				// Zeige das Debug-Modal mit *allen* Details
+				new DebugModal(this.app, requestBodyString, errorDetails).open();
+
+				// Zeige die *verbesserte, menschenlesbare* Notice
+				new Notice(userFriendlyMessage, 10000);
 			}
+			// --- ENDE: MODIFIZIERTER CATCH-BLOCK ---
 		}).open();
 	}
 

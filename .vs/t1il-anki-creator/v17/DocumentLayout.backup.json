@@ -3,16 +3,16 @@
   "WorkspaceRootPath": "C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\AnkiConnect.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
-      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\anki\\AnkiConnect.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\ankiParser.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\anki\\ankiParser.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\main.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
       "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\main.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\ankiParser.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
-      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\anki\\ankiParser.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\AnkiConnect.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\anki\\AnkiConnect.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\ui\\SubdeckModal.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
@@ -50,7 +50,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 5,
+          "SelectedChildIndex": 6,
           "Children": [
             {
               "$type": "Bookmark",
@@ -66,7 +66,8 @@
               "RelativeToolTip": "styles.css",
               "ViewState": "AgIAAFEAAAAAAAAAAAAAAGQAAAAeAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003000|",
-              "WhenOpened": "2025-10-20T17:16:16.676Z"
+              "WhenOpened": "2025-10-20T17:16:16.676Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -78,7 +79,8 @@
               "RelativeToolTip": "src\\ui\\CardPreviewModal.ts",
               "ViewState": "AgIAABwAAAAAAAAAAAAUwEcAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
-              "WhenOpened": "2025-10-20T16:54:24.627Z"
+              "WhenOpened": "2025-10-20T16:54:24.627Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -90,7 +92,8 @@
               "RelativeToolTip": "esbuild.config.mjs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABEAAAAUAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
-              "WhenOpened": "2025-10-20T16:05:42.705Z"
+              "WhenOpened": "2025-10-20T16:05:42.705Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -102,30 +105,31 @@
               "RelativeToolTip": "package.json",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAQAAAAKAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2025-10-20T16:03:30.687Z"
+              "WhenOpened": "2025-10-20T16:03:30.687Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 2,
               "Title": "AnkiConnect.ts",
               "DocumentMoniker": "C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\AnkiConnect.ts",
               "RelativeDocumentMoniker": "src\\anki\\AnkiConnect.ts",
               "ToolTip": "C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\AnkiConnect.ts",
               "RelativeToolTip": "src\\anki\\AnkiConnect.ts",
-              "ViewState": "AgIAAGkAAAAAAAAAAAAAAGoAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABEAAAAUAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
               "WhenOpened": "2025-10-20T16:04:29.383Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 0,
               "Title": "ankiParser.ts",
               "DocumentMoniker": "C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\ankiParser.ts",
               "RelativeDocumentMoniker": "src\\anki\\ankiParser.ts",
               "ToolTip": "C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\anki\\ankiParser.ts",
               "RelativeToolTip": "src\\anki\\ankiParser.ts",
-              "ViewState": "AgIAADQAAAAAAAAAAAAgwFEAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAABAAAAAAAAAAAAAgwBgAAAAbAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
               "WhenOpened": "2025-10-20T16:04:20.034Z",
               "EditorCaption": ""
@@ -140,7 +144,8 @@
               "RelativeToolTip": "src\\ui\\SubdeckModal.ts",
               "ViewState": "AgIAAAwAAAAAAAAAAAAUwDYAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
-              "WhenOpened": "2025-10-20T16:04:03.182Z"
+              "WhenOpened": "2025-10-20T16:04:03.182Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -152,7 +157,8 @@
               "RelativeToolTip": "src\\settings.ts",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAA4AAAAKAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
-              "WhenOpened": "2025-10-20T16:03:47.347Z"
+              "WhenOpened": "2025-10-20T16:03:47.347Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -164,7 +170,8 @@
               "RelativeToolTip": "manifest.json",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAoAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2025-10-20T14:38:22.942Z"
+              "WhenOpened": "2025-10-20T14:38:22.942Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -174,7 +181,7 @@
               "RelativeDocumentMoniker": "src\\main.ts",
               "ToolTip": "C:\\Users\\Till\\Desktop\\NFS-Ausbildung (Till)\\.obsidian\\plugins\\t1il-anki-creator\\src\\main.ts",
               "RelativeToolTip": "src\\main.ts",
-              "ViewState": "AgIAAC0BAAAAAAAAAAAAAC4BAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAANQAAAAAAAAAAAAwwOEAAAA/AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
               "WhenOpened": "2025-10-20T14:34:41.618Z",
               "EditorCaption": ""
