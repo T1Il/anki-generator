@@ -1,7 +1,7 @@
 // src/aiGenerator.ts
 
 import { requestUrl, Notice, App } from 'obsidian';
-import { AnkiGeneratorSettings, DEFAULT_SETTINGS } from './settings'; // Import DEFAULT_SETTINGS
+import { AnkiGeneratorSettings, DEFAULT_SETTINGS } from './settings';
 import { DebugModal } from './ui/DebugModal';
 
 export async function generateCardsWithAI(
@@ -9,25 +9,45 @@ export async function generateCardsWithAI(
 	noteContent: string,
 	existingCards: string,
 	provider: 'gemini' | 'ollama',
-	settings: AnkiGeneratorSettings
+	settings: AnkiGeneratorSettings,
+	additionalInstructions: string | null
 ): Promise<string> {
 
-	// --- START: Robustheits-Check für settings.prompt ---
 	let basePrompt = settings.prompt;
 	if (typeof basePrompt !== 'string') {
 		console.warn("generateCardsWithAI: settings.prompt war kein String. Fallback auf DEFAULT_SETTINGS.prompt.");
-		basePrompt = DEFAULT_SETTINGS.prompt; // Fallback auf den Standard-Prompt
+		basePrompt = DEFAULT_SETTINGS.prompt;
 		if (typeof basePrompt !== 'string') {
-			// Selbst der Standard-Prompt ist ungültig (sollte nie passieren)
 			throw new Error("Interner Fehler: Standard-Prompt ist ungültig.");
 		}
 	}
-	// --- ENDE: Robustheits-Check ---
 
-	// Verwende basePrompt (entweder der aus den Settings oder der Default)
-	const finalPrompt = basePrompt
+	// --- NEU: Zusätzliche Anweisungen an spezifischer Stelle einfügen ---
+	let finalPrompt = basePrompt; // Starte mit dem Basis-Prompt
+	if (additionalInstructions && additionalInstructions.trim().length > 0) {
+		const insertionMarker = "Hier ist der Text"; // Die Zeile, *vor* der eingefügt werden soll
+		const markerIndex = basePrompt.indexOf(insertionMarker);
+
+		if (markerIndex !== -1) {
+			// Füge die Anweisungen VOR dem Marker ein
+			const beforeMarker = basePrompt.substring(0, markerIndex);
+			const afterMarker = basePrompt.substring(markerIndex);
+			finalPrompt = `${beforeMarker.trimRight()}\n\n**Zusätzliche Anweisungen für diese Generierung:**\n${additionalInstructions.trim()}\n\n${afterMarker.trimLeft()}`;
+			console.log("Zusätzliche Anweisungen vor dem Text-Marker eingefügt.");
+
+		} else {
+			// Fallback: Füge die Anweisungen ganz am Anfang ein (wie zuvor)
+			console.warn("Konnte den Einfüge-Marker im Prompt nicht finden. Füge zusätzliche Anweisungen am Anfang ein.");
+			finalPrompt = `${additionalInstructions.trim()}\n\n---\n\n${basePrompt}`;
+		}
+	}
+	// --- ENDE NEU ---
+
+	// Ersetze Platzhalter erst *nach* dem Einfügen der zusätzlichen Anweisungen
+	finalPrompt = finalPrompt
 		.replace('{{noteContent}}', noteContent)
 		.replace('{{existingCards}}', existingCards);
+
 
 	console.log(`--- Prompt sent to ${provider} ---\n${finalPrompt}\n--- End Prompt ---`);
 
@@ -91,6 +111,7 @@ export async function generateCardsWithAI(
 	return "";
 }
 
+// handleApiError bleibt unverändert
 function handleApiError(app: App, provider: string, status: number, responseJson: any, requestBodyString: string) {
 	let userFriendlyMessage = `API Fehler (${provider}, Status ${status})`;
 	let errorDetails = `Status: ${status}\nBody:\n${JSON.stringify(responseJson, null, 2)}`;

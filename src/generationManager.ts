@@ -1,3 +1,5 @@
+// src/generationManager.ts
+
 import { Editor, Notice } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { SubdeckModal } from './ui/SubdeckModal';
@@ -6,74 +8,9 @@ import { ModelSelectionModal } from './ui/ModelSelectionModal';
 import { parseAnkiSection } from './anki/ankiParser';
 import { generateCardsWithAI } from './aiGenerator';
 
-// Regex zum Finden des Blocks (bleibt gleich)
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
-// --- NEUE FUNKTION: Bereinigt den KI-Output ---
-function cleanAiGeneratedText(rawText: string): string {
-	const lines = rawText.trim().split('\n');
-	const validCardLines: string[] = [];
-	let insideNestedBlock = false;
-
-	for (const line of lines) {
-		const trimmedLine = line.trim();
-
-		// Überspringe Verschachtelte Blöcke und Begleittext
-		if (trimmedLine.startsWith('```')) {
-			insideNestedBlock = !insideNestedBlock; // Toggle state
-			continue; // Überspringe die Zaun-Zeile selbst
-		}
-		if (insideNestedBlock) {
-			continue; // Überspringe Inhalt innerhalb verschachtelter Blöcke
-		}
-		if (trimmedLine.length === 0) {
-			// Behalte Leerzeilen nur bei, wenn sie zwischen gültigen Kartenzeilen liegen
-			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length > 0) {
-				validCardLines.push(''); // Füge max. eine Leerzeile hinzu
-			}
-			continue;
-		}
-		// Überspringe typischen Begleittext (Groß-/Kleinschreibung ignorieren)
-		const lowerTrimmed = trimmedLine.toLowerCase();
-		if (lowerTrimmed.startsWith("here are the anki cards") ||
-			lowerTrimmed.startsWith("note that i've only created cards") ||
-			lowerTrimmed.startsWith("target deck:") // Entferne auch versehentlich duplizierte Deck-Zeilen
-		) {
-			continue;
-		}
-
-
-		// Behalte nur gültige Kartenzeilen
-		if (trimmedLine.startsWith('Q:') ||
-			trimmedLine.startsWith('A:') ||
-			trimmedLine.startsWith('ID:') ||
-			trimmedLine === 'xxx' ||
-			line.includes('____') || // Zeile mit Lücke ist Teil der Frage
-			(validCardLines.length > 0 && // Prüfe, ob die vorherige Zeile Teil einer mehrz. Q/A sein könnte
-				(validCardLines[validCardLines.length - 1].startsWith('Q:') || validCardLines[validCardLines.length - 1].startsWith('A:') || validCardLines[validCardLines.length - 1] === 'xxx' || validCardLines[validCardLines.length - 1].includes('____')))
-
-		) {
-			// Prüfe, ob die letzte Zeile leer war, um doppelte Leerzeilen zu vermeiden
-			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0 && line.trim().length > 0) {
-				validCardLines.pop(); // Entferne die vorherige leere Zeile
-			}
-			validCardLines.push(line); // Behalte die Originalzeile mit Einrückung etc. bei
-		} else {
-			console.warn("CleanAI: Ignoriere ungültige Zeile:", line);
-		}
-	}
-
-	// Stelle sicher, dass am Ende keine überflüssigen Leerzeilen sind
-	while (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
-		validCardLines.pop();
-	}
-
-	return validCardLines.join('\n');
-}
-
-
 export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor: Editor) {
-	// (Rest bleibt gleich)
 	const initialAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
 	const initialSubdeck = initialAnkiInfo ? initialAnkiInfo.subdeck : '';
 
@@ -81,6 +18,7 @@ export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor:
 	const ollamaAvailable = plugin.settings.ollamaEnabled && !!plugin.settings.ollamaEndpoint && !!plugin.settings.ollamaModel;
 
 	const startGen = (provider: 'gemini' | 'ollama') => {
+		// Rufe startGenerationProcess direkt auf, der Modal wird dort geöffnet
 		startGenerationProcess(plugin, editor, provider, initialSubdeck);
 	};
 
@@ -101,7 +39,8 @@ async function startGenerationProcess(
 	provider: 'gemini' | 'ollama',
 	initialSubdeck: string
 ) {
-	new SubdeckModal(plugin.app, plugin.settings.mainDeck, initialSubdeck, async (newSubdeck) => {
+	// Öffne den SubdeckModal, der jetzt auch die zusätzlichen Anweisungen sammelt
+	new SubdeckModal(plugin.app, plugin.settings.mainDeck, initialSubdeck, async (newSubdeck, additionalInstructions) => {
 		let notice = new Notice(`Bereite Anki-Block für ${provider}...`, 0);
 
 		try {
@@ -111,7 +50,6 @@ async function startGenerationProcess(
 			const { blockStartIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath);
 			console.log(`ensureAnkiBlock completed. Start: ${blockStartIndex}, InsertionPoint Line: ${insertionPoint.line}, Ch: ${insertionPoint.ch}`);
 
-
 			notice.setMessage(`Lese vorhandene Karten...`);
 			const currentAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
 			const existingCards = currentAnkiInfo?.existingCardsText || 'Keine.';
@@ -120,12 +58,19 @@ async function startGenerationProcess(
 
 			notice.setMessage(`Generiere Karten mit ${provider}...`);
 			const currentContentForAI = editor.getValue();
-			const generatedTextRaw = await generateCardsWithAI(plugin.app, currentContentForAI, existingCards, provider, plugin.settings);
 
-			// --- ANWENDUNG DER BEREINIGUNG ---
+			// --- ÜBERGABE der additionalInstructions an generateCardsWithAI ---
+			const generatedTextRaw = await generateCardsWithAI(
+				plugin.app,
+				currentContentForAI,
+				existingCards,
+				provider,
+				plugin.settings,
+				additionalInstructions // Hier übergeben
+			);
+			// --- ENDE ÜBERGABE ---
+
 			const generatedText = cleanAiGeneratedText(generatedTextRaw);
-			// --- ENDE ANWENDUNG ---
-
 			console.log("Generierter Text (bereinigt):", JSON.stringify(generatedText));
 
 			if (insertionPoint && generatedText) {
@@ -147,10 +92,12 @@ async function startGenerationProcess(
 				new Notice(`Fehler: ${error.message}`, 7000);
 			}
 		}
-	}).open();
+	}).open(); // Öffne den Modal hier
 }
 
-// Stellt sicher, dass ein Anki-Block existiert (bleibt gleich)
+// --- Rest der Datei (ensureAnkiBlock, insertGeneratedText, cleanAiGeneratedText) bleibt unverändert ---
+
+// Stellt sicher, dass ein Anki-Block existiert und gibt Start-Index + Einfügepunkt zurück
 async function ensureAnkiBlock(editor: Editor, fullDeckPath: string): Promise<{ blockStartIndex: number, blockEndIndex: number, insertionPoint: CodeMirror.Position }> {
 	let fileContent = editor.getValue();
 	ANKI_BLOCK_REGEX.lastIndex = 0;
@@ -178,7 +125,7 @@ async function ensureAnkiBlock(editor: Editor, fullDeckPath: string): Promise<{ 
 			if (linesToKeep.length > 0 && linesToKeep.some(l => l.trim().length > 0)) {
 				newBlockInternalContent += `\n\n${linesToKeep.join('\n')}`;
 			} else {
-				newBlockInternalContent += `\n`; // Nur eine Leerzeile nach Deck
+				newBlockInternalContent += `\n`;
 			}
 
 			const newAnkiBlockSource = `\`\`\`anki-cards\n${newBlockInternalContent.trim()}\n\`\`\``;
@@ -224,23 +171,19 @@ async function ensureAnkiBlock(editor: Editor, fullDeckPath: string): Promise<{ 
 	const lineBeforeEndFence = Math.max(0, endPos.line - 1);
 	const insertionPoint = { line: lineBeforeEndFence, ch: editor.getLine(lineBeforeEndFence).length };
 
-
 	const finalInsertionOffset = editor.posToOffset(insertionPoint);
 	if (finalInsertionOffset < blockStartIndex || finalInsertionOffset > blockEndIndex - 1) {
 		console.error("Ungültiger Einfügepunkt berechnet:", insertionPoint, { blockStartIndex, blockEndIndex });
-		// Fallback: Einfügen direkt vor den letzten ``` (Offset - 1, um vor \n zu sein)
 		const fallbackOffset = Math.max(blockStartIndex + `\`\`\`anki-cards\n`.length, blockEndIndex - 4);
 		console.warn(`Fallback insertion offset: ${fallbackOffset}`);
 		const fallbackPoint = editor.offsetToPos(fallbackOffset);
 		return { blockStartIndex, blockEndIndex, insertionPoint: fallbackPoint };
-		// throw new Error("Fehler bei Berechnung des Einfügepunkts innerhalb des Blocks.");
 	}
 
 	return { blockStartIndex, blockEndIndex, insertionPoint };
 }
 
-
-// Fügt den generierten Text korrekt in den Block ein (bleibt gleich)
+// Fügt den generierten Text korrekt in den Block ein
 function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionPoint: CodeMirror.Position, generatedText: string) {
 	const blockStartOffset = blockStartIndex + "```anki-cards\n".length;
 	const insertionOffset = editor.posToOffset(insertionPoint);
@@ -285,7 +228,62 @@ function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionP
 		}
 	}
 
-
 	console.log("Final prefix:", JSON.stringify(prefix));
 	editor.replaceRange(`${prefix}${generatedText}`, insertionPoint);
+}
+
+
+// Bereinigt den KI-Output (bleibt gleich)
+function cleanAiGeneratedText(rawText: string): string {
+	const lines = rawText.trim().split('\n');
+	const validCardLines: string[] = [];
+	let insideNestedBlock = false;
+
+	for (const line of lines) {
+		const trimmedLine = line.trim();
+
+		if (trimmedLine.startsWith('```')) {
+			insideNestedBlock = !insideNestedBlock;
+			continue;
+		}
+		if (insideNestedBlock) {
+			continue;
+		}
+		if (trimmedLine.length === 0) {
+			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length > 0) {
+				validCardLines.push('');
+			}
+			continue;
+		}
+		const lowerTrimmed = trimmedLine.toLowerCase();
+		if (lowerTrimmed.startsWith("here are the anki cards") ||
+			lowerTrimmed.startsWith("note that i've only created cards") ||
+			lowerTrimmed.startsWith("target deck:")
+		) {
+			continue;
+		}
+
+		if (trimmedLine.startsWith('Q:') ||
+			trimmedLine.startsWith('A:') ||
+			trimmedLine.startsWith('ID:') ||
+			trimmedLine === 'xxx' ||
+			line.includes('____') ||
+			(validCardLines.length > 0 &&
+				(validCardLines[validCardLines.length - 1].startsWith('Q:') || validCardLines[validCardLines.length - 1].startsWith('A:') || validCardLines[validCardLines.length - 1] === 'xxx' || validCardLines[validCardLines.length - 1].includes('____')))
+
+		) {
+			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0 && line.trim().length > 0) {
+				validCardLines.pop();
+			}
+			validCardLines.push(line);
+		} else {
+			console.warn("CleanAI: Ignoriere ungültige Zeile:", line);
+		}
+	}
+
+	while (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
+		validCardLines.pop();
+	}
+
+	return validCardLines.join('\n');
 }
