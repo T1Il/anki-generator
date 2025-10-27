@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Notice, Plugin, requestUrl } from 'obsidian';
+import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, TFile } from 'obsidian';
 import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings } from './settings';
 import { SubdeckModal } from './ui/SubdeckModal';
 import { CardPreviewModal } from './ui/CardPreviewModal';
@@ -290,17 +290,80 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		});
 	}
 
+	// --- START: MODIFIZIERTE triggerCardGeneration FUNKTION ---
 	async triggerCardGeneration(editor: Editor) {
 		const ankiInfo = parseAnkiSection(editor, this.settings.mainDeck);
 		const initialSubdeck = ankiInfo ? ankiInfo.subdeck : '';
 
 		new SubdeckModal(this.app, this.settings.mainDeck, initialSubdeck, async (newSubdeck) => {
 			const notice = new Notice('Anki-Karten werden generiert...', 0);
-
 			let requestBodyString = "";
 
+			// --- LÖSUNG FÜR REQUEST 2: DECKNAME SOFORT SPEICHERN ---
+			let insertionPoint: { line: number, ch: number } | null = null;
+			try {
+				const fullDeckPath = `${this.settings.mainDeck}::${newSubdeck}`;
+				const fileContent = editor.getValue();
+				const ankiBlockRegex = /```anki-cards\s*([\s\S]*?)\s*```/g;
+				const matches = [...fileContent.matchAll(ankiBlockRegex)];
+
+				if (matches.length > 0) {
+					// Block(s) existieren: Finde den letzten
+					const lastMatch = matches[matches.length - 1];
+					const sourceBlock = lastMatch[0]; // z.B. ```anki-cards...```
+					const blockContent = lastMatch[1]; // Inhalt
+					const blockLines = blockContent.trim().split('\n');
+					const deckLine = blockLines.find(l => l.startsWith('TARGET DECK:'));
+					const deckLineIndex = blockLines.findIndex(l => l.startsWith('TARGET DECK:'));
+
+					// Finde den Einfügepunkt (vor den letzten ```)
+					const insertionOffset = lastMatch.index + sourceBlock.length - 3;
+					insertionPoint = editor.offsetToPos(insertionOffset);
+
+					// Aktualisiere den Decknamen, falls er sich geändert hat ODER fehlt
+					if (!deckLine || deckLine.replace('TARGET DECK:', '').trim() !== fullDeckPath) {
+						let newBlockContent = "";
+						if (deckLineIndex > -1) {
+							// Ersetze die existierende Deck-Zeile
+							blockLines[deckLineIndex] = `TARGET DECK: ${fullDeckPath}`;
+							newBlockContent = blockLines.join('\n');
+						} else {
+							// Füge die Deck-Zeile oben hinzu
+							newBlockContent = `TARGET DECK: ${fullDeckPath}\n${blockLines.join('\n')}`;
+						}
+
+						const newAnkiBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
+						const startPos = editor.offsetToPos(lastMatch.index);
+						const endPos = editor.offsetToPos(lastMatch.index + sourceBlock.length);
+						editor.replaceRange(newAnkiBlockSource, startPos, endPos);
+
+						// Neuberechnung des Einfügepunkts, da sich der Block geändert hat
+						const newOffset = lastMatch.index + newAnkiBlockSource.length - 3;
+						insertionPoint = editor.offsetToPos(newOffset);
+					}
+				} else {
+					// Kein Block vorhanden: Erstelle einen neuen, leeren Block
+					const output = `\n\n## Anki\n\n\`\`\`anki-cards\nTARGET DECK: ${fullDeckPath}\n\n\`\`\``;
+					const lastLine = editor.lastLine();
+					const endOfDocument = { line: lastLine, ch: editor.getLine(lastLine).length };
+					editor.replaceRange(output, endOfDocument);
+
+					// Setze den Einfügepunkt (vor den letzten ``` des *neuen* Blocks)
+					insertionPoint = editor.offsetToPos(editor.getValue().length - 3);
+				}
+			} catch (e) {
+				notice.hide();
+				new Notice(`Fehler beim Vorbereiten des Anki-Blocks: ${e.message}`, 7000);
+				console.error("Fehler (Block-Vorbereitung):", e);
+				return; // Breche die Generierung ab
+			}
+			// --- ENDE: LÖSUNG FÜR REQUEST 2 ---
+
+
+			// --- START: LÖSUNG FÜR REQUEST 1 (API-AUFRUF & FEHLERBEHANDLUNG) ---
 			try {
 				const noteContent = editor.getValue();
+				// Wir verwenden das ankiInfo von *vor* unserer Code-Block-Änderung, das ist OK
 				const existingCards = ankiInfo ? ankiInfo.existingCardsText : 'Keine.';
 
 				const finalPrompt = this.settings.prompt
@@ -315,90 +378,75 @@ export default class AnkiGeneratorPlugin extends Plugin {
 				const response = await requestUrl({
 					url: apiUrl, method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: requestBodyString
+					body: requestBodyString,
+					throw: false // Wirft keinen Fehler bei 4xx/5xx
 				});
 
-				const generatedText = response.json.candidates[0].content.parts[0].text.trim();
+				const responseJson = response.json;
 
-				console.log(generatedText);
+				// Erfolgsfall (z.B. 200)
+				if (response.status < 300) {
+					const generatedText = responseJson.candidates[0].content.parts[0].text.trim();
+					console.log(generatedText);
 
-				const fullDeckPath = `${this.settings.mainDeck}::${newSubdeck}`;
+					// Füge den generierten Text am gespeicherten Einfügepunkt ein
+					const textBeforeInsertion = editor.getRange({ line: 0, ch: 0 }, insertionPoint).trimEnd();
+					const prefix = textBeforeInsertion.endsWith('\n\n') ? '' : (textBeforeInsertion.endsWith('\n') ? '\n' : '\n\n');
+					editor.replaceRange(`${prefix}${generatedText}`, insertionPoint);
 
-				const fileContent = editor.getValue();
-				const ankiBlockRegex = /```anki-cards\s*([\s\S]*?)\s*```/g;
-				const matches = [...fileContent.matchAll(ankiBlockRegex)];
+					notice.hide();
+					new Notice('Anki-Block wurde aktualisiert/hinzugefügt.');
 
-				if (matches.length > 0) {
-					const lastMatch = matches[matches.length - 1];
-					if (lastMatch.index !== undefined) {
-						const insertionPoint = lastMatch.index + lastMatch[0].length - 3;
-
-						const textBeforeInsertion = editor.getRange(editor.offsetToPos(0), editor.offsetToPos(insertionPoint)).trimEnd();
-						const prefix = textBeforeInsertion.length === 0 ? '' : '\n\n';
-
-						editor.replaceRange(`${prefix}${generatedText}`, editor.offsetToPos(insertionPoint));
-					} else {
-						throw new Error("Konnte die Position des letzten anki-cards Blocks nicht bestimmen.");
-					}
+					// Fehlerfall (z.B. 503, 400)
 				} else {
-					const output = `n\n## Anki\n\n\`\`\`anki-cards\nTARGET DECK: ${fullDeckPath}\n\n${generatedText}\n\`\`\``;
-					const lastLine = editor.lastLine();
-					const endOfDocument = { line: lastLine, ch: editor.getLine(lastLine).length };
-					editor.replaceRange(output, endOfDocument);
+					let userFriendlyMessage = `API Fehler (Status ${response.status})`;
+					let errorDetails = JSON.stringify(responseJson, null, 2);
+					let isOverloadedError = false;
+
+					if (responseJson && responseJson.error && responseJson.error.message) {
+						const apiMessage = responseJson.error.message;
+						userFriendlyMessage = `API Fehler (${response.status}): ${apiMessage}`;
+						// Prüfe auf den spezifischen 503-Fehler
+						if (response.status === 503 && apiMessage.toLowerCase().includes("overloaded")) {
+							isOverloadedError = true;
+						}
+					}
+
+					const error = new Error(userFriendlyMessage);
+					// @ts-ignore
+					error.debugDetails = errorDetails;
+					// @ts-ignore
+					error.isOverloaded = isOverloadedError;
+					throw error;
 				}
 
-				notice.hide();
-				new Notice('Anki-Block wurde aktualisiert/hinzugefügt.');
-
-				// --- START: MODIFIZIERTER CATCH-BLOCK (FÜR VERBESSERTE NOTICE) ---
+				// Fängt Netzwerkfehler ODER unsere manuell geworfenen API-Fehler
 			} catch (error) {
 				notice.hide();
-				console.error("Fehler bei der Kartengenerierung (rohes Objekt):", error);
-
-				let errorDetails = "Keine detaillierte Antwort vom Server erhalten.";
-				let userFriendlyMessage = "API Fehler. Details im Debug-Modal."; // Standard-Notice
+				console.error("Fehler bei der Kartengenerierung:", error);
 
 				// @ts-ignore
-				if (error.body) {
-					// @ts-ignore
-					errorDetails = `--- STATUS ---\n${error.status}\n\n--- BODY ---\n${error.body}`;
+				const isOverloaded = error.isOverloaded === true;
+				// @ts-ignore
+				const userMessage = error.message || "Unbekannter Fehler. Details im Debug-Modal.";
 
-					// (NEU) Versuche, die spezifische Nachricht für die Notice zu parsen
-					try {
-						// @ts-ignore
-						const errorJson = JSON.parse(error.body);
-						if (errorJson.error && errorJson.error.message) {
-							// Wir haben die exakte Nachricht!
-							userFriendlyMessage = `API Fehler (503): ${errorJson.error.message}`;
-						}
-					} catch (e) {
-						// Body war kein JSON, bleibe bei der Standard-Notice
-						// @ts-ignore
-						userFriendlyMessage = `API Fehler: Status ${error.status}. Details im Modal.`;
-					}
-					// @ts-ignore
-				} else if (error.message) {
-					// @ts-ignore
-					errorDetails = `--- MESSAGE ---\n${error.message}\n\n--- STACK ---\n${error.stack}`;
-					// @ts-ignore
-					userFriendlyMessage = error.message; // z.B. "Request failed, status 503"
+				// --- LÖSUNG FÜR REQUEST 1: ZEIGE MODAL NUR WENN NÖTIG ---
+				if (isOverloaded) {
+					// Zeige *nur* die Notice beim 503-Fehler
+					new Notice(userMessage, 10000);
 				} else {
-					try {
-						errorDetails = JSON.stringify(error, null, 2);
-					} catch (e) {
-						errorDetails = "Fehlerobjekt konnte nicht stringifiziert werden.";
-					}
+					// Zeige das Debug-Modal für *alle anderen* Fehler
+					// @ts-ignore
+					let details = error.debugDetails || `--- MESSAGE ---\n${error.message}\n\n--- STACK ---\n${error.stack}`;
+					new DebugModal(this.app, requestBodyString, details).open();
+					new Notice(userMessage, 10000);
 				}
-
-				// Zeige das Debug-Modal mit *allen* Details
-				new DebugModal(this.app, requestBodyString, errorDetails).open();
-
-				// Zeige die *verbesserte, menschenlesbare* Notice
-				new Notice(userFriendlyMessage, 10000);
 			}
-			// --- ENDE: MODIFIZIERTER CATCH-BLOCK ---
+			// --- ENDE: LÖSUNG FÜR REQUEST 1 ---
 		}).open();
 	}
+	// --- ENDE: MODIFIZIERTE triggerCardGeneration FUNKTION ---
+
 
 	onunload() { }
 	async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
