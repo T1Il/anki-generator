@@ -4,109 +4,19 @@ import { Card } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
 import { deleteAnkiNotes, createAnkiDeck, getCardCountForDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './anki/AnkiConnect';
 import { arrayBufferToBase64, basicMarkdownToHtml, normalizeNewlines } from './utils';
+import { parseCardsFromBlockSource } from './anki/ankiParser';
 
-// --- KORRIGIERTE PARSER-LOGIK für den Codeblock-Inhalt ---
-function parseCodeBlockContent(source: string): { deckName: string | null, cards: Card[] } {
-	const lines = source.trim().split('\n');
-	const deckLine = lines.find(l => l.trim().startsWith('TARGET DECK:'));
-	const deckName = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
-	const cards: Card[] = [];
-	let i = 0;
+// --- NEUE, ROBUSTERE REGEX ---
+const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
-	while (i < lines.length) {
-		const line = lines[i];
-		const trimmedLine = line.trim();
-
-		if (trimmedLine.length === 0 || trimmedLine.startsWith('TARGET DECK:')) {
-			i++;
-			continue;
-		}
-
-		if (line.startsWith('Q:')) {
-			let q = line.substring(2).trim();
-			let a = '';
-			let id: number | null = null;
-			let currentLineIndex = i + 1;
-
-			while (currentLineIndex < lines.length &&
-				!lines[currentLineIndex].startsWith('A:') &&
-				!lines[currentLineIndex].startsWith('ID:') &&
-				!lines[currentLineIndex].startsWith('Q:')) {
-				if (lines[currentLineIndex].trim() === 'xxx' || lines[currentLineIndex].includes('____')) break;
-				q += '\n' + lines[currentLineIndex];
-				currentLineIndex++;
-			}
-
-			if (currentLineIndex < lines.length && lines[currentLineIndex].startsWith('A:')) {
-				a = lines[currentLineIndex].substring(2).trim();
-				currentLineIndex++;
-				while (currentLineIndex < lines.length &&
-					!lines[currentLineIndex].startsWith('ID:') &&
-					!lines[currentLineIndex].startsWith('Q:')) {
-					if (lines[currentLineIndex].trim() === 'xxx' || lines[currentLineIndex].includes('____')) break;
-					a += '\n' + lines[currentLineIndex];
-					currentLineIndex++;
-				}
-			}
-
-			if (currentLineIndex < lines.length && lines[currentLineIndex].trim().startsWith('ID:')) {
-				id = parseInt(lines[currentLineIndex].trim().substring(3).trim(), 10) || null;
-				currentLineIndex++;
-			}
-
-			cards.push({ type: 'Basic', q: q.trim(), a: a.trim(), id });
-			i = currentLineIndex;
-
-		} else {
-			let q = line;
-			let a = '';
-			let id: number | null = null;
-			let currentLineIndex = i + 1;
-			let foundXxx = false;
-
-			while (currentLineIndex < lines.length &&
-				lines[currentLineIndex].trim() !== 'xxx' &&
-				!lines[currentLineIndex].startsWith('Q:') &&
-				!lines[currentLineIndex].startsWith('ID:')) {
-				if (lines[currentLineIndex].includes('____')) break;
-				q += '\n' + lines[currentLineIndex];
-				currentLineIndex++;
-			}
-
-			if (currentLineIndex < lines.length && lines[currentLineIndex].trim() === 'xxx') {
-				foundXxx = true;
-				currentLineIndex++;
-				while (currentLineIndex < lines.length &&
-					!lines[currentLineIndex].startsWith('ID:') &&
-					!lines[currentLineIndex].startsWith('Q:')) {
-					if (lines[currentLineIndex].trim() === 'xxx' || lines[currentLineIndex].includes('____')) break;
-					a += '\n' + lines[currentLineIndex];
-					currentLineIndex++;
-				}
-			}
-
-			if (currentLineIndex < lines.length && lines[currentLineIndex].trim().startsWith('ID:')) {
-				id = parseInt(lines[currentLineIndex].trim().substring(3).trim(), 10) || null;
-				currentLineIndex++;
-			}
-
-			if (foundXxx || q.includes('____')) {
-				cards.push({ type: 'Cloze', q: q.trim(), a: a.trim(), id });
-			} else {
-				if (q.trim().length > 0) {
-					console.warn("Anki-Block Parser: Ignoriere unerwartete Zeile:", line);
-				}
-			}
-			i = currentLineIndex;
-		}
-	}
-	return { deckName, cards };
-}
-
-// --- Hauptfunktion für den Markdown Code Block Prozessor ---
+// Hauptfunktion für den Markdown Code Block Prozessor
 export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
 	el.empty();
-	const { deckName, cards } = parseCodeBlockContent(source);
+
+	const linesForDeck = source.trim().split('\n');
+	const deckLine = linesForDeck.find(l => l.trim().startsWith('TARGET DECK:'));
+	const deckName = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
+	const cards = parseCardsFromBlockSource(source);
 
 	el.createEl('h4', { text: 'Anki-Karten' });
 
@@ -130,7 +40,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 	const buttonContainer = el.createDiv({ cls: 'anki-button-container' });
 
-	// Vorschau & Bearbeiten Button
 	const previewButton = buttonContainer.createEl('button', { text: 'Vorschau & Bearbeiten' });
 	previewButton.onclick = () => {
 		const cardsForModal = JSON.parse(JSON.stringify(cards)) as Card[];
@@ -140,7 +49,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		new CardPreviewModal(plugin.app, cardsForModal, onSave).open();
 	};
 
-	// Mit Anki synchronisieren Button
 	const syncButton = buttonContainer.createEl('button', { text: 'Mit Anki synchronisieren' });
 	syncButton.onclick = async () => {
 		await syncAnkiBlock(plugin, source, deckName, cards);
@@ -148,7 +56,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 }
 
 
-// --- Speichern der Änderungen aus dem Preview Modal ---
+// Speichern der Änderungen aus dem Preview Modal
 async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceContent: string, updatedCards: Card[], deletedCardIds: number[]) {
 	const notice = new Notice('Speichere Änderungen...', 0);
 	try {
@@ -160,6 +68,7 @@ async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceC
 		if (!file) throw new Error("Keine aktive Datei.");
 		const currentFileContent = await plugin.app.vault.read(file);
 
+		// Verwende die robustere Funktion zum Finden des Blocks
 		const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
 
 		if (matchIndex === -1) {
@@ -169,13 +78,14 @@ async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceC
 		const deckLine = originalFullBlockSource.split('\n').find(l => l.trim().startsWith('TARGET DECK:')) || `TARGET DECK: ${plugin.settings.mainDeck}::Standard`;
 		const newBlockContent = formatCardsToString(deckLine, updatedCards);
 
+		// Formatierung: ```anki-cards\n[CONTENT]\n```
 		const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
 		const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
 
 		await plugin.app.vault.modify(file, updatedFileContent);
 		notice.hide();
 		new Notice("Änderungen gespeichert!");
-		plugin.app.workspace.trigger('markdown-preview-rerender'); // Trigger rerender
+		plugin.app.workspace.trigger('markdown-preview-rerender');
 
 	} catch (e) {
 		notice.hide();
@@ -184,7 +94,7 @@ async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceC
 	}
 }
 
-// --- Synchronisation mit AnkiConnect ---
+// Synchronisation mit AnkiConnect
 async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent: string, deckName: string | null, cards: Card[]) {
 	const notice = new Notice('Synchronisiere mit Anki...', 0);
 	try {
@@ -193,8 +103,7 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 		if (!deckName) throw new Error("Kein 'TARGET DECK' im anki-cards Block gefunden.");
 		await createAnkiDeck(deckName);
 
-		const updatedCardsWithIds: Card[] = []; // Store cards with potentially updated IDs
-
+		const updatedCardsWithIds: Card[] = [];
 		const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
 
 		for (const card of cards) {
@@ -207,7 +116,6 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 			const imageProcessedMap = new Map<string, string>();
 
 			const processImages = async (text: string): Promise<string> => {
-				// Bildverarbeitungslogik bleibt gleich
 				let processedText = text;
 				const matches = Array.from(text.matchAll(imageRegex));
 				for (const match of matches) {
@@ -233,9 +141,11 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 							imageProcessedMap.set(imageName, ankiFilename);
 							processedText = processedText.replaceAll(originalLink, `<img src="${ankiFilename}">`);
 						} else {
+							console.warn(`Bilddatei nicht gefunden beim Sync: ${imageName}`);
 							processedText = processedText.replaceAll(originalLink, `[Bild nicht gefunden: ${imageName}]`);
 						}
 					} catch (imgError) {
+						console.error(`Fehler bei Bild ${imageName} beim Sync:`, imgError);
 						new Notice(`Fehler bei Bild ${imageName}: ${imgError.message}`, 5000);
 						processedText = processedText.replaceAll(originalLink, `[Fehler bei Bild: ${imageName}]`);
 					}
@@ -245,10 +155,8 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 
 			processedQ = await processImages(processedQ);
 			processedA = await processImages(processedA);
-
 			const htmlQ = basicMarkdownToHtml(processedQ);
 			const htmlA = basicMarkdownToHtml(processedA);
-
 			let ankiFieldQ = htmlQ;
 			let ankiFieldA = htmlA;
 			let ankiClozeTextField = "";
@@ -257,7 +165,7 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 				const clozeRegex = /(?<!\w)____(?!\w)/;
 				ankiClozeTextField = clozeRegex.test(htmlQ)
 					? htmlQ.replace(clozeRegex, `{{c1::${htmlA}}}`)
-					: `${htmlQ} {{c1::${htmlA}}}`; // Fallback if marker missing
+					: `${htmlQ} {{c1::${htmlA}}}`;
 				ankiFieldQ = ankiClozeTextField;
 				ankiFieldA = "";
 			}
@@ -279,7 +187,7 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 				} catch (e) {
 					if (e.message?.includes("Note was not found")) {
 						new Notice(`Karte ${ankiNoteId} nicht gefunden. Erstelle neu.`);
-						ankiNoteId = null; // Markieren, um neu zu erstellen
+						ankiNoteId = null;
 					} else { throw e; }
 				}
 			}
@@ -309,28 +217,28 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 					} else { throw e; }
 				}
 			}
-			// Speichere die Karte mit der (potenziell neuen) ID für das Zurückschreiben
 			updatedCardsWithIds.push({ ...card, id: ankiNoteId });
 		}
 
-		// Schreibe den Block mit den aktualisierten IDs zurück
 		const currentFileContent = await plugin.app.vault.read(activeFile);
+		// Verwende die robustere Funktion zum Finden des Blocks
 		const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
 
 		if (matchIndex === -1) {
 			throw new Error("Konnte den zu synchronisierenden Anki-Block nicht finden.");
 		}
 
-		const deckLine = `TARGET DECK: ${deckName}`; // Deckname ist hier bekannt
+		const deckLine = `TARGET DECK: ${deckName}`;
 		const newBlockContent = formatCardsToString(deckLine, updatedCardsWithIds);
 
+		// Formatierung: ```anki-cards\n[CONTENT]\n```
 		const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
 		const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
 
 		await plugin.app.vault.modify(activeFile, updatedFileContent);
 		notice.hide();
 		new Notice('Synchronisation erfolgreich!');
-		plugin.app.workspace.trigger('markdown-preview-rerender'); // Trigger rerender
+		plugin.app.workspace.trigger('markdown-preview-rerender');
 
 	} catch (error) {
 		notice.hide();
@@ -341,7 +249,7 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 }
 
 
-// --- Hilfsfunktion zum Formatieren der Kartenliste in einen String ---
+// Hilfsfunktion zum Formatieren der Kartenliste in einen String
 function formatCardsToString(deckLine: string, cards: Card[]): string {
 	const newLines: string[] = [deckLine.trim()];
 	if (cards.length > 0) newLines.push('');
@@ -366,26 +274,28 @@ function formatCardsToString(deckLine: string, cards: Card[]): string {
 			newLines.push(''); // Leerzeile
 		}
 	});
+	// Wichtig: trimEnd() entfernt nur Whitespace am Ende, nicht die letzte Leerzeile zwischen Karten
 	return newLines.join('\n').trimEnd();
 }
 
-// --- Verbesserte Funktion zum Finden des spezifischen Codeblocks ---
+// Verbesserte Funktion zum Finden des spezifischen Codeblocks
 function findSpecificAnkiBlock(fullContent: string, originalSourceContent: string): { matchIndex: number, originalFullBlockSource: string } {
-	const blockRegex = /^```anki-cards\s*([\s\S]*?)^```/gm;
-	const matches = [...fullContent.matchAll(blockRegex)];
+	// KORREKTUR: Verwende die neue Regex
+	ANKI_BLOCK_REGEX.lastIndex = 0; // Reset state
+	const matches = [...fullContent.matchAll(ANKI_BLOCK_REGEX)];
 	let originalFullBlockSource = "";
 	let matchIndex = -1;
 
 	const normalizedSource = normalizeNewlines(originalSourceContent);
 
 	if (matches.length > 0) {
-		// 1. Exakter normalisierter Match
+		// 1. Exakter normalisierter Match des *Inhalts* (m[1])
 		const match = Array.from(matches).find(m => normalizeNewlines(m[1]) === normalizedSource);
 		if (match) {
-			originalFullBlockSource = match[0];
+			originalFullBlockSource = match[0]; // Ganzer Block
 			matchIndex = match.index ?? -1;
 		} else {
-			// 2. Getrimmter normalisierter Match
+			// 2. Getrimmter normalisierter Match des *Inhalts*
 			const normalizedSourceTrimmed = normalizedSource.trim();
 			const fallbackMatch = Array.from(matches).find(m => normalizeNewlines(m[1]).trim() === normalizedSourceTrimmed);
 			if (fallbackMatch) {
@@ -393,12 +303,15 @@ function findSpecificAnkiBlock(fullContent: string, originalSourceContent: strin
 				matchIndex = fallbackMatch.index ?? -1;
 			} else {
 				// 3. Fallback: Letzter Block
-				console.warn("Konnte spezifischen Anki-Block nicht exakt finden, verwende letzten Block.");
+				console.warn("Konnte spezifischen Anki-Block nicht exakt finden (via source content), verwende letzten Block.");
 				const lastMatch = matches[matches.length - 1];
 				originalFullBlockSource = lastMatch[0];
 				matchIndex = lastMatch.index ?? -1;
 			}
 		}
+	}
+	if (matchIndex === -1) {
+		console.error("findSpecificAnkiBlock: Konnte keinen Block finden. Regex:", ANKI_BLOCK_REGEX, "Content snippet:", fullContent.substring(0, 500));
 	}
 	return { matchIndex, originalFullBlockSource };
 }
