@@ -1,10 +1,11 @@
-import { MarkdownPostProcessorContext, Notice, TFile, normalizePath } from 'obsidian';
+import { MarkdownPostProcessorContext, Notice, TFile, normalizePath, MarkdownView } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { Card } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
 import { deleteAnkiNotes, createAnkiDeck, getCardCountForDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './anki/AnkiConnect';
-import { arrayBufferToBase64, basicMarkdownToHtml, normalizeNewlines, convertObsidianLatexToAnki } from './utils';
+import { arrayBufferToBase64, basicMarkdownToHtml, normalizeNewlines, convertObsidianLatexToAnki, convertObsidianLinks } from './utils';
 import { parseCardsFromBlockSource } from './anki/ankiParser';
+import { runGenerationProcess } from './generationManager';
 
 // --- NEUE, ROBUSTERE REGEX ---
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
@@ -40,6 +41,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 	const buttonContainer = el.createDiv({ cls: 'anki-button-container' });
 
+	// Button 1: Vorschau
 	const previewButton = buttonContainer.createEl('button', { text: 'Vorschau & Bearbeiten' });
 	previewButton.onclick = () => {
 		const cardsForModal = JSON.parse(JSON.stringify(cards)) as Card[];
@@ -49,10 +51,49 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		new CardPreviewModal(plugin.app, cardsForModal, onSave).open();
 	};
 
+	// Button 2: Sync
 	const syncButton = buttonContainer.createEl('button', { text: 'Mit Anki synchronisieren' });
 	syncButton.onclick = async () => {
 		await syncAnkiBlock(plugin, source, deckName, cards);
 	};
+
+	// Button 3: Schnell-Generieren (Auto/Gemini)
+	const quickGenButton = buttonContainer.createEl('button', { text: '⚡ KI Generieren' });
+	quickGenButton.title = "Generiert Karten mit dem Standard-Modell (Gemini bevorzugt)";
+	quickGenButton.onclick = async () => {
+		const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
+
+		let subdeck = "";
+		if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
+			subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
+		}
+
+		const provider = plugin.settings.geminiApiKey ? 'gemini' : (plugin.settings.ollamaEnabled ? 'ollama' : null);
+		if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
+
+		await runGenerationProcess(plugin, view.editor, provider, subdeck, "");
+	};
+
+	// Button 4: Lokal Generieren (Ollama) - Nur sichtbar wenn aktiviert
+	if (plugin.settings.ollamaEnabled) {
+		const localGenButton = buttonContainer.createEl('button', { text: '💻 Lokal (Ollama)' });
+		localGenButton.title = "Erzwingt Generierung mit dem lokalen Modell";
+		// Optional: Anderes Styling für Unterscheidung
+		// localGenButton.style.backgroundColor = "#2e3b4e"; 
+
+		localGenButton.onclick = async () => {
+			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
+
+			let subdeck = "";
+			if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
+				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
+			}
+
+			await runGenerationProcess(plugin, view.editor, 'ollama', subdeck, "");
+		};
+	}
 }
 
 
@@ -102,6 +143,28 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 		if (!activeFile) throw new Error("Keine aktive Datei gefunden.");
 		if (!deckName) throw new Error("Kein 'TARGET DECK' im anki-cards Block gefunden.");
 		await createAnkiDeck(deckName);
+
+		// Vault Name abrufen
+		let vaultName = plugin.settings.vaultName;
+		if (!vaultName) {
+			try {
+				// @ts-ignore
+				vaultName = plugin.app.vault.getName();
+			} catch (e) { console.log("getName error", e); }
+		}
+		if (!vaultName) {
+			try {
+				// @ts-ignore
+				if (plugin.app.vault.adapter && plugin.app.vault.adapter.getName) {
+					// @ts-ignore
+					vaultName = plugin.app.vault.adapter.getName();
+				}
+			} catch (e) { console.log("adapter.getName error", e); }
+		}
+		if (!vaultName) {
+			vaultName = "Obsidian";
+			console.warn("Vault Name konnte nicht ermittelt werden. Verwende 'Obsidian'.");
+		}
 
 		const updatedCardsWithIds: Card[] = [];
 		const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
@@ -156,11 +219,11 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 			processedQ = await processImages(processedQ);
 			processedA = await processImages(processedA);
 
-			// --- START CHANGE: LaTeX Konvertierung ---
-			// Konvertiere Obsidian $LaTeX$ zu Anki \(LaTeX\)
 			processedQ = convertObsidianLatexToAnki(processedQ);
 			processedA = convertObsidianLatexToAnki(processedA);
-			// --- END CHANGE ---
+
+			processedQ = convertObsidianLinks(processedQ, vaultName);
+			processedA = convertObsidianLinks(processedA, vaultName);
 
 			const htmlQ = basicMarkdownToHtml(processedQ);
 			const htmlA = basicMarkdownToHtml(processedA);
@@ -228,7 +291,6 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 		}
 
 		const currentFileContent = await plugin.app.vault.read(activeFile);
-		// Verwende die robustere Funktion zum Finden des Blocks
 		const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
 
 		if (matchIndex === -1) {
@@ -237,8 +299,6 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 
 		const deckLine = `TARGET DECK: ${deckName}`;
 		const newBlockContent = formatCardsToString(deckLine, updatedCardsWithIds);
-
-		// Formatierung: ```anki-cards\n[CONTENT]\n```
 		const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
 		const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
 
@@ -256,7 +316,6 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 }
 
 
-// Hilfsfunktion zum Formatieren der Kartenliste in einen String
 function formatCardsToString(deckLine: string, cards: Card[]): string {
 	const newLines: string[] = [deckLine.trim()];
 	if (cards.length > 0) newLines.push('');
@@ -281,14 +340,11 @@ function formatCardsToString(deckLine: string, cards: Card[]): string {
 			newLines.push(''); // Leerzeile
 		}
 	});
-	// Wichtig: trimEnd() entfernt nur Whitespace am Ende, nicht die letzte Leerzeile zwischen Karten
 	return newLines.join('\n').trimEnd();
 }
 
-// Verbesserte Funktion zum Finden des spezifischen Codeblocks
 function findSpecificAnkiBlock(fullContent: string, originalSourceContent: string): { matchIndex: number, originalFullBlockSource: string } {
-	// KORREKTUR: Verwende die neue Regex
-	ANKI_BLOCK_REGEX.lastIndex = 0; // Reset state
+	ANKI_BLOCK_REGEX.lastIndex = 0;
 	const matches = [...fullContent.matchAll(ANKI_BLOCK_REGEX)];
 	let originalFullBlockSource = "";
 	let matchIndex = -1;
@@ -296,20 +352,17 @@ function findSpecificAnkiBlock(fullContent: string, originalSourceContent: strin
 	const normalizedSource = normalizeNewlines(originalSourceContent);
 
 	if (matches.length > 0) {
-		// 1. Exakter normalisierter Match des *Inhalts* (m[1])
 		const match = Array.from(matches).find(m => normalizeNewlines(m[1]) === normalizedSource);
 		if (match) {
-			originalFullBlockSource = match[0]; // Ganzer Block
+			originalFullBlockSource = match[0];
 			matchIndex = match.index ?? -1;
 		} else {
-			// 2. Getrimmter normalisierter Match des *Inhalts*
 			const normalizedSourceTrimmed = normalizedSource.trim();
 			const fallbackMatch = Array.from(matches).find(m => normalizeNewlines(m[1]).trim() === normalizedSourceTrimmed);
 			if (fallbackMatch) {
 				originalFullBlockSource = fallbackMatch[0];
 				matchIndex = fallbackMatch.index ?? -1;
 			} else {
-				// 3. Fallback: Letzter Block
 				console.warn("Konnte spezifischen Anki-Block nicht exakt finden (via source content), verwende letzten Block.");
 				const lastMatch = matches[matches.length - 1];
 				originalFullBlockSource = lastMatch[0];

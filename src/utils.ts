@@ -37,24 +37,38 @@ export function getMimeType(extension: string): string {
 
 /**
  * Konvertiert Obsidian-Style LaTeX ($...$ und $$...$$) in Anki-kompatibles Format (\(..._) und \[...\]).
- * Wichtig: Muss aufgerufen werden, BEVOR basicMarkdownToHtml aufgerufen wird, 
- * da sonst Zeilenumbrüche in Block-Math zerstört werden könnten (wobei basicMarkdownToHtml sehr simpel ist).
+ * Wichtig: Muss aufgerufen werden, BEVOR basicMarkdownToHtml aufgerufen wird.
  */
 export function convertObsidianLatexToAnki(text: string): string {
 	if (!text) return text;
 
 	// 1. Block Math: $$...$$ zu \[...\]
-	// Wir nutzen [\s\S]*?, um auch über Zeilenumbrüche hinweg zu matchen.
 	let converted = text.replace(/\$\$([\s\S]*?)\$\$/g, '\\[$1\\]');
 
 	// 2. Inline Math: $...$ zu \(...\)
-	// Regex Erklärung:
-	// (?<!\\)\$      -> Ein $, vor dem KEIN Backslash steht (escape check)
-	// (.+?)          -> Der Inhalt (non-greedy), mindestens 1 Zeichen
-	// (?<!\\)\$      -> Ein $, vor dem KEIN Backslash steht
-	// Wir schließen Fälle aus, wo $ für Währung stehen könnte (z.B. $50), indem wir annehmen, 
-	// dass LaTeX-User im Plugin-Kontext meist mathematische Ausdrücke meinen.
 	converted = converted.replace(/(?<!\\)\$(.+?)(?<!\\)\$/g, '\\($1\\)');
 
 	return converted;
+}
+
+/**
+ * Konvertiert Obsidian Wikilinks in klickbare obsidian:// URIs für Anki.
+ * [[Link|Alias]] -> <a href="obsidian://open?vault=...&file=Link">Alias</a>
+ * [[Link]] -> <a href="obsidian://open?vault=...&file=Link">Link</a>
+ */
+export function convertObsidianLinks(text: string, vaultName: string): string {
+	if (!text) return text;
+
+	const encodedVault = encodeURIComponent(vaultName);
+
+	// Regex für [[Link]] oder [[Link|Alias]]
+	// Matcht [[Gruppe1]] oder [[Gruppe1|Gruppe2]]
+	return text.replace(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g, (match, linkPath, alias) => {
+		// Pfad und Vault-Name müssen URL-codiert werden (z.B. Leerzeichen zu %20)
+		const href = `obsidian://open?vault=${encodedVault}&file=${encodeURIComponent(linkPath)}`;
+		const linkText = alias || linkPath; // Nutze Alias wenn vorhanden, sonst den Pfad
+
+		// Gib den HTML-Link zurück. Inline-Style für Farbe/Deko optional, hier Standard:
+		return `<a href="${href}" style="text-decoration: underline; color: #007AFF;">${linkText}</a>`;
+	});
 }

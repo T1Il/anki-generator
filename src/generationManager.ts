@@ -43,67 +43,82 @@ async function startGenerationProcess(
 ) {
 	// Öffne den SubdeckModal, der jetzt auch die zusätzlichen Anweisungen sammelt
 	new SubdeckModal(plugin.app, plugin.settings.mainDeck, initialSubdeck, async (newSubdeck, additionalInstructions) => {
-		let notice = new Notice(`Bereite Anki-Block für ${provider}...`, 0);
+		// Rufe die ausgelagerte Logik auf
+		await runGenerationProcess(plugin, editor, provider, newSubdeck, additionalInstructions);
+	}).open();
+}
 
-		try {
-			const sub = newSubdeck || 'Standard';
-			const fullDeckPath = `${plugin.settings.mainDeck}::${sub}`;
+/**
+ * Führt den eigentlichen Generierungsprozess durch (ohne Modals).
+ * Kann direkt von Buttons aufgerufen werden.
+ */
+export async function runGenerationProcess(
+	plugin: AnkiGeneratorPlugin,
+	editor: Editor,
+	provider: 'gemini' | 'ollama',
+	subdeck: string,
+	additionalInstructions: string = ''
+) {
+	let notice = new Notice(`Bereite Anki-Block für ${provider} vor...`, 0);
 
-			const { blockStartIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath);
-			console.log(`ensureAnkiBlock completed. Start: ${blockStartIndex}, InsertionPoint Line: ${insertionPoint.line}, Ch: ${insertionPoint.ch}`);
+	try {
+		const sub = subdeck || 'Standard';
+		const fullDeckPath = `${plugin.settings.mainDeck}::${sub}`;
 
-			notice.setMessage(`Lese vorhandene Karten...`);
-			const currentAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
-			const existingCards = currentAnkiInfo?.existingCardsText || 'Keine.';
-			console.log("--- Existing Cards sent to AI (after ensureAnkiBlock) ---\n", existingCards, "\n--- End Existing Cards ---");
+		const { blockStartIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath);
+		console.log(`ensureAnkiBlock completed. Start: ${blockStartIndex}, InsertionPoint Line: ${insertionPoint.line}, Ch: ${insertionPoint.ch}`);
 
-			notice.setMessage(`Suche Bilder im Text...`);
-			const currentContentForAI = editor.getValue();
+		notice.setMessage(`Lese vorhandene Karten...`);
+		const currentAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
+		const existingCards = currentAnkiInfo?.existingCardsText || 'Keine.';
+		console.log("--- Existing Cards sent to AI (after ensureAnkiBlock) ---\n", existingCards, "\n--- End Existing Cards ---");
 
-			// Bilder extrahieren
-			const activeFile = plugin.app.workspace.getActiveFile();
-			const images = await extractImagesFromContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
-			if (images.length > 0) {
-				notice.setMessage(`Gefunden: ${images.length} Bilder. Generiere Karten mit ${provider}...`);
-			} else {
-				notice.setMessage(`Generiere Karten mit ${provider}...`);
-			}
+		notice.setMessage(`Suche Bilder im Text...`);
+		const currentContentForAI = editor.getValue();
 
-			// --- ÜBERGABE der images an generateCardsWithAI ---
-			const generatedTextRaw = await generateCardsWithAI(
-				plugin.app,
-				currentContentForAI,
-				existingCards,
-				provider,
-				plugin.settings,
-				additionalInstructions, // Hier übergeben
-				images // Bilder übergeben
-			);
-			// --- ENDE ÜBERGABE ---
-
-			const generatedText = cleanAiGeneratedText(generatedTextRaw);
-			console.log("Generierter Text (bereinigt):", JSON.stringify(generatedText));
-
-			if (insertionPoint && generatedText) {
-				console.log("Inserting generated text at:", insertionPoint);
-				insertGeneratedText(editor, blockStartIndex, insertionPoint, generatedText);
-				notice.hide();
-				new Notice(`Anki-Block wurde mit ${provider} aktualisiert/hinzugefügt.`);
-			} else if (!generatedText) {
-				notice.hide();
-				new Notice(`Kein neuer Text von ${provider} generiert.`, 5000);
-			} else {
-				throw new Error("Interner Fehler: Einfügepunkt war ungültig nach ensureAnkiBlock.");
-			}
-
-		} catch (error) {
-			notice.hide();
-			console.error(`Fehler bei der Kartengenerierung mit ${provider} (in startGenerationProcess):`, error);
-			if (!(error instanceof Error && (error.message.startsWith("API Fehler") || error.message.startsWith("Netzwerkfehler")))) {
-				new Notice(`Fehler: ${error.message}`, 7000);
-			}
+		// Bilder extrahieren
+		const activeFile = plugin.app.workspace.getActiveFile();
+		const images = await extractImagesFromContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
+		if (images.length > 0) {
+			notice.setMessage(`Gefunden: ${images.length} Bilder. Generiere Karten mit ${provider}...`);
+		} else {
+			notice.setMessage(`Generiere Karten mit ${provider}...`);
 		}
-	}).open(); // Öffne den Modal hier
+
+		// --- ÜBERGABE der images an generateCardsWithAI ---
+		const generatedTextRaw = await generateCardsWithAI(
+			plugin.app,
+			currentContentForAI,
+			existingCards,
+			provider,
+			plugin.settings,
+			additionalInstructions,
+			images // Bilder übergeben
+		);
+		// --- ENDE ÜBERGABE ---
+
+		const generatedText = cleanAiGeneratedText(generatedTextRaw);
+		console.log("Generierter Text (bereinigt):", JSON.stringify(generatedText));
+
+		if (insertionPoint && generatedText) {
+			console.log("Inserting generated text at:", insertionPoint);
+			insertGeneratedText(editor, blockStartIndex, insertionPoint, generatedText);
+			notice.hide();
+			new Notice(`Anki-Block wurde mit ${provider} aktualisiert/hinzugefügt.`);
+		} else if (!generatedText) {
+			notice.hide();
+			new Notice(`Kein neuer Text von ${provider} generiert.`, 5000);
+		} else {
+			throw new Error("Interner Fehler: Einfügepunkt war ungültig nach ensureAnkiBlock.");
+		}
+
+	} catch (error) {
+		notice.hide();
+		console.error(`Fehler bei der Kartengenerierung mit ${provider} (in runGenerationProcess):`, error);
+		if (!(error instanceof Error && (error.message.startsWith("API Fehler") || error.message.startsWith("Netzwerkfehler")))) {
+			new Notice(`Fehler: ${error.message}`, 7000);
+		}
+	}
 }
 
 // Neue Funktion zum Extrahieren und Laden von Bildern
@@ -113,13 +128,10 @@ async function extractImagesFromContent(plugin: AnkiGeneratorPlugin, content: st
 	const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
 	const matches = Array.from(content.matchAll(imageRegex));
 
-	// Beschränkung auf z.B. die ersten 5 Bilder um Payload-Größe zu begrenzen, falls nötig
-	// const limitedMatches = matches.slice(0, 5); 
-
 	for (const match of matches) {
 		let imageName = match[1]?.trim(); // Wiki-Link Format
 		if (!imageName && match[2]) {
-			// Markdown Link Format: Pfad kann URL-encodiert sein
+			// Markdown Link Format
 			try {
 				imageName = decodeURIComponent(match[2]);
 			} catch (e) {
@@ -129,7 +141,7 @@ async function extractImagesFromContent(plugin: AnkiGeneratorPlugin, content: st
 
 		if (!imageName) continue;
 
-		// Entferne Query-Parameter oder Anker, falls vorhanden (einfache Bereinigung)
+		// Entferne Query-Parameter
 		imageName = imageName.split('#')[0].split('?')[0];
 
 		// Nur Bilddateien verarbeiten
@@ -142,7 +154,6 @@ async function extractImagesFromContent(plugin: AnkiGeneratorPlugin, content: st
 				const base64 = arrayBufferToBase64(arrayBuffer);
 				const mimeType = getMimeType(file.extension);
 
-				// Prüfen, ob das Bild schon in der Liste ist (Duplikate vermeiden)
 				if (!images.some(img => img.filename === file.name)) {
 					images.push({
 						base64,
@@ -158,9 +169,7 @@ async function extractImagesFromContent(plugin: AnkiGeneratorPlugin, content: st
 	return images;
 }
 
-// --- Rest der Datei (ensureAnkiBlock, insertGeneratedText, cleanAiGeneratedText) bleibt unverändert ---
-
-// Stellt sicher, dass ein Anki-Block existiert und gibt Start-Index + Einfügepunkt zurück
+// Stellt sicher, dass ein Anki-Block existiert
 async function ensureAnkiBlock(editor: Editor, fullDeckPath: string): Promise<{ blockStartIndex: number, blockEndIndex: number, insertionPoint: CodeMirror.Position }> {
 	let fileContent = editor.getValue();
 	ANKI_BLOCK_REGEX.lastIndex = 0;
@@ -256,11 +265,7 @@ function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionP
 	const contentBeforeInsertionRaw = editor.getRange(rangeStartPos, insertionPoint);
 	const contentBeforeInsertionTrimmedEnd = contentBeforeInsertionRaw.replace(/\s+$/, '');
 
-	console.log("Content before insertion (raw):", JSON.stringify(contentBeforeInsertionRaw));
-	console.log("Content before insertion (trimmed end):", JSON.stringify(contentBeforeInsertionTrimmedEnd));
-
 	let prefix = "";
-
 	const linesBeforeTrimmed = contentBeforeInsertionTrimmedEnd.split('\n');
 	let lastNonEmptyLineIndex = -1;
 	for (let i = linesBeforeTrimmed.length - 1; i >= 0; i--) {
@@ -272,26 +277,18 @@ function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionP
 
 	if (lastNonEmptyLineIndex === -1) {
 		prefix = "";
-		console.log("Prefix determined: Empty prefix for effectively empty block.");
 	} else {
 		const trailingNewlinesRaw = contentBeforeInsertionRaw.substring(contentBeforeInsertionTrimmedEnd.length);
 		const numberOfTrailingNewlines = (trailingNewlinesRaw.match(/\n/g) || []).length;
 
-		console.log("Number of trailing newlines in raw content:", numberOfTrailingNewlines);
-
 		if (numberOfTrailingNewlines === 0) {
 			prefix = "\n\n";
-			console.log("Prefix determined: Double newline (no trailing newline).");
 		} else if (numberOfTrailingNewlines === 1) {
 			prefix = "\n";
-			console.log("Prefix determined: Single newline (already ends with single newline).");
 		} else {
 			prefix = "";
-			console.log("Prefix determined: Empty prefix (already ends with sufficient newlines).");
 		}
 	}
-
-	console.log("Final prefix:", JSON.stringify(prefix));
 	editor.replaceRange(`${prefix}${generatedText}`, insertionPoint);
 }
 
@@ -300,12 +297,11 @@ function cleanAiGeneratedText(rawText: string): string {
 	const lines = rawText.trim().split('\n');
 	const validCardLines: string[] = [];
 	let insideNestedBlock = false;
-	let isInsideCard = false; // Merkt sich, ob wir gerade in einem gültigen Block sind
+	let isInsideCard = false;
 
 	for (const line of lines) {
 		const trimmedLine = line.trim();
 
-		// Code-Blöcke in der Antwort überspringen/handhaben
 		if (trimmedLine.startsWith('```')) {
 			insideNestedBlock = !insideNestedBlock;
 			continue;
@@ -314,7 +310,6 @@ function cleanAiGeneratedText(rawText: string): string {
 			continue;
 		}
 
-		// Leere Zeilen handhaben
 		if (trimmedLine.length === 0) {
 			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length > 0) {
 				validCardLines.push('');
@@ -322,17 +317,15 @@ function cleanAiGeneratedText(rawText: string): string {
 			continue;
 		}
 
-		// KI-Metadaten ignorieren
 		const lowerTrimmed = trimmedLine.toLowerCase();
 		if (lowerTrimmed.startsWith("here are the anki cards") ||
 			lowerTrimmed.startsWith("note that i've only created cards") ||
 			lowerTrimmed.startsWith("target deck:") ||
-			lowerTrimmed.startsWith("---") // Trennlinien ignorieren
+			lowerTrimmed.startsWith("---")
 		) {
 			continue;
 		}
 
-		// Prüfen auf Start einer neuen Komponente
 		const isStartMarker = trimmedLine.startsWith('Q:') ||
 			trimmedLine.startsWith('A:') ||
 			trimmedLine.startsWith('ID:') ||
@@ -340,16 +333,13 @@ function cleanAiGeneratedText(rawText: string): string {
 			line.includes('____');
 
 		if (isStartMarker) {
-			isInsideCard = true; // Wir sind jetzt sicher in einer Karte
-
-			// Vorherige leere Zeile entfernen, falls vorhanden (für kompaktere Ausgabe)
+			isInsideCard = true;
 			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
 				validCardLines.pop();
 			}
 			validCardLines.push(line);
 		}
 		else if (isInsideCard) {
-			// Wenn wir bereits in einer Karte sind, akzeptieren wir die Folgezeile (z.B. Listenpunkte)
 			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
 				validCardLines.pop();
 			}
@@ -360,7 +350,6 @@ function cleanAiGeneratedText(rawText: string): string {
 		}
 	}
 
-	// Aufräumen am Ende
 	while (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
 		validCardLines.pop();
 	}
