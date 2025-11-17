@@ -3,6 +3,7 @@
 import { requestUrl, Notice, App } from 'obsidian';
 import { AnkiGeneratorSettings, DEFAULT_SETTINGS } from './settings';
 import { DebugModal } from './ui/DebugModal';
+import { ImageInput } from './types';
 
 export async function generateCardsWithAI(
 	app: App,
@@ -10,7 +11,8 @@ export async function generateCardsWithAI(
 	existingCards: string,
 	provider: 'gemini' | 'ollama',
 	settings: AnkiGeneratorSettings,
-	additionalInstructions: string | null
+	additionalInstructions: string | null,
+	images: ImageInput[] = [] // Neuer Parameter für Bilder
 ): Promise<string> {
 
 	let basePrompt = settings.prompt;
@@ -49,7 +51,7 @@ export async function generateCardsWithAI(
 		.replace('{{existingCards}}', existingCards);
 
 
-	console.log(`--- Prompt sent to ${provider} ---\n${finalPrompt}\n--- End Prompt ---`);
+	console.log(`--- Prompt sent to ${provider} (Images: ${images.length}) ---\n${finalPrompt.substring(0, 8000)}...\n--- End Prompt ---`);
 
 	let apiUrl = "";
 	let requestBody: any = {};
@@ -58,11 +60,36 @@ export async function generateCardsWithAI(
 	if (provider === 'gemini') {
 		if (!settings.geminiApiKey) throw new Error("Gemini API Key nicht gesetzt.");
 		apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${settings.geminiApiKey}`;
-		requestBody = { contents: [{ parts: [{ text: finalPrompt }] }] };
+
+		// Aufbau des Multimodal-Requests für Gemini
+		const parts: any[] = [{ text: finalPrompt }];
+
+		// Bilder als inline_data hinzufügen
+		images.forEach(img => {
+			parts.push({
+				inline_data: {
+					mime_type: img.mimeType,
+					data: img.base64
+				}
+			});
+		});
+
+		requestBody = { contents: [{ parts: parts }] };
+
 	} else if (provider === 'ollama') {
 		if (!settings.ollamaEndpoint || !settings.ollamaModel) throw new Error("Ollama Endpunkt oder Modell nicht konfiguriert.");
 		apiUrl = settings.ollamaEndpoint;
-		requestBody = { model: settings.ollamaModel, prompt: finalPrompt, stream: false };
+
+		requestBody = {
+			model: settings.ollamaModel,
+			prompt: finalPrompt,
+			stream: false
+		};
+
+		// Wenn Bilder vorhanden sind, füge sie für Ollama hinzu (erwartet Array von base64 Strings)
+		if (images.length > 0) {
+			requestBody.images = images.map(img => img.base64);
+		}
 	} else {
 		throw new Error("Ungültiger AI Provider angegeben.");
 	}

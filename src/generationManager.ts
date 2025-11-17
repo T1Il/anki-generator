@@ -1,12 +1,14 @@
 // src/generationManager.ts
 
-import { Editor, Notice } from 'obsidian';
+import { Editor, Notice, TFile, normalizePath } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { SubdeckModal } from './ui/SubdeckModal';
 import { ModelSelectionModal } from './ui/ModelSelectionModal';
 // DebugModal wird in aiGenerator verwendet
 import { parseAnkiSection } from './anki/ankiParser';
 import { generateCardsWithAI } from './aiGenerator';
+import { ImageInput } from './types';
+import { arrayBufferToBase64, getMimeType } from './utils';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
@@ -55,18 +57,27 @@ async function startGenerationProcess(
 			const existingCards = currentAnkiInfo?.existingCardsText || 'Keine.';
 			console.log("--- Existing Cards sent to AI (after ensureAnkiBlock) ---\n", existingCards, "\n--- End Existing Cards ---");
 
-
-			notice.setMessage(`Generiere Karten mit ${provider}...`);
+			notice.setMessage(`Suche Bilder im Text...`);
 			const currentContentForAI = editor.getValue();
 
-			// --- ÜBERGABE der additionalInstructions an generateCardsWithAI ---
+			// Bilder extrahieren
+			const activeFile = plugin.app.workspace.getActiveFile();
+			const images = await extractImagesFromContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
+			if (images.length > 0) {
+				notice.setMessage(`Gefunden: ${images.length} Bilder. Generiere Karten mit ${provider}...`);
+			} else {
+				notice.setMessage(`Generiere Karten mit ${provider}...`);
+			}
+
+			// --- ÜBERGABE der images an generateCardsWithAI ---
 			const generatedTextRaw = await generateCardsWithAI(
 				plugin.app,
 				currentContentForAI,
 				existingCards,
 				provider,
 				plugin.settings,
-				additionalInstructions // Hier übergeben
+				additionalInstructions, // Hier übergeben
+				images // Bilder übergeben
 			);
 			// --- ENDE ÜBERGABE ---
 
@@ -93,6 +104,58 @@ async function startGenerationProcess(
 			}
 		}
 	}).open(); // Öffne den Modal hier
+}
+
+// Neue Funktion zum Extrahieren und Laden von Bildern
+async function extractImagesFromContent(plugin: AnkiGeneratorPlugin, content: string, sourcePath: string): Promise<ImageInput[]> {
+	const images: ImageInput[] = [];
+	// Regex für ![[bild.png]] und ![alt](bild.png)
+	const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
+	const matches = Array.from(content.matchAll(imageRegex));
+
+	// Beschränkung auf z.B. die ersten 5 Bilder um Payload-Größe zu begrenzen, falls nötig
+	// const limitedMatches = matches.slice(0, 5); 
+
+	for (const match of matches) {
+		let imageName = match[1]?.trim(); // Wiki-Link Format
+		if (!imageName && match[2]) {
+			// Markdown Link Format: Pfad kann URL-encodiert sein
+			try {
+				imageName = decodeURIComponent(match[2]);
+			} catch (e) {
+				imageName = match[2];
+			}
+		}
+
+		if (!imageName) continue;
+
+		// Entferne Query-Parameter oder Anker, falls vorhanden (einfache Bereinigung)
+		imageName = imageName.split('#')[0].split('?')[0];
+
+		// Nur Bilddateien verarbeiten
+		if (!imageName.match(/\.(jpg|jpeg|png|webp|heic|heif)$/i)) continue;
+
+		try {
+			const file = plugin.app.metadataCache.getFirstLinkpathDest(normalizePath(imageName), sourcePath);
+			if (file instanceof TFile) {
+				const arrayBuffer = await plugin.app.vault.readBinary(file);
+				const base64 = arrayBufferToBase64(arrayBuffer);
+				const mimeType = getMimeType(file.extension);
+
+				// Prüfen, ob das Bild schon in der Liste ist (Duplikate vermeiden)
+				if (!images.some(img => img.filename === file.name)) {
+					images.push({
+						base64,
+						mimeType,
+						filename: file.name
+					});
+				}
+			}
+		} catch (e) {
+			console.warn(`Konnte Bild ${imageName} nicht laden:`, e);
+		}
+	}
+	return images;
 }
 
 // --- Rest der Datei (ensureAnkiBlock, insertGeneratedText, cleanAiGeneratedText) bleibt unverändert ---
@@ -232,16 +295,17 @@ function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionP
 	editor.replaceRange(`${prefix}${generatedText}`, insertionPoint);
 }
 
-
-// Bereinigt den KI-Output (bleibt gleich)
+// Bereinigt den KI-Output (Korrigierte Version mit Status-Tracking)
 function cleanAiGeneratedText(rawText: string): string {
 	const lines = rawText.trim().split('\n');
 	const validCardLines: string[] = [];
 	let insideNestedBlock = false;
+	let isInsideCard = false; // Merkt sich, ob wir gerade in einem gültigen Block sind
 
 	for (const line of lines) {
 		const trimmedLine = line.trim();
 
+		// Code-Blöcke in der Antwort überspringen/handhaben
 		if (trimmedLine.startsWith('```')) {
 			insideNestedBlock = !insideNestedBlock;
 			continue;
@@ -249,38 +313,54 @@ function cleanAiGeneratedText(rawText: string): string {
 		if (insideNestedBlock) {
 			continue;
 		}
+
+		// Leere Zeilen handhaben
 		if (trimmedLine.length === 0) {
 			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length > 0) {
 				validCardLines.push('');
 			}
 			continue;
 		}
+
+		// KI-Metadaten ignorieren
 		const lowerTrimmed = trimmedLine.toLowerCase();
 		if (lowerTrimmed.startsWith("here are the anki cards") ||
 			lowerTrimmed.startsWith("note that i've only created cards") ||
-			lowerTrimmed.startsWith("target deck:")
+			lowerTrimmed.startsWith("target deck:") ||
+			lowerTrimmed.startsWith("---") // Trennlinien ignorieren
 		) {
 			continue;
 		}
 
-		if (trimmedLine.startsWith('Q:') ||
+		// Prüfen auf Start einer neuen Komponente
+		const isStartMarker = trimmedLine.startsWith('Q:') ||
 			trimmedLine.startsWith('A:') ||
 			trimmedLine.startsWith('ID:') ||
 			trimmedLine === 'xxx' ||
-			line.includes('____') ||
-			(validCardLines.length > 0 &&
-				(validCardLines[validCardLines.length - 1].startsWith('Q:') || validCardLines[validCardLines.length - 1].startsWith('A:') || validCardLines[validCardLines.length - 1] === 'xxx' || validCardLines[validCardLines.length - 1].includes('____')))
+			line.includes('____');
 
-		) {
-			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0 && line.trim().length > 0) {
+		if (isStartMarker) {
+			isInsideCard = true; // Wir sind jetzt sicher in einer Karte
+
+			// Vorherige leere Zeile entfernen, falls vorhanden (für kompaktere Ausgabe)
+			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
 				validCardLines.pop();
 			}
 			validCardLines.push(line);
-		} else {
+		}
+		else if (isInsideCard) {
+			// Wenn wir bereits in einer Karte sind, akzeptieren wir die Folgezeile (z.B. Listenpunkte)
+			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
+				validCardLines.pop();
+			}
+			validCardLines.push(line);
+		}
+		else {
 			console.warn("CleanAI: Ignoriere ungültige Zeile:", line);
 		}
 	}
 
+	// Aufräumen am Ende
 	while (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length === 0) {
 		validCardLines.pop();
 	}

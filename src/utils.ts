@@ -21,3 +21,16 @@ export function basicMarkdownToHtml(text: string): string {
 export function normalizeNewlines(str: string): string {
 	return str.replace(/\r\n/g, '\n');
 }
+
+export function getMimeType(extension: string): string {
+	const ext = extension.toLowerCase();
+	switch (ext) {
+		case 'png': return 'image/png';
+		case 'jpg':
+		case 'jpeg': return 'image/jpeg';
+		case 'webp': return 'image/webp';
+		case 'heic': return 'image/heic';
+		case 'heif': return 'image/heif';
+		default: return 'image/png'; // Fallback
+	}
+}

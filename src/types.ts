@@ -4,3 +4,9 @@ export interface Card {
 	id: number | null;
 	type: 'Basic' | 'Cloze';
 }
+
+export interface ImageInput {
+	base64: string;
+	mimeType: string;
+	filename: string;
+}
