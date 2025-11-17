@@ -57,9 +57,9 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		await syncAnkiBlock(plugin, source, deckName, cards);
 	};
 
-	// Button 3: Schnell-Generieren (Auto/Gemini)
+	// Button 3: Schnell-Generieren (Priorität: Gemini > OpenAI > Ollama)
 	const quickGenButton = buttonContainer.createEl('button', { text: '⚡ KI Generieren' });
-	quickGenButton.title = "Generiert Karten mit dem Standard-Modell (Gemini bevorzugt)";
+	quickGenButton.title = "Generiert Karten (Gemini bevorzugt)";
 	quickGenButton.onclick = async () => {
 		const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
@@ -69,7 +69,11 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
 		}
 
-		const provider = plugin.settings.geminiApiKey ? 'gemini' : (plugin.settings.ollamaEnabled ? 'ollama' : null);
+		// Ermittele Provider basierend auf Konfiguration
+		const provider = plugin.settings.geminiApiKey ? 'gemini' :
+			(plugin.settings.openAiApiKey ? 'openai' :
+				(plugin.settings.ollamaEnabled ? 'ollama' : null));
+
 		if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
 
 		await runGenerationProcess(plugin, view.editor, provider, subdeck, "");
@@ -79,9 +83,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	if (plugin.settings.ollamaEnabled) {
 		const localGenButton = buttonContainer.createEl('button', { text: '💻 Lokal (Ollama)' });
 		localGenButton.title = "Erzwingt Generierung mit dem lokalen Modell";
-		// Optional: Anderes Styling für Unterscheidung
-		// localGenButton.style.backgroundColor = "#2e3b4e"; 
-
 		localGenButton.onclick = async () => {
 			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }

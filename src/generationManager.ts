@@ -17,17 +17,23 @@ export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor:
 	const initialSubdeck = initialAnkiInfo ? initialAnkiInfo.subdeck : '';
 
 	const geminiAvailable = !!plugin.settings.geminiApiKey;
+	const openAiAvailable = !!plugin.settings.openAiApiKey; // NEU
 	const ollamaAvailable = plugin.settings.ollamaEnabled && !!plugin.settings.ollamaEndpoint && !!plugin.settings.ollamaModel;
 
-	const startGen = (provider: 'gemini' | 'ollama') => {
+	const startGen = (provider: 'gemini' | 'ollama' | 'openai') => {
 		// Rufe startGenerationProcess direkt auf, der Modal wird dort geöffnet
 		startGenerationProcess(plugin, editor, provider, initialSubdeck);
 	};
 
-	if (geminiAvailable && ollamaAvailable) {
-		new ModelSelectionModal(plugin.app, geminiAvailable, ollamaAvailable, startGen).open();
+	// Prüfen wie viele Provider verfügbar sind
+	const availableProviders = [geminiAvailable, openAiAvailable, ollamaAvailable].filter(Boolean).length;
+
+	if (availableProviders > 1) {
+		new ModelSelectionModal(plugin.app, geminiAvailable, ollamaAvailable, openAiAvailable, startGen).open();
 	} else if (geminiAvailable) {
 		startGen('gemini');
+	} else if (openAiAvailable) {
+		startGen('openai');
 	} else if (ollamaAvailable) {
 		startGen('ollama');
 	} else {
@@ -38,7 +44,7 @@ export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor:
 async function startGenerationProcess(
 	plugin: AnkiGeneratorPlugin,
 	editor: Editor,
-	provider: 'gemini' | 'ollama',
+	provider: 'gemini' | 'ollama' | 'openai',
 	initialSubdeck: string
 ) {
 	// Öffne den SubdeckModal, der jetzt auch die zusätzlichen Anweisungen sammelt
@@ -55,7 +61,7 @@ async function startGenerationProcess(
 export async function runGenerationProcess(
 	plugin: AnkiGeneratorPlugin,
 	editor: Editor,
-	provider: 'gemini' | 'ollama',
+	provider: 'gemini' | 'ollama' | 'openai',
 	subdeck: string,
 	additionalInstructions: string = ''
 ) {

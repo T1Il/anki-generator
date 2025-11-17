@@ -1,17 +1,19 @@
 import { App, Modal, Setting } from 'obsidian';
 
-// Definiert den Typ für den Callback, der den ausgewählten Provider zurückgibt
-type ModelSelectionCallback = (provider: 'gemini' | 'ollama') => void;
+// Provider Typ erweitert
+type ModelSelectionCallback = (provider: 'gemini' | 'ollama' | 'openai') => void;
 
 export class ModelSelectionModal extends Modal {
 	onSubmit: ModelSelectionCallback;
 	geminiAvailable: boolean;
 	ollamaAvailable: boolean;
+	openAiAvailable: boolean; // NEU
 
-	constructor(app: App, geminiAvailable: boolean, ollamaAvailable: boolean, onSubmit: ModelSelectionCallback) {
+	constructor(app: App, geminiAvailable: boolean, ollamaAvailable: boolean, openAiAvailable: boolean, onSubmit: ModelSelectionCallback) {
 		super(app);
 		this.geminiAvailable = geminiAvailable;
 		this.ollamaAvailable = ollamaAvailable;
+		this.openAiAvailable = openAiAvailable;
 		this.onSubmit = onSubmit;
 	}
 
@@ -21,19 +23,30 @@ export class ModelSelectionModal extends Modal {
 		contentEl.createEl("h2", { text: "KI-Modell auswählen" });
 		contentEl.createEl("p", { text: "Wähle das Modell, das für die Kartengenerierung verwendet werden soll:" });
 
-		// Button für Gemini (nur wenn verfügbar)
+		// Button für Gemini
 		if (this.geminiAvailable) {
 			new Setting(contentEl)
 				.addButton(btn => btn
 					.setButtonText("Google Gemini (Online)")
-					.setCta() // Hauptoption hervorheben
+					.setCta()
 					.onClick(() => {
 						this.close();
 						this.onSubmit('gemini');
 					}));
 		}
 
-		// Button für Ollama (nur wenn verfügbar)
+		// NEU: Button für OpenAI
+		if (this.openAiAvailable) {
+			new Setting(contentEl)
+				.addButton(btn => btn
+					.setButtonText("OpenAI (ChatGPT)")
+					.onClick(() => {
+						this.close();
+						this.onSubmit('openai');
+					}));
+		}
+
+		// Button für Ollama
 		if (this.ollamaAvailable) {
 			new Setting(contentEl)
 				.addButton(btn => btn
@@ -44,8 +57,7 @@ export class ModelSelectionModal extends Modal {
 					}));
 		}
 
-		// Fallback, falls (unerwartet) keines verfügbar ist
-		if (!this.geminiAvailable && !this.ollamaAvailable) {
+		if (!this.geminiAvailable && !this.ollamaAvailable && !this.openAiAvailable) {
 			contentEl.createEl("p", { text: "Kein KI-Modell konfiguriert oder verfügbar." });
 		}
 	}

@@ -9,10 +9,10 @@ export async function generateCardsWithAI(
 	app: App,
 	noteContent: string,
 	existingCards: string,
-	provider: 'gemini' | 'ollama',
+	provider: 'gemini' | 'ollama' | 'openai',
 	settings: AnkiGeneratorSettings,
 	additionalInstructions: string | null,
-	images: ImageInput[] = [] // Neuer Parameter für Bilder
+	images: ImageInput[] = []
 ): Promise<string> {
 
 	let basePrompt = settings.prompt;
@@ -24,47 +24,41 @@ export async function generateCardsWithAI(
 		}
 	}
 
-	// --- NEU: Zusätzliche Anweisungen an spezifischer Stelle einfügen ---
-	let finalPrompt = basePrompt; // Starte mit dem Basis-Prompt
+	let finalPrompt = basePrompt;
 	if (additionalInstructions && additionalInstructions.trim().length > 0) {
-		const insertionMarker = "Hier ist der Text"; // Die Zeile, *vor* der eingefügt werden soll
+		const insertionMarker = "Hier ist der Text";
 		const markerIndex = basePrompt.indexOf(insertionMarker);
 
 		if (markerIndex !== -1) {
-			// Füge die Anweisungen VOR dem Marker ein
 			const beforeMarker = basePrompt.substring(0, markerIndex);
 			const afterMarker = basePrompt.substring(markerIndex);
 			finalPrompt = `${beforeMarker.trimRight()}\n\n**Zusätzliche Anweisungen für diese Generierung:**\n${additionalInstructions.trim()}\n\n${afterMarker.trimLeft()}`;
 			console.log("Zusätzliche Anweisungen vor dem Text-Marker eingefügt.");
 
 		} else {
-			// Fallback: Füge die Anweisungen ganz am Anfang ein (wie zuvor)
 			console.warn("Konnte den Einfüge-Marker im Prompt nicht finden. Füge zusätzliche Anweisungen am Anfang ein.");
 			finalPrompt = `${additionalInstructions.trim()}\n\n---\n\n${basePrompt}`;
 		}
 	}
-	// --- ENDE NEU ---
 
-	// Ersetze Platzhalter erst *nach* dem Einfügen der zusätzlichen Anweisungen
 	finalPrompt = finalPrompt
 		.replace('{{noteContent}}', noteContent)
 		.replace('{{existingCards}}', existingCards);
 
-
-	console.log(`--- Prompt sent to ${provider} (Images: ${images.length}) ---\n${finalPrompt.substring(0, 8000)}...\n--- End Prompt ---`);
+	console.log(`--- Prompt sent to ${provider} (Images: ${images.length}) ---\n${finalPrompt.substring(0, 200)}...\n--- End Prompt ---`);
 
 	let apiUrl = "";
 	let requestBody: any = {};
+	let requestHeaders: any = { 'Content-Type': 'application/json' };
 	let requestBodyString = "";
 
 	if (provider === 'gemini') {
 		if (!settings.geminiApiKey) throw new Error("Gemini API Key nicht gesetzt.");
-		apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${settings.geminiApiKey}`;
 
-		// Aufbau des Multimodal-Requests für Gemini
+		const modelToUse = settings.geminiModel || 'gemini-1.5-pro';
+		apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${settings.geminiApiKey}`;
+
 		const parts: any[] = [{ text: finalPrompt }];
-
-		// Bilder als inline_data hinzufügen
 		images.forEach(img => {
 			parts.push({
 				inline_data: {
@@ -76,6 +70,32 @@ export async function generateCardsWithAI(
 
 		requestBody = { contents: [{ parts: parts }] };
 
+	} else if (provider === 'openai') {
+		if (!settings.openAiApiKey) throw new Error("OpenAI API Key nicht gesetzt.");
+
+		apiUrl = 'https://api.openai.com/v1/chat/completions';
+		requestHeaders['Authorization'] = `Bearer ${settings.openAiApiKey}`;
+
+		const userContent: any[] = [{ type: "text", text: finalPrompt }];
+
+		// Bilder für OpenAI hinzufügen (data URI Format)
+		images.forEach(img => {
+			userContent.push({
+				type: "image_url",
+				image_url: {
+					url: `data:${img.mimeType};base64,${img.base64}`
+				}
+			});
+		});
+
+		requestBody = {
+			model: settings.openAiModel || 'gpt-4o',
+			messages: [
+				{ role: "system", content: "Du bist ein hilfreicher Assistent, der Anki-Karten erstellt." },
+				{ role: "user", content: userContent }
+			]
+		};
+
 	} else if (provider === 'ollama') {
 		if (!settings.ollamaEndpoint || !settings.ollamaModel) throw new Error("Ollama Endpunkt oder Modell nicht konfiguriert.");
 		apiUrl = settings.ollamaEndpoint;
@@ -86,7 +106,6 @@ export async function generateCardsWithAI(
 			stream: false
 		};
 
-		// Wenn Bilder vorhanden sind, füge sie für Ollama hinzu (erwartet Array von base64 Strings)
 		if (images.length > 0) {
 			requestBody.images = images.map(img => img.base64);
 		}
@@ -95,12 +114,13 @@ export async function generateCardsWithAI(
 	}
 
 	requestBodyString = JSON.stringify(requestBody);
+	console.log("Sende Request Body:", requestBodyString);
 
 	try {
 		const response = await requestUrl({
 			url: apiUrl,
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: requestHeaders,
 			body: requestBodyString,
 			throw: false
 		});
@@ -114,13 +134,16 @@ export async function generateCardsWithAI(
 
 		if (provider === 'gemini') {
 			if (!responseJson?.candidates?.[0]?.content?.parts?.[0]?.text) {
-				console.error("Unerwartete Antwortstruktur von Gemini:", responseJson);
 				throw new Error("Unerwartete Antwortstruktur von Gemini.");
 			}
 			return responseJson.candidates[0].content.parts[0].text.trim();
+		} else if (provider === 'openai') {
+			if (!responseJson?.choices?.[0]?.message?.content) {
+				throw new Error("Unerwartete Antwortstruktur von OpenAI.");
+			}
+			return responseJson.choices[0].message.content.trim();
 		} else if (provider === 'ollama') {
 			if (typeof responseJson?.response !== 'string') {
-				console.error("Unerwartete Antwortstruktur von Ollama:", responseJson);
 				throw new Error("Unerwartete Antwortstruktur von Ollama.");
 			}
 			return responseJson.response.trim();
@@ -138,7 +161,6 @@ export async function generateCardsWithAI(
 	return "";
 }
 
-// handleApiError bleibt unverändert
 function handleApiError(app: App, provider: string, status: number, responseJson: any, requestBodyString: string) {
 	let userFriendlyMessage = `API Fehler (${provider}, Status ${status})`;
 	let errorDetails = `Status: ${status}\nBody:\n${JSON.stringify(responseJson, null, 2)}`;
@@ -151,16 +173,9 @@ function handleApiError(app: App, provider: string, status: number, responseJson
 		if (provider === 'gemini' && status === 503 && apiMessage.toLowerCase().includes("overloaded")) {
 			isOverloaded = true;
 		}
-	} else if (status >= 500 && !isNetworkError) {
-		userFriendlyMessage = `API Serverfehler (${provider}, Status ${status}). Prüfe Serverstatus.`;
-		isOverloaded = true;
-	} else if (status >= 400 && !isNetworkError) {
-		userFriendlyMessage = `API Client-Fehler (${provider}, Status ${status}). Prüfe API Key oder Anfrage.`;
-	} else if (isNetworkError) {
-		userFriendlyMessage = `Netzwerkfehler beim Verbinden mit ${provider}. Läuft der Dienst?`;
 	}
 
-	if (!isOverloaded || provider !== 'gemini') {
+	if (!isOverloaded) {
 		new DebugModal(app, requestBodyString, errorDetails).open();
 		new Notice(userFriendlyMessage + " Details im Modal.", 10000);
 	} else {
