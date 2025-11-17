@@ -34,3 +34,27 @@ export function getMimeType(extension: string): string {
 		default: return 'image/png'; // Fallback
 	}
 }
+
+/**
+ * Konvertiert Obsidian-Style LaTeX ($...$ und $$...$$) in Anki-kompatibles Format (\(..._) und \[...\]).
+ * Wichtig: Muss aufgerufen werden, BEVOR basicMarkdownToHtml aufgerufen wird, 
+ * da sonst Zeilenumbrüche in Block-Math zerstört werden könnten (wobei basicMarkdownToHtml sehr simpel ist).
+ */
+export function convertObsidianLatexToAnki(text: string): string {
+	if (!text) return text;
+
+	// 1. Block Math: $$...$$ zu \[...\]
+	// Wir nutzen [\s\S]*?, um auch über Zeilenumbrüche hinweg zu matchen.
+	let converted = text.replace(/\$\$([\s\S]*?)\$\$/g, '\\[$1\\]');
+
+	// 2. Inline Math: $...$ zu \(...\)
+	// Regex Erklärung:
+	// (?<!\\)\$      -> Ein $, vor dem KEIN Backslash steht (escape check)
+	// (.+?)          -> Der Inhalt (non-greedy), mindestens 1 Zeichen
+	// (?<!\\)\$      -> Ein $, vor dem KEIN Backslash steht
+	// Wir schließen Fälle aus, wo $ für Währung stehen könnte (z.B. $50), indem wir annehmen, 
+	// dass LaTeX-User im Plugin-Kontext meist mathematische Ausdrücke meinen.
+	converted = converted.replace(/(?<!\\)\$(.+?)(?<!\\)\$/g, '\\($1\\)');
+
+	return converted;
+}

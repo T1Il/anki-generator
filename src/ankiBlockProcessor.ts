@@ -3,7 +3,7 @@ import AnkiGeneratorPlugin from './main';
 import { Card } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
 import { deleteAnkiNotes, createAnkiDeck, getCardCountForDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './anki/AnkiConnect';
-import { arrayBufferToBase64, basicMarkdownToHtml, normalizeNewlines } from './utils';
+import { arrayBufferToBase64, basicMarkdownToHtml, normalizeNewlines, convertObsidianLatexToAnki } from './utils';
 import { parseCardsFromBlockSource } from './anki/ankiParser';
 
 // --- NEUE, ROBUSTERE REGEX ---
@@ -155,6 +155,13 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 
 			processedQ = await processImages(processedQ);
 			processedA = await processImages(processedA);
+
+			// --- START CHANGE: LaTeX Konvertierung ---
+			// Konvertiere Obsidian $LaTeX$ zu Anki \(LaTeX\)
+			processedQ = convertObsidianLatexToAnki(processedQ);
+			processedA = convertObsidianLatexToAnki(processedA);
+			// --- END CHANGE ---
+
 			const htmlQ = basicMarkdownToHtml(processedQ);
 			const htmlA = basicMarkdownToHtml(processedA);
 			let ankiFieldQ = htmlQ;
