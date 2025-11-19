@@ -7,10 +7,8 @@ import { arrayBufferToBase64, basicMarkdownToHtml, normalizeNewlines, convertObs
 import { parseCardsFromBlockSource } from './anki/ankiParser';
 import { runGenerationProcess } from './generationManager';
 
-// --- NEUE, ROBUSTERE REGEX ---
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
-// Hauptfunktion für den Markdown Code Block Prozessor
 export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
 	el.empty();
 
@@ -41,7 +39,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 	const buttonContainer = el.createDiv({ cls: 'anki-button-container' });
 
-	// Button 1: Vorschau
 	const previewButton = buttonContainer.createEl('button', { text: 'Vorschau & Bearbeiten' });
 	previewButton.onclick = () => {
 		const cardsForModal = JSON.parse(JSON.stringify(cards)) as Card[];
@@ -51,13 +48,11 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		new CardPreviewModal(plugin.app, cardsForModal, onSave).open();
 	};
 
-	// Button 2: Sync
 	const syncButton = buttonContainer.createEl('button', { text: 'Mit Anki synchronisieren' });
 	syncButton.onclick = async () => {
 		await syncAnkiBlock(plugin, source, deckName, cards);
 	};
 
-	// Button 3: Schnell-Generieren (Priorität: Gemini > OpenAI > Ollama)
 	const quickGenButton = buttonContainer.createEl('button', { text: '⚡ KI Generieren' });
 	quickGenButton.title = "Generiert Karten (Gemini bevorzugt)";
 	quickGenButton.onclick = async () => {
@@ -69,7 +64,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
 		}
 
-		// Ermittele Provider basierend auf Konfiguration
 		const provider = plugin.settings.geminiApiKey ? 'gemini' :
 			(plugin.settings.openAiApiKey ? 'openai' :
 				(plugin.settings.ollamaEnabled ? 'ollama' : null));
@@ -79,7 +73,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		await runGenerationProcess(plugin, view.editor, provider, subdeck, "");
 	};
 
-	// Button 4: Lokal Generieren (Ollama) - Nur sichtbar wenn aktiviert
 	if (plugin.settings.ollamaEnabled) {
 		const localGenButton = buttonContainer.createEl('button', { text: '💻 Lokal (Ollama)' });
 		localGenButton.title = "Erzwingt Generierung mit dem lokalen Modell";
@@ -98,7 +91,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 }
 
 
-// Speichern der Änderungen aus dem Preview Modal
 async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceContent: string, updatedCards: Card[], deletedCardIds: number[]) {
 	const notice = new Notice('Speichere Änderungen...', 0);
 	try {
@@ -110,7 +102,6 @@ async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceC
 		if (!file) throw new Error("Keine aktive Datei.");
 		const currentFileContent = await plugin.app.vault.read(file);
 
-		// Verwende die robustere Funktion zum Finden des Blocks
 		const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
 
 		if (matchIndex === -1) {
@@ -120,7 +111,6 @@ async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceC
 		const deckLine = originalFullBlockSource.split('\n').find(l => l.trim().startsWith('TARGET DECK:')) || `TARGET DECK: ${plugin.settings.mainDeck}::Standard`;
 		const newBlockContent = formatCardsToString(deckLine, updatedCards);
 
-		// Formatierung: ```anki-cards\n[CONTENT]\n```
 		const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
 		const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
 
@@ -136,7 +126,6 @@ async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceC
 	}
 }
 
-// Synchronisation mit AnkiConnect
 async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent: string, deckName: string | null, cards: Card[]) {
 	const notice = new Notice('Synchronisiere mit Anki...', 0);
 	try {
@@ -145,33 +134,15 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 		if (!deckName) throw new Error("Kein 'TARGET DECK' im anki-cards Block gefunden.");
 		await createAnkiDeck(deckName);
 
-		// Vault Name abrufen
 		let vaultName = plugin.settings.vaultName;
-		if (!vaultName) {
-			try {
-				// @ts-ignore
-				vaultName = plugin.app.vault.getName();
-			} catch (e) { console.log("getName error", e); }
-		}
-		if (!vaultName) {
-			try {
-				// @ts-ignore
-				if (plugin.app.vault.adapter && plugin.app.vault.adapter.getName) {
-					// @ts-ignore
-					vaultName = plugin.app.vault.adapter.getName();
-				}
-			} catch (e) { console.log("adapter.getName error", e); }
-		}
-		if (!vaultName) {
-			vaultName = "Obsidian";
-			console.warn("Vault Name konnte nicht ermittelt werden. Verwende 'Obsidian'.");
-		}
+		if (!vaultName) { try { /* @ts-ignore */ vaultName = plugin.app.vault.getName(); } catch (e) { console.log("getName error", e); } }
+		if (!vaultName) { try { /* @ts-ignore */ if (plugin.app.vault.adapter && plugin.app.vault.adapter.getName) { /* @ts-ignore */ vaultName = plugin.app.vault.adapter.getName(); } } catch (e) { console.log("adapter.getName error", e); } }
+		if (!vaultName) { vaultName = "Obsidian"; console.warn("Vault Name konnte nicht ermittelt werden. Verwende 'Obsidian'."); }
 
 		const updatedCardsWithIds: Card[] = [];
 		const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
 
 		for (const card of cards) {
-			// --- FIX: Karten ohne Inhalt überspringen ---
 			if (!card.q || card.q.trim().length === 0) {
 				console.warn("Überspringe Karte mit leerer Frage:", card);
 				continue;
@@ -198,7 +169,6 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 					}
 					if (!imageName) continue;
 					if (imageProcessedMap.has(imageName)) {
-						// FIX: replaceAll -> split/join
 						processedText = processedText.split(originalLink).join(`<img src="${imageProcessedMap.get(imageName)}">`);
 						continue;
 					}
@@ -210,17 +180,14 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 							const base64Data = arrayBufferToBase64(fileData);
 							const ankiFilename = await storeAnkiMediaFile(file.name, base64Data);
 							imageProcessedMap.set(imageName, ankiFilename);
-							// FIX: replaceAll -> split/join
 							processedText = processedText.split(originalLink).join(`<img src="${ankiFilename}">`);
 						} else {
 							console.warn(`Bilddatei nicht gefunden beim Sync: ${imageName}`);
-							// FIX: replaceAll -> split/join
 							processedText = processedText.split(originalLink).join(`[Bild nicht gefunden: ${imageName}]`);
 						}
 					} catch (imgError) {
 						console.error(`Fehler bei Bild ${imageName} beim Sync:`, imgError);
 						new Notice(`Fehler bei Bild ${imageName}: ${imgError.message}`, 5000);
-						// FIX: replaceAll -> split/join
 						processedText = processedText.split(originalLink).join(`[Fehler bei Bild: ${imageName}]`);
 					}
 				}
@@ -251,7 +218,6 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 				ankiFieldA = "";
 			}
 
-			// --- FIX: Prüfen ob das Feld nach der Verarbeitung leer ist ---
 			if (card.type === 'Basic' && (!ankiFieldQ || ankiFieldQ.trim().length === 0)) {
 				console.warn("Überspringe Basic Karte (leeres Front-Feld):", originalQ);
 				continue;
@@ -263,17 +229,17 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 
 			if (!ankiNoteId) {
 				ankiNoteId = card.type === 'Basic'
-					? await findAnkiNoteId(originalQ)
-					: await findAnkiClozeNoteId(originalQ);
+					? await findAnkiNoteId(originalQ, plugin.settings.basicFrontField) // FIX: Feldname
+					: await findAnkiClozeNoteId(originalQ, plugin.settings.clozeTextField); // FIX: Feldname
 			}
 
 			if (ankiNoteId) {
 				try {
 					notice.setMessage(`Aktualisiere Karte ${ankiNoteId}...`);
 					if (card.type === 'Basic') {
-						await updateAnkiNoteFields(ankiNoteId, ankiFieldQ, ankiFieldA);
+						await updateAnkiNoteFields(ankiNoteId, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA); // FIX
 					} else {
-						await updateAnkiClozeNoteFields(ankiNoteId, ankiClozeTextField);
+						await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeTextField, ankiClozeTextField); // FIX
 					}
 				} catch (e) {
 					if (e.message?.includes("Note was not found")) {
@@ -287,22 +253,22 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 				try {
 					notice.setMessage(`Erstelle neue Karte für ${originalQ.substring(0, 30)}...`);
 					ankiNoteId = card.type === 'Basic'
-						? await addAnkiNote(deckName, plugin.settings.basicModelName, ankiFieldQ, ankiFieldA)
-						: await addAnkiClozeNote(deckName, plugin.settings.clozeModelName, ankiClozeTextField);
+						? await addAnkiNote(deckName, plugin.settings.basicModelName, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA) // FIX
+						: await addAnkiClozeNote(deckName, plugin.settings.clozeModelName, plugin.settings.clozeTextField, ankiClozeTextField); // FIX
 				} catch (e) {
 					if (e.message?.includes("cannot create note because it is a duplicate")) {
 						new Notice(`Duplikat gefunden. Suche ID...`, 3000);
 						ankiNoteId = card.type === 'Basic'
-							? await findAnkiNoteId(originalQ)
-							: await findAnkiClozeNoteId(originalQ);
+							? await findAnkiNoteId(originalQ, plugin.settings.basicFrontField) // FIX
+							: await findAnkiClozeNoteId(originalQ, plugin.settings.clozeTextField); // FIX
 						if (!ankiNoteId) {
 							throw new Error(`Duplikat "${originalQ.substring(0, 20)}..." ID nicht gefunden.`);
 						} else {
 							new Notice(`ID ${ankiNoteId} für Duplikat gefunden. Update...`);
 							if (card.type === 'Basic') {
-								await updateAnkiNoteFields(ankiNoteId, ankiFieldQ, ankiFieldA);
+								await updateAnkiNoteFields(ankiNoteId, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA); // FIX
 							} else {
-								await updateAnkiClozeNoteFields(ankiNoteId, ankiClozeTextField);
+								await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeTextField, ankiClozeTextField); // FIX
 							}
 						}
 					} else { throw e; }

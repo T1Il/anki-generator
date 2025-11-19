@@ -10,7 +10,7 @@ async function ankiConnectRequest(action: string, params: object): Promise<any> 
 		});
 		const json = response.json;
 		if (json.error) {
-			console.log("AnkiConnect Error:", json.error, "Params:", params); // Log bei Fehler
+			console.log("AnkiConnect Error:", json.error, "Params:", params);
 			throw new Error(json.error);
 		}
 		return json.result;
@@ -29,9 +29,10 @@ export async function getCardCountForDeck(deckName: string): Promise<number> {
 	return result ? result.length : 0;
 }
 
-export async function findAnkiNoteId(front: string): Promise<number | null> {
+export async function findAnkiNoteId(front: string, frontFieldName: string): Promise<number | null> {
 	const escapedFront = front.replace(/"/g, '\\"');
-	const query = `Front:"${escapedFront}"`;
+	// Suche dynamisch nach dem Feldnamen
+	const query = `${frontFieldName}:"${escapedFront}"`;
 	const noteIds = await ankiConnectRequest('findNotes', { query });
 	if (noteIds && noteIds.length > 0) {
 		return noteIds[0];
@@ -39,11 +40,10 @@ export async function findAnkiNoteId(front: string): Promise<number | null> {
 	return null;
 }
 
-export async function findAnkiClozeNoteId(questionText: string): Promise<number | null> {
-	// WICHTIG: Suche nach dem Feld *ohne* die Cloze-Ersetzung, aber mit Wildcard statt ____
+export async function findAnkiClozeNoteId(questionText: string, textFieldName: string): Promise<number | null> {
 	const searchQuery = questionText.replace(/____/g, '*').replace(/"/g, '\\"');
-	// Standardmäßig heißt das erste Feld bei Cloze-Notizen "Text"
-	const query = `Text:"${searchQuery}"`;
+	// Suche dynamisch nach dem Textfeld
+	const query = `${textFieldName}:"${searchQuery}"`;
 	const noteIds = await ankiConnectRequest('findNotes', { query });
 	if (noteIds && noteIds.length > 0) {
 		return noteIds[0];
@@ -60,12 +60,16 @@ export async function createAnkiDeck(deckName: string): Promise<void> {
 	return ankiConnectRequest('createDeck', { deck: deckName });
 }
 
-export async function addAnkiNote(deckName: string, modelName: string, front: string, back: string): Promise<number> {
+export async function addAnkiNote(deckName: string, modelName: string, frontField: string, backField: string, front: string, back: string): Promise<number> {
+	const fields: any = {};
+	fields[frontField] = front;
+	fields[backField] = back;
+
 	const result = await ankiConnectRequest('addNote', {
 		note: {
 			deckName,
 			modelName,
-			fields: { Front: front, Back: back },
+			fields: fields,
 			tags: []
 		}
 	});
@@ -75,14 +79,15 @@ export async function addAnkiNote(deckName: string, modelName: string, front: st
 	return result;
 }
 
-export async function addAnkiClozeNote(deckName: string, modelName: string, text: string): Promise<number> {
-	// Der 'text' Parameter sollte hier bereits den formatierten Cloze-Text enthalten (z.B. "Hauptstadt ist {{c1::Berlin}}.")
+export async function addAnkiClozeNote(deckName: string, modelName: string, textField: string, text: string): Promise<number> {
+	const fields: any = {};
+	fields[textField] = text;
+
 	const result = await ankiConnectRequest('addNote', {
 		note: {
 			deckName,
 			modelName,
-			// Standardmäßig heißt das Feld für Cloze "Text"
-			fields: { Text: text },
+			fields: fields,
 			tags: []
 		}
 	});
@@ -92,41 +97,43 @@ export async function addAnkiClozeNote(deckName: string, modelName: string, text
 	return result;
 }
 
-export async function updateAnkiNoteFields(id: number, front: string, back: string): Promise<void> {
+export async function updateAnkiNoteFields(id: number, frontField: string, backField: string, front: string, back: string): Promise<void> {
+	const fields: any = {};
+	fields[frontField] = front;
+	fields[backField] = back;
+
 	return ankiConnectRequest('updateNoteFields', {
 		note: {
 			id,
-			fields: { Front: front, Back: back }
+			fields: fields
 		}
 	});
 }
 
-export async function updateAnkiClozeNoteFields(id: number, textWithCloze: string): Promise<void> {
-	// Der 'textWithCloze' Parameter enthält den vollständigen Text mit {{c1::...}}
+export async function updateAnkiClozeNoteFields(id: number, textField: string, textWithCloze: string): Promise<void> {
+	const fields: any = {};
+	fields[textField] = textWithCloze;
+
 	return ankiConnectRequest('updateNoteFields', {
 		note: {
 			id,
-			// Standardmäßig heißt das Feld für Cloze "Text"
-			fields: { Text: textWithCloze }
+			fields: fields
 		}
 	});
 }
 
-// --- NEUE FUNKTION ZUM HOCHLADEN VON MEDIEN ---
 export async function storeAnkiMediaFile(filename: string, base64Data: string): Promise<string> {
 	try {
 		const result = await ankiConnectRequest('storeMediaFile', {
-			filename: filename, // Gewünschter Dateiname
-			data: base64Data    // Bilddaten als Base64-String
+			filename: filename,
+			data: base64Data
 		});
 		if (!result || typeof result !== 'string') {
 			throw new Error(`Anki hat keinen gültigen Dateinamen für ${filename} zurückgegeben (Antwort: ${result}).`);
 		}
-		// Anki gibt den tatsächlich verwendeten Dateinamen zurück
 		return result;
 	} catch (e) {
 		console.error(`Fehler beim Speichern der Mediendatei ${filename} in Anki:`, e);
 		throw new Error(`Konnte Mediendatei ${filename} nicht in Anki speichern. ${e.message}`);
 	}
 }
-// --- ENDE NEUE FUNKTION ---
