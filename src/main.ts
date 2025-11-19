@@ -61,10 +61,3 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 }
-
-// Typdeklaration für parseAnkiSection (bleibt notwendig für Typsicherheit)
-declare module './anki/ankiParser' {
-	export function parseAnkiSection(editor: Editor | null, mainDeck: string, blockContentOverride?: string): { subdeck: string; deckLineNumber: number; existingCardsText: string; } | null;
-	// Überladung beibehalten, falls sie spezifisch genutzt wird
-	export function parseAnkiSection(editor: Editor, mainDeck: string): { subdeck: string; deckLineNumber: number; existingCardsText: string; } | null;
-}

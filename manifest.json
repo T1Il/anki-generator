@@ -4,7 +4,7 @@
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Creates anki cards using Google Gemini",
-	"author": "Obsidian",
+	"author": "T1Il",
 	"authorUrl": "https://github.com/T1Il/",
 	"isDesktopOnly": false
 }

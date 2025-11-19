@@ -192,7 +192,8 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 					}
 					if (!imageName) continue;
 					if (imageProcessedMap.has(imageName)) {
-						processedText = processedText.replaceAll(originalLink, `<img src="${imageProcessedMap.get(imageName)}">`);
+						// FIX: replaceAll -> split/join
+						processedText = processedText.split(originalLink).join(`<img src="${imageProcessedMap.get(imageName)}">`);
 						continue;
 					}
 					try {
@@ -203,15 +204,18 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 							const base64Data = arrayBufferToBase64(fileData);
 							const ankiFilename = await storeAnkiMediaFile(file.name, base64Data);
 							imageProcessedMap.set(imageName, ankiFilename);
-							processedText = processedText.replaceAll(originalLink, `<img src="${ankiFilename}">`);
+							// FIX: replaceAll -> split/join
+							processedText = processedText.split(originalLink).join(`<img src="${ankiFilename}">`);
 						} else {
 							console.warn(`Bilddatei nicht gefunden beim Sync: ${imageName}`);
-							processedText = processedText.replaceAll(originalLink, `[Bild nicht gefunden: ${imageName}]`);
+							// FIX: replaceAll -> split/join
+							processedText = processedText.split(originalLink).join(`[Bild nicht gefunden: ${imageName}]`);
 						}
 					} catch (imgError) {
 						console.error(`Fehler bei Bild ${imageName} beim Sync:`, imgError);
 						new Notice(`Fehler bei Bild ${imageName}: ${imgError.message}`, 5000);
-						processedText = processedText.replaceAll(originalLink, `[Fehler bei Bild: ${imageName}]`);
+						// FIX: replaceAll -> split/join
+						processedText = processedText.split(originalLink).join(`[Fehler bei Bild: ${imageName}]`);
 					}
 				}
 				return processedText;
