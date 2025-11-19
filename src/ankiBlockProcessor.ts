@@ -171,6 +171,12 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 		const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
 
 		for (const card of cards) {
+			// --- FIX: Karten ohne Inhalt überspringen ---
+			if (!card.q || card.q.trim().length === 0) {
+				console.warn("Überspringe Karte mit leerer Frage:", card);
+				continue;
+			}
+
 			notice.setMessage(`Verarbeite Karte: ${card.q.substring(0, 30)}...`);
 			let ankiNoteId = card.id;
 			const originalQ = card.q;
@@ -243,6 +249,16 @@ async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent:
 					: `${htmlQ} {{c1::${htmlA}}}`;
 				ankiFieldQ = ankiClozeTextField;
 				ankiFieldA = "";
+			}
+
+			// --- FIX: Prüfen ob das Feld nach der Verarbeitung leer ist ---
+			if (card.type === 'Basic' && (!ankiFieldQ || ankiFieldQ.trim().length === 0)) {
+				console.warn("Überspringe Basic Karte (leeres Front-Feld):", originalQ);
+				continue;
+			}
+			if (card.type === 'Cloze' && (!ankiClozeTextField || ankiClozeTextField.trim().length === 0)) {
+				console.warn("Überspringe Cloze Karte (leeres Text-Feld):", originalQ);
+				continue;
 			}
 
 			if (!ankiNoteId) {
