@@ -11,10 +11,40 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         if (!deckName) throw new Error("Kein 'TARGET DECK' im anki-cards Block gefunden.");
         await createAnkiDeck(deckName);
 
+        // Get vault name from various sources
         let vaultName = plugin.settings.vaultName;
-        if (!vaultName) { try { /* @ts-ignore */ vaultName = plugin.app.vault.getName(); } catch (e) { console.log("getName error", e); } }
-        if (!vaultName) { try { /* @ts-ignore */ if (plugin.app.vault.adapter && plugin.app.vault.adapter.getName) { /* @ts-ignore */ vaultName = plugin.app.vault.adapter.getName(); } } catch (e) { console.log("adapter.getName error", e); } }
-        if (!vaultName) { vaultName = "Obsidian"; console.warn("Vault Name konnte nicht ermittelt werden. Verwende 'Obsidian'."); }
+
+        // Try to get actual vault name from Obsidian
+        if (!vaultName || vaultName === 'My Vault') {
+            try {
+                // Try getting from adapter basePath (most reliable)
+                /* @ts-ignore */
+                const basePath = plugin.app.vault.adapter.basePath;
+                if (basePath) {
+                    // Extract folder name from path
+                    const pathParts = basePath.split(/[\\/]/);
+                    vaultName = pathParts[pathParts.length - 1] || vaultName;
+                }
+            } catch (e) {
+                console.log("basePath error", e);
+            }
+        }
+
+        if (!vaultName || vaultName === 'My Vault') {
+            try {
+                /* @ts-ignore */
+                vaultName = plugin.app.vault.getName();
+            } catch (e) {
+                console.log("getName error", e);
+            }
+        }
+
+        if (!vaultName) {
+            vaultName = "Obsidian";
+            console.warn("Vault Name konnte nicht ermittelt werden. Verwende 'Obsidian'.");
+        }
+
+        console.log("Using vault name:", vaultName);
 
         const updatedCardsWithIds: Card[] = [];
         const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
@@ -105,18 +135,23 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
             }
 
             if (!ankiNoteId) {
-                ankiNoteId = card.type === 'Basic'
-                    ? await findAnkiNoteId(originalQ, plugin.settings.basicFrontField)
-                    : await findAnkiClozeNoteId(originalQ, plugin.settings.clozeTextField);
+                if (card.type === 'Basic') {
+                    const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                    ankiNoteId = await findAnkiNoteId(originalQ, frontField);
+                } else {
+                    ankiNoteId = await findAnkiClozeNoteId(originalQ, plugin.settings.clozeText);
+                }
             }
 
             if (ankiNoteId) {
                 try {
                     notice.setMessage(`Aktualisiere Karte ${ankiNoteId}...`);
                     if (card.type === 'Basic') {
-                        await updateAnkiNoteFields(ankiNoteId, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA);
+                        const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                        const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+                        await updateAnkiNoteFields(ankiNoteId, frontField, backField, ankiFieldQ, ankiFieldA);
                     } else {
-                        await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeTextField, ankiClozeTextField);
+                        await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeText, ankiClozeTextField);
                     }
                 } catch (e) {
                     if (e.message?.includes("Note was not found")) {
@@ -129,23 +164,33 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
             if (!ankiNoteId) {
                 try {
                     notice.setMessage(`Erstelle neue Karte für ${originalQ.substring(0, 30)}...`);
-                    ankiNoteId = card.type === 'Basic'
-                        ? await addAnkiNote(deckName, plugin.settings.basicModelName, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA)
-                        : await addAnkiClozeNote(deckName, plugin.settings.clozeModelName, plugin.settings.clozeTextField, ankiClozeTextField);
+                    if (card.type === 'Basic') {
+                        const model = card.typeIn ? plugin.settings.typeInModel : plugin.settings.basicModel;
+                        const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                        const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+                        ankiNoteId = await addAnkiNote(deckName, model, frontField, backField, ankiFieldQ, ankiFieldA);
+                    } else {
+                        ankiNoteId = await addAnkiClozeNote(deckName, plugin.settings.clozeModel, plugin.settings.clozeText, ankiClozeTextField);
+                    }
                 } catch (e) {
                     if (e.message?.includes("cannot create note because it is a duplicate")) {
                         new Notice(`Duplikat gefunden. Suche ID...`, 3000);
-                        ankiNoteId = card.type === 'Basic'
-                            ? await findAnkiNoteId(originalQ, plugin.settings.basicFrontField)
-                            : await findAnkiClozeNoteId(originalQ, plugin.settings.clozeTextField);
+                        if (card.type === 'Basic') {
+                            const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                            ankiNoteId = await findAnkiNoteId(originalQ, frontField);
+                        } else {
+                            ankiNoteId = await findAnkiClozeNoteId(originalQ, plugin.settings.clozeText);
+                        }
                         if (!ankiNoteId) {
                             throw new Error(`Duplikat "${originalQ.substring(0, 20)}..." ID nicht gefunden.`);
                         } else {
                             new Notice(`ID ${ankiNoteId} für Duplikat gefunden. Update...`);
                             if (card.type === 'Basic') {
-                                await updateAnkiNoteFields(ankiNoteId, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA);
+                                const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                                const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+                                await updateAnkiNoteFields(ankiNoteId, frontField, backField, ankiFieldQ, ankiFieldA);
                             } else {
-                                await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeTextField, ankiClozeTextField);
+                                await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeText, ankiClozeTextField);
                             }
                         }
                     } else { throw e; }
@@ -161,8 +206,14 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
             throw new Error("Konnte den zu synchronisierenden Anki-Block nicht finden.");
         }
 
+        const lines = originalFullBlockSource.split('\n');
+        const instructionLine = lines.find(l => l.trim().startsWith('INSTRUCTION:'));
+        const statusLine = lines.find(l => l.trim().startsWith('STATUS:'));
+        const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : undefined;
+        const status = statusLine ? statusLine.replace('STATUS:', '').trim() : undefined;
+
         const deckLine = `TARGET DECK: ${deckName}`;
-        const newBlockContent = formatCardsToString(deckLine, updatedCardsWithIds);
+        const newBlockContent = formatCardsToString(deckLine, updatedCardsWithIds, instruction, status);
         const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
         const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
 
@@ -196,13 +247,18 @@ export async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, original
             throw new Error("Konnte den zu speichernden Anki-Block nicht finden.");
         }
 
-        let deckLine = originalFullBlockSource.split('\n').find(l => l.trim().startsWith('TARGET DECK:')) || `TARGET DECK: ${plugin.settings.mainDeck}::Standard`;
+        const lines = originalFullBlockSource.split('\n');
+        let deckLine = lines.find(l => l.trim().startsWith('TARGET DECK:')) || `TARGET DECK: ${plugin.settings.mainDeck}::Standard`;
+        const instructionLine = lines.find(l => l.trim().startsWith('INSTRUCTION:'));
+        const statusLine = lines.find(l => l.trim().startsWith('STATUS:'));
+        const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : undefined;
+        const status = statusLine ? statusLine.replace('STATUS:', '').trim() : undefined;
 
         if (newDeckName) {
             deckLine = `TARGET DECK: ${newDeckName}`;
         }
 
-        const newBlockContent = formatCardsToString(deckLine, updatedCards);
+        const newBlockContent = formatCardsToString(deckLine, updatedCards, instruction, status);
 
         const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
         const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);

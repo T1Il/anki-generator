@@ -9,6 +9,7 @@ import { parseAnkiSection } from './anki/ankiParser';
 import { generateCardsWithAI } from './aiGenerator';
 import { ImageInput } from './types';
 import { arrayBufferToBase64, getMimeType } from './utils';
+import { t } from './lang/helpers';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
@@ -37,7 +38,7 @@ export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor:
 	} else if (ollamaAvailable) {
 		startGen('ollama');
 	} else {
-		new Notice('Kein KI-Modell konfiguriert.', 7000);
+		new Notice(t('notice.noAiModel'), 7000);
 	}
 }
 
@@ -65,36 +66,40 @@ export async function runGenerationProcess(
 	subdeck: string,
 	additionalInstructions: string = ''
 ): Promise<string> {
-	let notice = new Notice(`Bereite Anki-Block für ${provider} vor...`, 0);
+	let notice = new Notice(t('notice.preparing', { provider }), 0);
 
 	try {
 		const sub = subdeck || 'Standard';
 		const fullDeckPath = `${plugin.settings.mainDeck}::${sub}`;
 
-		const { blockStartIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath);
+		// Ensure block exists AND update header (Instruction, clear Status)
+		// Pass undefined for instruction if it's empty string, so we don't overwrite existing instruction with empty.
+		const instructionToUpdate = additionalInstructions && additionalInstructions.trim().length > 0 ? additionalInstructions : undefined;
+		const { blockStartIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath, instructionToUpdate, undefined);
 		console.log(`ensureAnkiBlock completed. Start: ${blockStartIndex}, InsertionPoint Line: ${insertionPoint.line}, Ch: ${insertionPoint.ch}`);
 
-		notice.setMessage(`Lese vorhandene Karten...`);
+		notice.setMessage(t('notice.readingCards'));
 		const currentAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
 		const existingCards = currentAnkiInfo?.existingCardsText || 'Keine.';
 		console.log("--- Existing Cards sent to AI (after ensureAnkiBlock) ---\n", existingCards, "\n--- End Existing Cards ---");
 
-		notice.setMessage(`Suche Bilder im Text...`);
+		notice.setMessage(t('notice.searchingImages'));
 		const currentContentForAI = editor.getValue();
 
-		// Bilder extrahieren
+		// Bilder extrahieren und Content vorbereiten
 		const activeFile = plugin.app.workspace.getActiveFile();
-		const images = await extractImagesFromContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
+		const { images, preparedContent } = await extractImagesAndPrepareContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
+
 		if (images.length > 0) {
-			notice.setMessage(`Gefunden: ${images.length} Bilder. Generiere Karten mit ${provider}...`);
+			notice.setMessage(t('notice.foundImages', { count: images.length, provider }));
 		} else {
-			notice.setMessage(`Generiere Karten mit ${provider}...`);
+			notice.setMessage(t('notice.generating', { provider }));
 		}
 
 		// --- ÜBERGABE der images an generateCardsWithAI ---
 		const { cards: generatedTextRaw, feedback } = await generateCardsWithAI(
 			plugin.app,
-			currentContentForAI,
+			preparedContent, // Nutze den vorbereiteten Content mit Bild-Markern
 			existingCards,
 			provider,
 			plugin.settings,
@@ -106,7 +111,7 @@ export async function runGenerationProcess(
 		console.log("runGenerationProcess received feedback:", feedback ? "YES (Length: " + feedback.length + ")" : "NO");
 
 		if (!generatedTextRaw) {
-			new Notice("Keine Karten generiert.");
+			new Notice(t('notice.noCardsGenerated'));
 			return "";
 		}
 
@@ -132,11 +137,11 @@ export async function runGenerationProcess(
 			console.log("Inserting generated text at:", insertionPoint);
 			insertGeneratedText(editor, blockStartIndex, insertionPoint, generatedText);
 			notice.hide();
-			new Notice(`Anki-Block wurde mit ${provider} aktualisiert/hinzugefügt.`);
+			new Notice(t('notice.updated', { provider }));
 			return feedback;
 		} else if (!generatedText) {
 			notice.hide();
-			new Notice(`Kein neuer Text von ${provider} generiert. Prüfe die Konsole (Strg+Shift+I) für Details.`, 7000);
+			new Notice(t('notice.noNewText', { provider }), 7000);
 			return "";
 		} else {
 			throw new Error("Interner Fehler: Einfügepunkt war ungültig nach ensureAnkiBlock.");
@@ -145,6 +150,17 @@ export async function runGenerationProcess(
 	} catch (error) {
 		notice.hide();
 		console.error(`Fehler bei der Kartengenerierung mit ${provider} (in runGenerationProcess):`, error);
+
+		// Check for Overload
+		if ((error as any).isOverloaded) {
+			// Update block with OVERLOADED status
+			const sub = subdeck || 'Standard';
+			const fullDeckPath = `${plugin.settings.mainDeck}::${sub}`;
+			await ensureAnkiBlock(editor, fullDeckPath, additionalInstructions, 'OVERLOADED');
+			new Notice(t('anki.status.overloaded'), 10000);
+			return "";
+		}
+
 		if (!(error instanceof Error && (error.message.startsWith("API Fehler") || error.message.startsWith("Netzwerkfehler")))) {
 			new Notice(`Fehler: ${error.message}`, 7000);
 		}
@@ -152,56 +168,93 @@ export async function runGenerationProcess(
 	}
 }
 
-// Neue Funktion zum Extrahieren und Laden von Bildern
-async function extractImagesFromContent(plugin: AnkiGeneratorPlugin, content: string, sourcePath: string): Promise<ImageInput[]> {
+// Neue Funktion zum Extrahieren und Laden von Bildern UND Vorbereiten des Contents
+async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin, content: string, sourcePath: string): Promise<{ images: ImageInput[], preparedContent: string }> {
 	const images: ImageInput[] = [];
+	let preparedContent = content;
+
 	// Regex für ![[bild.png]] und ![alt](bild.png)
-	const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
+	// Wir nutzen capture groups um den ganzen Match zu identifizieren
+	const imageRegex = /(!\[\[((?:[^|\]]+)(?:\|[^\]]+)?)\]\]|!\[[^\]]*\]\(([^)]+)\))/g;
+
+	// Wir müssen die Matches sammeln und dann den Content bearbeiten.
+	// Da sich die Indizes verschieben, wenn wir Text einfügen, arbeiten wir von hinten nach vorne oder nutzen Split/Join.
+	// Einfacher: Wir bauen den Content neu auf oder nutzen replace mit einer Funktion, aber wir brauchen async für das Laden der Bilder.
+	// Da replace keine async funktion unterstützt, sammeln wir erst alle Infos.
+
 	const matches = Array.from(content.matchAll(imageRegex));
+	const replacements: { index: number, length: number, replacement: string }[] = [];
 
 	for (const match of matches) {
-		let imageName = match[1]?.trim(); // Wiki-Link Format
-		if (!imageName && match[2]) {
-			// Markdown Link Format
-			try {
-				imageName = decodeURIComponent(match[2]);
-			} catch (e) {
-				imageName = match[2];
-			}
+		const fullMatch = match[1];
+		let imageName = match[2]?.trim(); // Wiki-Link (ohne Pipe) - wait match[2] includes pipe? Regex above: ([^|\]]+) is inside match[2]? No.
+		// Let's adjust regex logic slightly for clarity or rely on existing.
+		// Existing: /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g
+		// My new regex: /(!\[\[((?:[^|\]]+)(?:\|[^\]]+)?)\]\]|!\[[^\]]*\]\(([^)]+)\))/g
+		// Group 1: Full match
+		// Group 2: Wiki inner (potentially with pipe? No, the regex is tricky).
+
+		// Let's stick to the logic: extract name, load image, if success -> mark.
+
+		// Re-using the logic from before but careful with groups.
+		// match[0] is full match.
+		// match[1] is also full match because of outer parens in regex.
+		// match[2] is Wiki link content (inner).
+		// match[3] is Markdown link URL.
+
+		let extractedName = match[2]?.trim();
+		if (!extractedName && match[3]) {
+			try { extractedName = decodeURIComponent(match[3]); } catch (e) { extractedName = match[3]; }
 		}
 
-		if (!imageName) continue;
+		if (!extractedName) continue;
 
-		// Entferne Query-Parameter
-		imageName = imageName.split('#')[0].split('?')[0];
-
-		// Nur Bilddateien verarbeiten
-		if (!imageName.match(/\.(jpg|jpeg|png|webp|heic|heif)$/i)) continue;
+		// Clean name
+		let cleanName = extractedName.split('#')[0].split('?')[0];
+		if (!cleanName.match(/\.(jpg|jpeg|png|webp|heic|heif)$/i)) continue;
 
 		try {
-			const file = plugin.app.metadataCache.getFirstLinkpathDest(normalizePath(imageName), sourcePath);
+			const file = plugin.app.metadataCache.getFirstLinkpathDest(normalizePath(cleanName), sourcePath);
 			if (file instanceof TFile) {
 				const arrayBuffer = await plugin.app.vault.readBinary(file);
 				const base64 = arrayBufferToBase64(arrayBuffer);
 				const mimeType = getMimeType(file.extension);
 
-				if (!images.some(img => img.filename === file.name)) {
-					images.push({
-						base64,
-						mimeType,
-						filename: file.name
+				// Check if already added
+				let imgIndex = images.findIndex(img => img.filename === file.name);
+				if (imgIndex === -1) {
+					images.push({ base64, mimeType, filename: file.name });
+					imgIndex = images.length - 1;
+				}
+
+				// Mark this match in content
+				// We want to append (Image X) to the match.
+				// match[0] is the link.
+				if (match.index !== undefined) {
+					replacements.push({
+						index: match.index,
+						length: match[0].length,
+						replacement: `${match[0]} <!-- Image ${imgIndex + 1}: ${file.name} -->`
 					});
 				}
 			}
 		} catch (e) {
-			console.warn(`Konnte Bild ${imageName} nicht laden:`, e);
+			console.warn(`Konnte Bild ${cleanName} nicht laden:`, e);
 		}
 	}
-	return images;
+
+	// Apply replacements from back to front to avoid index shifts
+	replacements.sort((a, b) => b.index - a.index);
+
+	for (const rep of replacements) {
+		preparedContent = preparedContent.substring(0, rep.index) + rep.replacement + preparedContent.substring(rep.index + rep.length);
+	}
+
+	return { images, preparedContent };
 }
 
-// Stellt sicher, dass ein Anki-Block existiert
-async function ensureAnkiBlock(editor: Editor, fullDeckPath: string): Promise<{ blockStartIndex: number, blockEndIndex: number, insertionPoint: CodeMirror.Position }> {
+// Stellt sicher, dass ein Anki-Block existiert und aktualisiert Header-Daten (Deck, Instruction, Status)
+async function ensureAnkiBlock(editor: Editor, fullDeckPath: string, instruction?: string, status?: string | null): Promise<{ blockStartIndex: number, blockEndIndex: number, insertionPoint: CodeMirror.Position }> {
 	let fileContent = editor.getValue();
 	ANKI_BLOCK_REGEX.lastIndex = 0;
 	let matches = [...fileContent.matchAll(ANKI_BLOCK_REGEX)];
@@ -216,15 +269,82 @@ async function ensureAnkiBlock(editor: Editor, fullDeckPath: string): Promise<{ 
 		const sourceBlock = lastMatch[0];
 		const blockContent = lastMatch[1] || "";
 		const blockLines = blockContent.trim().split('\n');
+
 		const deckLine = blockLines.find(l => l.trim().startsWith('TARGET DECK:'));
+		const currentDeck = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
+
+		const instructionLine = blockLines.find(l => l.trim().startsWith('INSTRUCTION:'));
+		const currentInstruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : null;
+
+		const disabledInstructionLine = blockLines.find(l => l.trim().startsWith('# INSTRUCTION:'));
+		const currentDisabledInstruction = disabledInstructionLine ? disabledInstructionLine.replace('# INSTRUCTION:', '').trim() : null;
+
+		const statusLine = blockLines.find(l => l.trim().startsWith('STATUS:'));
+		const currentStatus = statusLine ? statusLine.replace('STATUS:', '').trim() : null;
 
 		blockStartIndex = lastMatch.index;
 		blockSourceLength = sourceBlock.length;
 
-		if (!deckLine || deckLine.replace('TARGET DECK:', '').trim() !== fullDeckPath) {
-			console.log("Deck line needs update or is missing. Updating block.");
-			const linesToKeep = blockLines.filter(l => !l.trim().startsWith('TARGET DECK:'));
+		// Check if update is needed
+		const deckNeedsUpdate = currentDeck !== fullDeckPath;
+		const instructionNeedsUpdate = instruction !== undefined && currentInstruction !== instruction;
+		// If status is passed (string or null/empty to clear), check if it differs. 
+		// If status is undefined, we ignore it (don't update).
+		// But we want to clear it if null/empty is passed.
+		const statusNeedsUpdate = status !== undefined && currentStatus !== (status || null); // Treat empty string as null for comparison
+
+		if (deckNeedsUpdate || instructionNeedsUpdate || statusNeedsUpdate) {
+			console.log("Block header needs update. Reconstructing block.");
+
+			// Filter out header lines to keep content
+			const linesToKeep = blockLines.filter(l =>
+				!l.trim().startsWith('TARGET DECK:') &&
+				!l.trim().startsWith('INSTRUCTION:') &&
+				!l.trim().startsWith('# INSTRUCTION:') &&
+				!l.trim().startsWith('STATUS:')
+			);
+
 			let newBlockInternalContent = `TARGET DECK: ${fullDeckPath}`;
+
+			// Instruction
+			if (instruction !== undefined) {
+				if (instruction && instruction.trim().length > 0) {
+					newBlockInternalContent += `\nINSTRUCTION: ${instruction.trim()}`;
+					// If we set a new instruction, we should probably remove the disabled one if it's the same?
+					// Or just keep it. Let's keep existing disabled instruction unless it conflicts?
+					// Actually, if we set a new instruction, we might want to keep the disabled one if it's different.
+					// But usually 'instruction' argument comes from the modal (additional instructions).
+					// If the user adds a NEW instruction via modal, it becomes the active one.
+					if (currentDisabledInstruction) {
+						newBlockInternalContent += `\n# INSTRUCTION: ${currentDisabledInstruction}`;
+					}
+				}
+				// If instruction is empty string, we don't add the line.
+				// But we should preserve the disabled one if it exists.
+				else if (currentDisabledInstruction) {
+					newBlockInternalContent += `\n# INSTRUCTION: ${currentDisabledInstruction}`;
+				}
+			} else {
+				// Keep existing if not provided
+				if (currentInstruction) {
+					newBlockInternalContent += `\nINSTRUCTION: ${currentInstruction}`;
+				}
+				if (currentDisabledInstruction) {
+					newBlockInternalContent += `\n# INSTRUCTION: ${currentDisabledInstruction}`;
+				}
+			}
+
+			// Status
+			if (status !== undefined) {
+				if (status && status.trim().length > 0) {
+					newBlockInternalContent += `\nSTATUS: ${status.trim()}`;
+				}
+				// If status is null/empty, we don't add the line (removing it)
+			} else if (currentStatus) {
+				// Keep existing if not provided
+				newBlockInternalContent += `\nSTATUS: ${currentStatus}`;
+			}
+
 			if (linesToKeep.length > 0 && linesToKeep.some(l => l.trim().length > 0)) {
 				newBlockInternalContent += `\n\n${linesToKeep.join('\n')}`;
 			} else {
@@ -244,7 +364,15 @@ async function ensureAnkiBlock(editor: Editor, fullDeckPath: string): Promise<{ 
 
 	} else {
 		console.log("No anki-cards block found. Creating a new one.");
-		const output = `\n\n## Anki\n\n\`\`\`anki-cards\nTARGET DECK: ${fullDeckPath}\n\n\`\`\``;
+		let newBlockInternalContent = `TARGET DECK: ${fullDeckPath}`;
+		if (instruction && instruction.trim().length > 0) {
+			newBlockInternalContent += `\nINSTRUCTION: ${instruction.trim()}`;
+		}
+		if (status && status.trim().length > 0) {
+			newBlockInternalContent += `\nSTATUS: ${status.trim()}`;
+		}
+
+		const output = `\n\n## Anki\n\n\`\`\`anki-cards\n${newBlockInternalContent}\n\n\`\`\``;
 		const lastLine = editor.lastLine();
 		const endOfDocument = { line: lastLine, ch: editor.getLine(lastLine).length };
 		editor.replaceRange(output, endOfDocument);

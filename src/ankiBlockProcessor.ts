@@ -1,4 +1,4 @@
-import { MarkdownPostProcessorContext, Notice, MarkdownView } from 'obsidian';
+import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { Card } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
@@ -7,6 +7,7 @@ import { parseCardsFromBlockSource } from './anki/ankiParser';
 import { runGenerationProcess } from './generationManager';
 import { syncAnkiBlock, saveAnkiBlockChanges } from './anki/syncManager';
 import { generateFeedbackOnly } from './aiGenerator';
+import { t } from './lang/helpers';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
@@ -16,25 +17,131 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	const linesForDeck = source.trim().split('\n');
 	const deckLine = linesForDeck.find(l => l.trim().startsWith('TARGET DECK:'));
 	const deckName = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
+
+	const instructionLine = linesForDeck.find(l => l.trim().startsWith('INSTRUCTION:'));
+	const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : null;
+
+	const disabledInstructionLine = linesForDeck.find(l => l.trim().startsWith('# INSTRUCTION:'));
+	const disabledInstruction = disabledInstructionLine ? disabledInstructionLine.replace('# INSTRUCTION:', '').trim() : null;
+
+	const statusLine = linesForDeck.find(l => l.trim().startsWith('STATUS:'));
+	const status = statusLine ? statusLine.replace('STATUS:', '').trim() : null;
+
 	const cards = parseCardsFromBlockSource(source);
 
 	el.createEl('h4', { text: 'Anki-Karten' });
 
+	// --- STATUS WARNING ---
+	if (status === 'OVERLOADED') {
+		const warningEl = el.createDiv({ cls: 'anki-warning' });
+		warningEl.style.backgroundColor = 'rgba(255, 165, 0, 0.2)';
+		warningEl.style.border = '1px solid orange';
+		warningEl.style.padding = '10px';
+		warningEl.style.marginBottom = '10px';
+		warningEl.style.borderRadius = '5px';
+		warningEl.style.display = 'flex';
+		warningEl.style.justifyContent = 'space-between';
+		warningEl.style.alignItems = 'center';
+
+		warningEl.createEl('strong', { text: t('anki.status.overloaded') });
+
+		const closeWarningBtn = warningEl.createEl('button', { text: '✖' });
+		closeWarningBtn.style.background = 'transparent';
+		closeWarningBtn.style.border = 'none';
+		closeWarningBtn.style.cursor = 'pointer';
+		closeWarningBtn.style.fontSize = '1.2em';
+		closeWarningBtn.style.padding = '0 5px';
+		closeWarningBtn.onclick = async () => {
+			const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
+			if (file instanceof TFile) {
+				const content = await plugin.app.vault.read(file);
+				let newContent = content;
+				const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+				const matches = [...content.matchAll(blockRegex)];
+				const match = matches.find(m => m[1].trim() === source.trim());
+
+				if (match) {
+					const fullBlock = match[0];
+					const newBlock = fullBlock.replace(`STATUS: ${status}`, ''); // Remove status line
+					// Clean up empty lines if needed, but simple replace is safer for now
+					newContent = content.replace(fullBlock, newBlock);
+					await plugin.app.vault.modify(file, newContent);
+				}
+			}
+		};
+	}
+
+	// --- INSTRUCTION DISPLAY ---
+	if (instruction || disabledInstruction) {
+		const instructionEl = el.createDiv({ cls: 'anki-instruction' });
+		const isEnabled = !!instruction;
+		const text = isEnabled ? instruction : disabledInstruction;
+
+		instructionEl.style.color = isEnabled ? '#4a90e2' : '#888'; // Blue or Gray
+		instructionEl.style.fontStyle = 'italic';
+		instructionEl.style.borderLeft = isEnabled ? '3px solid #4a90e2' : '3px solid #888';
+		instructionEl.style.paddingLeft = '10px';
+		instructionEl.style.marginBottom = '10px';
+		instructionEl.style.display = 'flex';
+		instructionEl.style.justifyContent = 'space-between';
+		instructionEl.style.alignItems = 'center';
+
+		const textSpan = instructionEl.createSpan({ text: `${t('anki.instruction')} "${text}"` });
+		if (!isEnabled) textSpan.style.textDecoration = 'line-through';
+
+		const toggleBtn = instructionEl.createEl('button', { text: isEnabled ? 'Deaktivieren' : 'Aktivieren' });
+		toggleBtn.style.fontSize = '0.8em';
+		toggleBtn.style.padding = '2px 5px';
+		toggleBtn.style.marginLeft = '10px';
+		toggleBtn.onclick = async () => {
+			const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
+			if (file instanceof TFile) {
+				const content = await plugin.app.vault.read(file);
+				let newContent = content;
+				// We need to find the EXACT block in the file.
+				// This is tricky because we only have 'source' which is the block content.
+				// But we can use replace on the file content if we find the unique block.
+				// Or use the same logic as syncManager.
+
+				// Simple approach: Replace the specific line in the block context.
+				// But we don't have the block context here easily.
+				// Let's use the source to find the block in the file.
+				const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+				const matches = [...content.matchAll(blockRegex)];
+				const match = matches.find(m => m[1].trim() === source.trim());
+
+				if (match) {
+					const fullBlock = match[0];
+					let newBlock = fullBlock;
+					if (isEnabled) {
+						newBlock = newBlock.replace(`INSTRUCTION: ${instruction}`, `# INSTRUCTION: ${instruction}`);
+					} else {
+						newBlock = newBlock.replace(`# INSTRUCTION: ${disabledInstruction}`, `INSTRUCTION: ${disabledInstruction}`);
+					}
+					newContent = content.replace(fullBlock, newBlock);
+					await plugin.app.vault.modify(file, newContent);
+				} else {
+					new Notice("Konnte den Block zum Aktualisieren nicht finden.");
+				}
+			}
+		};
+	}
+
 	if (deckName) {
 		const synchronizedCount = cards.filter(card => card.id !== null).length;
 		const totalCardCount = cards.length;
-		const localStatusText = `✅ ${synchronizedCount} Synchronisiert | 📝 ${totalCardCount} Lokal`;
+		const localStatusText = `✅ ${synchronizedCount} ${t('anki.synced')} | 📝 ${totalCardCount} ${t('anki.local')}`;
 
 		// Initial render with loading state
-		const pEl = el.createEl('p', { text: `⏳ Prüfe Anki... | ${localStatusText}`, cls: 'anki-card-count' });
+		const pEl = el.createEl('p', { text: `${t('anki.check')} | ${localStatusText}`, cls: 'anki-card-count' });
 
 		// Async check
 		getCardCountForDeck(deckName).then(totalAnkiCount => {
-			const ankiStatusText = `📈 ${totalAnkiCount} in Anki | `;
+			const ankiStatusText = `📈 ${totalAnkiCount} ${t('anki.inAnki')} | `;
 			pEl.setText(ankiStatusText + localStatusText);
 			pEl.removeClass('anki-error'); // Ensure error class is removed if it was there (re-render case)
 		}).catch(e => {
-			const ankiStatusText = '⚠️ Anki-Verbindung fehlgeschlagen | ';
+			const ankiStatusText = `${t('anki.connectionFailed')} | `;
 			pEl.setText(ankiStatusText + localStatusText);
 			pEl.addClass('anki-error');
 		});
@@ -59,7 +166,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 	if (plugin.settings.geminiApiKey) {
 		hasAnyProvider = true;
-		const genGeminiBtn = genContainer.createEl('button', { text: '✨ Gemini Generieren' });
+		const genGeminiBtn = genContainer.createEl('button', { text: '✨ Gemini generieren' });
 		genGeminiBtn.style.flex = '1';
 		genGeminiBtn.onclick = async () => {
 			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
@@ -72,14 +179,14 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 			const feedback = await runGenerationProcess(plugin, view.editor, 'gemini', subdeck, "");
 			if (feedback) {
-				renderFeedback(el, feedback);
+				renderFeedback(el, feedback, plugin);
 			}
 		};
 	}
 
 	if (plugin.settings.openAiApiKey) {
 		hasAnyProvider = true;
-		const genOpenAiBtn = genContainer.createEl('button', { text: '🤖 OpenAI Generieren' });
+		const genOpenAiBtn = genContainer.createEl('button', { text: '🤖 OpenAI generieren' });
 		genOpenAiBtn.style.flex = '1';
 		genOpenAiBtn.onclick = async () => {
 			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
@@ -92,14 +199,14 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 			const feedback = await runGenerationProcess(plugin, view.editor, 'openai', subdeck, "");
 			if (feedback) {
-				renderFeedback(el, feedback);
+				renderFeedback(el, feedback, plugin);
 			}
 		};
 	}
 
 	if (plugin.settings.ollamaEnabled) {
 		hasAnyProvider = true;
-		const genOllamaBtn = genContainer.createEl('button', { text: '💻 Ollama Generieren' });
+		const genOllamaBtn = genContainer.createEl('button', { text: '💻 Ollama generieren' });
 		genOllamaBtn.style.flex = '1';
 		genOllamaBtn.onclick = async () => {
 			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
@@ -115,7 +222,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	}
 
 	if (hasAnyProvider) {
-		const quickGenButton = genContainer.createEl('button', { text: '⚡ Auto Generieren' });
+		const quickGenButton = genContainer.createEl('button', { text: '⚡ Auto generieren' });
 		quickGenButton.style.flex = '1';
 		quickGenButton.title = "Generiert Karten (Gemini bevorzugt)";
 		quickGenButton.onclick = async () => {
@@ -135,7 +242,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 			const feedback = await runGenerationProcess(plugin, view.editor, provider, subdeck, "");
 			if (feedback) {
-				renderFeedback(el, feedback);
+				renderFeedback(el, feedback, plugin);
 			}
 		};
 	}
@@ -150,7 +257,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		const onSave = async (updatedCards: Card[], deletedCardIds: number[], newDeckName: string) => {
 			await saveAnkiBlockChanges(plugin, source, updatedCards, deletedCardIds, newDeckName);
 		};
-		new CardPreviewModal(plugin.app, cardsForModal, currentDeckName, onSave).open();
+		new CardPreviewModal(plugin.app, cardsForModal, currentDeckName, onSave, instruction || undefined).open();
 	};
 
 	const syncButton = actionContainer.createEl('button', { text: '🔄 Sync mit Anki' });
@@ -185,7 +292,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings);
 
 			if (feedback) {
-				renderFeedback(el, feedback);
+				renderFeedback(el, feedback, plugin);
 				if (ctx.sourcePath) {
 					plugin.feedbackCache.set(ctx.sourcePath, feedback);
 				}
@@ -205,13 +312,13 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	const cachedFeedback = plugin.feedbackCache.get(ctx.sourcePath);
 	if (cachedFeedback) {
 		console.log("Found cached feedback for", ctx.sourcePath, "rendering it.");
-		renderFeedback(el, cachedFeedback);
+		renderFeedback(el, cachedFeedback, plugin);
 		plugin.feedbackCache.delete(ctx.sourcePath); // Clear after rendering
 	}
 }
 
 // Helper function to render feedback
-function renderFeedback(container: HTMLElement, feedback: string) { // Renamed 'el' to 'container' for consistency with original
+function renderFeedback(container: HTMLElement, feedback: string, plugin: AnkiGeneratorPlugin) { // Renamed 'el' to 'container' for consistency with original
 	// Remove existing feedback box if any
 	const existingBox = container.querySelector('.anki-feedback-box'); // Changed selector to match new class
 	if (existingBox) existingBox.remove();
@@ -227,5 +334,5 @@ function renderFeedback(container: HTMLElement, feedback: string) { // Renamed '
 	};
 
 	const content = feedbackBox.createDiv({ cls: 'anki-feedback-content' });
-	content.setText(feedback);
+	MarkdownRenderer.render(plugin.app, feedback, content, container.getAttribute('src') || '', plugin);
 }

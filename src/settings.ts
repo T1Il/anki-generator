@@ -1,58 +1,122 @@
-import { App, PluginSettingTab, Setting, ToggleComponent, requestUrl, Notice, DropdownComponent, TextAreaComponent } from 'obsidian';
+import { App, PluginSettingTab, Setting, DropdownComponent, TextAreaComponent, requestUrl, Notice } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
+import { t } from './lang/helpers';
 
 export interface AnkiGeneratorSettings {
+	vaultName: string;
+	enableFeedback: boolean;
+	aiProvider: string;
 	geminiApiKey: string;
 	geminiModel: string;
 	openAiApiKey: string;
 	openAiModel: string;
-	prompt: string;
-	feedbackPrompt: string;
-	mainDeck: string;
-	basicModelName: string;
-	basicFrontField: string;
-	basicBackField: string;
-	clozeModelName: string;
-	clozeTextField: string;
 	ollamaEnabled: boolean;
 	ollamaEndpoint: string;
 	ollamaModel: string;
-	vaultName: string;
-	enableFeedback: boolean;
+	mainDeck: string;
+	basicModel: string;
+	basicFront: string;
+	basicBack: string;
+	typeInModel: string;
+	typeInFront: string;
+	typeInBack: string;
+	clozeModel: string;
+	clozeText: string;
+	useCustomPrompt: boolean;
+	prompt: string;
+	useCustomFeedbackPrompt: boolean;
+	feedbackPrompt: string;
+	language: string;
 }
 
 export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
+	vaultName: 'My Vault',
+	enableFeedback: false,
+	aiProvider: 'gemini',
 	geminiApiKey: '',
-	geminiModel: 'gemini-1.5-pro',
+	geminiModel: 'gemini-1.5-flash',
 	openAiApiKey: '',
 	openAiModel: 'gpt-4o',
-	mainDeck: 'Obsidian',
+	ollamaEnabled: false,
+	ollamaEndpoint: 'http://localhost:11434',
+	ollamaModel: 'llama3',
+	mainDeck: 'Default',
+	basicModel: 'Basic',
+	basicFront: 'Front',
+	basicBack: 'Back',
+	typeInModel: 'Basic (type in the answer)',
+	typeInFront: 'Front',
+	typeInBack: 'Back',
+	clozeModel: 'Cloze',
+	clozeText: 'Text',
+	useCustomPrompt: false,
 	prompt: `Du bist ein Assistent, der Lerninhalte in Anki-Karteikarten umwandelt. Deine einzige Aufgabe ist es, die formatierten Karten zu erstellen. Gib auf KEINEN FALL, NIEMALS einleitenden oder abschließenden Text aus. Deine Ausgabe MUSS *direkt* mit \`Q:\` oder dem Satz für den Lückentext beginnen und darf NUR die Karten enthalten. KEINERLEI zusätzlichen Text.
 
 Erstelle aus dem folgenden Text Anki-Karteikarten. 
-Wenn du Fragen erstellst, die Teile von Listen abfragen, nutze Lückentexte (Cloze Deletions), um den Kontext zu bewahren.
-Nutze Basic-Karten (Frage/Antwort) für Definitionen oder klare Konzepte.
+
+**WICHTIG - Kartentyp-Präferenzen:**
+- **BEVORZUGE Basic-Karten (Q:/A:)** für fast alle Inhalte, besonders für:
+  - Symptome, Ursachen, Gründe, Risikofaktoren (als Auflistung in der Antwort)
+  - Definitionen und Konzepte
+  - Vergleiche und Unterschiede
+- **Nutze Lückentext-Karten (Cloze) NUR für:**
+  - Einzelne, präzise Fakten (z.B. Zahlen, Namen)
+  - Sätze, bei denen der Kontext essentiell ist
+  - NIEMALS für Aufzählungen oder Listen
+
 Halte die Fragen und Antworten präzise und kurz.
 
 Formatierung:
 Für Basic-Karten:
 Q: [Frage]
-A: [Antwort]
+A: [Antwort als Auflistung]
 
-Für Lückentext-Karten:
+Beispiel:
+Q: Welche Symptome treten bei Hypokaliämie auf?
+A: - Müdigkeit und Schwächegefühl
+- Muskelkrämpfe
+- Kardiale Symptome (Arrhythmien, VT-Neigung)
+- Pathologische Glukosetoleranz
+
+Für Type-In Karten (zum Eintippen - gut für Fakten, die man aktiv abrufen soll):
+Q: [Frage]
+A (type): [Kurze, präzise Antwort]
+
+Beispiel:
+Q: Was ist die Hauptstadt von Deutschland?
+A (type): Berlin
+
+Q: Welcher Normalwert gilt für Kalium im Blut?
+A (type): 3,5 - 5,0 mmol/l
+
+**Nutze Type-In Karten für:**
+- Definitionen, Normalwerte, Formeln, die man auswendig können sollte
+- Kurze, präzise Antworten (1-3 Wörter oder kurzer Satz)
+- NICHT für lange Listen oder Aufzählungen
+
+WICHTIG ZU BILDERN: Wenn der Input-Text Bilder enthält (z.B. ![[bild.png]]), MUSS das Bild DIREKT in der Antwort (A:) der Karteikarte enthalten sein. Verwende exakt dieselbe Syntax ![[dateiname]].
+Beispiel:
+Q: Was zeigt dieses EKG-Bild?
+A: Das Bild zeigt eine T-Wellen-Abflachung bei Hypokaliämie.
+![[EKG-Bild.png]]
+
+Für Lückentext-Karten (SELTEN verwenden):
 [Satz mit {{c1::Lücke}}]
 
-Beispiel Output:
-Q: Was ist die Hauptstadt von Deutschland?
-A: Berlin
-
+Beispiel:
 Der Mensch hat {{c1::46}} Chromosomen.
+
+Trenne Karten mit einer Leerzeile.
+Verwende keine Markdown-Codeblöcke.
+
+Hier ist der Inhalt: 
 
 Hier ist der Text:
 {{noteContent}}
 
 Berücksichtige auch diese bestehenden Karten, um Duplikate zu vermeiden:
 {{existingCards}}`,
+	useCustomFeedbackPrompt: false,
 	feedbackPrompt: `Du bist ein erfahrener Tutor. Analysiere den folgenden Lerninhalt und gib kurzes, konstruktives Feedback basierend auf wissenschaftlichen Lernprinzipien (z.B. Klarheit, Struktur, fehlende Schlüsselkonzepte) und lege besonderen Fokus auf die inhaltliche Korrektheit und mögliche Ergänzungen, die für die Präklinik (Rettungsdienst) sinnvoll sein könnten.
 WICHTIG: Das Feedback MUSS auf DEUTSCH sein.
 Halte das Feedback präzise (2-3 Sätze).
@@ -62,23 +126,11 @@ Notiz Inhalt:
 """
 {{noteContent}}
 """`,
-	basicModelName: 'Basic',
-	basicFrontField: 'Front',
-	basicBackField: 'Back',
-	clozeModelName: 'Lückentext',
-	clozeTextField: 'Text',
-	ollamaEnabled: false,
-	ollamaEndpoint: 'http://localhost:11434/api/generate',
-	ollamaModel: 'llama3',
-	vaultName: '',
-	enableFeedback: true
-};
+	language: 'de'
+}
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {
 	plugin: AnkiGeneratorPlugin;
-	geminiModelDropdown: DropdownComponent | null = null;
-	ollamaModelDropdown: DropdownComponent | null = null;
-	openAiModelDropdown: DropdownComponent | null = null;
 
 	constructor(app: App, plugin: AnkiGeneratorPlugin) {
 		super(app, plugin);
@@ -88,14 +140,24 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		containerEl.createEl('h2', { text: 'Anki Generator Einstellungen' });
 
-		// --- 1. GENERAL SETTINGS ---
-		containerEl.createEl('h3', { text: 'Allgemein' });
-		new Setting(containerEl).setName('Vault Name').addText(text => text.setValue(this.plugin.settings.vaultName).onChange(async (value) => { this.plugin.settings.vaultName = value; await this.plugin.saveSettings(); }));
+		containerEl.createEl('h2', { text: t('settings.title') });
+
+		// General Settings
+		containerEl.createEl('h3', { text: t('settings.general') });
+
 		new Setting(containerEl)
-			.setName('AI Feedback aktivieren')
-			.setDesc('Wenn aktiviert, gibt die AI nach der Kartengenerierung kurzes Feedback zum Lerninhalt.')
+			.setName(t('settings.vaultName'))
+			.addText(text => text
+				.setValue(this.plugin.settings.vaultName)
+				.onChange(async (value) => {
+					this.plugin.settings.vaultName = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName(t('settings.enableFeedback'))
+			.setDesc(t('settings.enableFeedbackDesc'))
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableFeedback)
 				.onChange(async (value) => {
@@ -103,70 +165,233 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// --- 2. AI PROVIDER SETTINGS ---
-		const aiDetails = containerEl.createEl('details');
-		aiDetails.style.marginBottom = '1em';
-		aiDetails.createEl('summary', { text: 'AI Provider', cls: 'settings-summary' }).style.cursor = 'pointer';
-		const aiContainer = aiDetails.createDiv();
+		// AI Provider
+		new Setting(containerEl)
+			.setName(t('settings.aiProvider'))
+			.addDropdown(dropdown => dropdown
+				.addOption('gemini', 'Google Gemini')
+				.addOption('openai', 'OpenAI')
+				.addOption('ollama', t('settings.ollama'))
+				.setValue(this.plugin.settings.aiProvider)
+				.onChange(async (value) => {
+					this.plugin.settings.aiProvider = value;
+					await this.plugin.saveSettings();
+					this.display(); // Refresh to show relevant settings
+				}));
 
-		// Gemini
-		aiContainer.createEl('h4', { text: 'Google Gemini' });
-		new Setting(aiContainer).setName('Gemini API Key').addText(text => text.setPlaceholder('Gib deinen Schlüssel ein...').setValue(this.plugin.settings.geminiApiKey).onChange(async (value) => { this.plugin.settings.geminiApiKey = value; await this.plugin.saveSettings(); if (this.geminiModelDropdown) await this.updateGeminiModels(value, this.geminiModelDropdown); }));
-		new Setting(aiContainer).setName('Gemini Modell').addDropdown(async (dropdown) => { this.geminiModelDropdown = dropdown; await this.updateGeminiModels(this.plugin.settings.geminiApiKey, dropdown); dropdown.onChange(async (value) => { this.plugin.settings.geminiModel = value; await this.plugin.saveSettings(); }); });
+		// Gemini Settings
+		if (this.plugin.settings.aiProvider === 'gemini') {
+			new Setting(containerEl)
+				.setName(t('settings.geminiApiKey'))
+				.addText(text => text
+					.setPlaceholder('API Key')
+					.setValue(this.plugin.settings.geminiApiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.geminiApiKey = value;
+						await this.plugin.saveSettings();
+					}));
 
-		// OpenAI
-		aiContainer.createEl('h4', { text: 'OpenAI (ChatGPT)' });
-		new Setting(aiContainer).setName('OpenAI API Key').addText(text => text.setPlaceholder('sk-proj-...').setValue(this.plugin.settings.openAiApiKey).onChange(async (value) => { this.plugin.settings.openAiApiKey = value; await this.plugin.saveSettings(); if (this.openAiModelDropdown) await this.updateOpenAiModels(value, this.openAiModelDropdown); }));
-		new Setting(aiContainer).setName('OpenAI Modell').addDropdown(async (dropdown) => { this.openAiModelDropdown = dropdown; await this.updateOpenAiModels(this.plugin.settings.openAiApiKey, dropdown); dropdown.onChange(async (value) => { this.plugin.settings.openAiModel = value; await this.plugin.saveSettings(); }); });
-
-		// Ollama
-		aiContainer.createEl('h4', { text: 'Ollama (Lokal)' });
-		new Setting(aiContainer).setName('Ollama aktivieren').addToggle((toggle) => { toggle.setValue(this.plugin.settings.ollamaEnabled).onChange(async (value) => { this.plugin.settings.ollamaEnabled = value; await this.plugin.saveSettings(); this.display(); }); });
-		if (this.plugin.settings.ollamaEnabled) {
-			new Setting(aiContainer).setName('API Endpunkt').addText(text => text.setPlaceholder('http://localhost:11434/api/generate').setValue(this.plugin.settings.ollamaEndpoint).onChange(async (value) => { this.plugin.settings.ollamaEndpoint = value; await this.plugin.saveSettings(); if (this.ollamaModelDropdown) await this.updateOllamaModels(value, this.ollamaModelDropdown); }));
-			new Setting(aiContainer).setName('Ollama Modell').addDropdown(async (dropdown) => { this.ollamaModelDropdown = dropdown; await this.updateOllamaModels(this.plugin.settings.ollamaEndpoint, dropdown); dropdown.onChange(async (value) => { this.plugin.settings.ollamaModel = value; await this.plugin.saveSettings(); }); });
+			new Setting(containerEl)
+				.setName(t('settings.geminiModel'))
+				.addDropdown(async (dropdown) => {
+					await this.updateGeminiModels(this.plugin.settings.geminiApiKey, dropdown);
+					dropdown.onChange(async (value) => {
+						this.plugin.settings.geminiModel = value;
+						await this.plugin.saveSettings();
+					});
+				});
 		}
 
-		// --- 3. ANKI CONFIGURATION ---
-		const ankiDetails = containerEl.createEl('details');
-		ankiDetails.style.marginBottom = '1em';
-		ankiDetails.createEl('summary', { text: 'Anki Konfiguration', cls: 'settings-summary' }).style.cursor = 'pointer';
-		const ankiContainer = ankiDetails.createDiv();
+		// OpenAI Settings
+		if (this.plugin.settings.aiProvider === 'openai') {
+			new Setting(containerEl)
+				.setName(t('settings.openAiApiKey'))
+				.addText(text => text
+					.setPlaceholder('sk-...')
+					.setValue(this.plugin.settings.openAiApiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.openAiApiKey = value;
+						await this.plugin.saveSettings();
+					}));
 
-		new Setting(ankiContainer).setName('Hauptdeck').addText(text => text.setValue(this.plugin.settings.mainDeck).onChange(async (value) => { this.plugin.settings.mainDeck = value; await this.plugin.saveSettings(); }));
+			new Setting(containerEl)
+				.setName(t('settings.openAiModel'))
+				.addDropdown(async (dropdown) => {
+					await this.updateOpenAiModels(this.plugin.settings.openAiApiKey, dropdown);
+					dropdown.onChange(async (value) => {
+						this.plugin.settings.openAiModel = value;
+						await this.plugin.saveSettings();
+					});
+				});
+		}
 
-		// Basic Settings
-		new Setting(ankiContainer).setName('Basic Notiztyp Name').setDesc('Name des Typs in Anki (z.B. "Basic" oder "Einfach").').addText(text => text.setValue(this.plugin.settings.basicModelName).onChange(async (value) => { this.plugin.settings.basicModelName = value; await this.plugin.saveSettings(); }));
-		new Setting(ankiContainer).setName('Basic Feldname: Frage').setDesc('Name des ersten Feldes (z.B. "Front" oder "Vorderseite").').addText(text => text.setValue(this.plugin.settings.basicFrontField).onChange(async (value) => { this.plugin.settings.basicFrontField = value; await this.plugin.saveSettings(); }));
-		new Setting(ankiContainer).setName('Basic Feldname: Antwort').setDesc('Name des zweiten Feldes (z.B. "Back" oder "Rückseite").').addText(text => text.setValue(this.plugin.settings.basicBackField).onChange(async (value) => { this.plugin.settings.basicBackField = value; await this.plugin.saveSettings(); }));
+		// Ollama Settings
+		if (this.plugin.settings.aiProvider === 'ollama') {
+			new Setting(containerEl)
+				.setName(t('settings.ollamaEndpoint'))
+				.addText(text => text
+					.setPlaceholder('http://localhost:11434')
+					.setValue(this.plugin.settings.ollamaEndpoint)
+					.onChange(async (value) => {
+						this.plugin.settings.ollamaEndpoint = value;
+						await this.plugin.saveSettings();
+					}));
 
-		// Cloze Settings
-		new Setting(ankiContainer).setName('Lückentext Notiztyp Name').setDesc('Name des Typs in Anki (z.B. "Cloze" oder "Lückentext").').addText(text => text.setValue(this.plugin.settings.clozeModelName).onChange(async (value) => { this.plugin.settings.clozeModelName = value; await this.plugin.saveSettings(); }));
-		new Setting(ankiContainer).setName('Lückentext Feldname').setDesc('Name des Textfeldes (z.B. "Text").').addText(text => text.setValue(this.plugin.settings.clozeTextField).onChange(async (value) => { this.plugin.settings.clozeTextField = value; await this.plugin.saveSettings(); }));
+			new Setting(containerEl)
+				.setName(t('settings.ollamaModel'))
+				.addDropdown(async (dropdown) => {
+					await this.updateOllamaModels(this.plugin.settings.ollamaEndpoint, dropdown);
+					dropdown.onChange(async (value) => {
+						this.plugin.settings.ollamaModel = value;
+						await this.plugin.saveSettings();
+					});
+				});
+		}
 
-		// --- 4. PROMPTS ---
-		const promptDetails = containerEl.createEl('details');
-		promptDetails.style.marginBottom = '1em';
-		promptDetails.createEl('summary', { text: 'Prompts', cls: 'settings-summary' }).style.cursor = 'pointer';
-		const promptContainer = promptDetails.createDiv();
+		// Anki Configuration
+		containerEl.createEl('h3', { text: t('settings.ankiConfig') });
 
-		this.renderFullWidthTextArea(
-			promptContainer,
-			'Karten-Generierung Prompt',
-			'Der Prompt für die Erstellung der Karteikarten. Platzhalter: {{noteContent}}, {{existingCards}}',
-			this.plugin.settings.prompt,
-			async (value) => { this.plugin.settings.prompt = value; await this.plugin.saveSettings(); },
-			12
-		);
+		new Setting(containerEl)
+			.setName(t('settings.mainDeck'))
+			.addText(text => text
+				.setValue(this.plugin.settings.mainDeck)
+				.onChange(async (value) => {
+					this.plugin.settings.mainDeck = value;
+					await this.plugin.saveSettings();
+				}));
 
-		this.renderFullWidthTextArea(
-			promptContainer,
-			'Feedback Prompt',
-			'Der Prompt für das AI Feedback. Platzhalter: {{noteContent}}',
-			this.plugin.settings.feedbackPrompt,
-			async (value) => { this.plugin.settings.feedbackPrompt = value; await this.plugin.saveSettings(); },
-			6
-		);
+		new Setting(containerEl)
+			.setName(t('settings.basicModel'))
+			.setDesc(t('settings.basicModelDesc'))
+			.addText(text => text
+				.setValue(this.plugin.settings.basicModel)
+				.onChange(async (value) => {
+					this.plugin.settings.basicModel = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName(t('settings.basicFront'))
+			.setDesc(t('settings.basicFrontDesc'))
+			.addText(text => text
+				.setValue(this.plugin.settings.basicFront)
+				.onChange(async (value) => {
+					this.plugin.settings.basicFront = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName(t('settings.basicBack'))
+			.setDesc(t('settings.basicBackDesc'))
+			.addText(text => text
+				.setValue(this.plugin.settings.basicBack)
+				.onChange(async (value) => {
+					this.plugin.settings.basicBack = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Type-In Model')
+			.setDesc('Anki-Modell für Type-In Karten (z.B. "Basic (type in the answer)")')
+			.addText(text => text
+				.setValue(this.plugin.settings.typeInModel)
+				.onChange(async (value) => {
+					this.plugin.settings.typeInModel = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Type-In Front Field')
+			.setDesc('Name des Front-Feldes im Type-In Modell')
+			.addText(text => text
+				.setValue(this.plugin.settings.typeInFront)
+				.onChange(async (value) => {
+					this.plugin.settings.typeInFront = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Type-In Back Field')
+			.setDesc('Name des Back-Feldes im Type-In Modell')
+			.addText(text => text
+				.setValue(this.plugin.settings.typeInBack)
+				.onChange(async (value) => {
+					this.plugin.settings.typeInBack = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName(t('settings.clozeModel'))
+			.setDesc(t('settings.clozeModelDesc'))
+			.addText(text => text
+				.setValue(this.plugin.settings.clozeModel)
+				.onChange(async (value) => {
+					this.plugin.settings.clozeModel = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName(t('settings.clozeText'))
+			.setDesc(t('settings.clozeTextDesc'))
+			.addText(text => text
+				.setValue(this.plugin.settings.clozeText)
+				.onChange(async (value) => {
+					this.plugin.settings.clozeText = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// Prompts
+		containerEl.createEl('h3', { text: t('settings.prompts') });
+
+		new Setting(containerEl)
+			.setName(t('settings.useCustomPrompt'))
+			.setDesc(t('settings.useCustomPromptDesc'))
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.useCustomPrompt)
+				.onChange(async (value) => {
+					this.plugin.settings.useCustomPrompt = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}));
+
+		if (this.plugin.settings.useCustomPrompt) {
+			this.renderFullWidthTextArea(
+				containerEl,
+				t('settings.cardPrompt'),
+				t('settings.cardPromptDesc'),
+				this.plugin.settings.prompt,
+				async (value) => {
+					this.plugin.settings.prompt = value;
+					await this.plugin.saveSettings();
+				},
+				10
+			);
+		}
+
+		new Setting(containerEl)
+			.setName(t('settings.useCustomFeedbackPrompt'))
+			.setDesc(t('settings.useCustomFeedbackPromptDesc'))
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.useCustomFeedbackPrompt)
+				.onChange(async (value) => {
+					this.plugin.settings.useCustomFeedbackPrompt = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}));
+
+		if (this.plugin.settings.useCustomFeedbackPrompt) {
+			this.renderFullWidthTextArea(
+				containerEl,
+				t('settings.feedbackPrompt'),
+				t('settings.feedbackPromptDesc'),
+				this.plugin.settings.feedbackPrompt,
+				async (value) => {
+					this.plugin.settings.feedbackPrompt = value;
+					await this.plugin.saveSettings();
+				},
+				5
+			);
+		}
 	}
 
 	renderFullWidthTextArea(container: HTMLElement, title: string, desc: string, value: string, onChange: (v: string) => Promise<void>, rows: number = 5) {
@@ -197,10 +422,12 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 		if (!apiKey) { dropdown.addOption("", "Kein API Key"); dropdown.setDisabled(true); return; }
 		try { const r = await requestUrl({ url: `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, method: 'GET' }); const o: any = {}; r.json.models?.forEach((m: any) => { if (m.name.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent')) o[m.name.replace('models/', '')] = m.displayName || m.name; }); dropdown.selectEl.innerHTML = ''; dropdown.addOptions(o); dropdown.setDisabled(false); const c = this.plugin.settings.geminiModel; if (c && o[c]) dropdown.setValue(c); else { const f = Object.keys(o)[0]; if (f) { this.plugin.settings.geminiModel = f; dropdown.setValue(f); await this.plugin.saveSettings(); } } } catch (e) { dropdown.selectEl.innerHTML = ''; dropdown.addOption(this.plugin.settings.geminiModel, "Fehler"); }
 	}
+
 	async updateOllamaModels(endpoint: string, dropdown: DropdownComponent) {
 		if (!endpoint) { dropdown.addOption("", "Kein Endpunkt"); dropdown.setDisabled(true); return; }
 		try { let u = endpoint.endsWith("/api/generate") ? endpoint.replace("/api/generate", "/api/tags") : endpoint.replace(/\/$/, "") + "/api/tags"; const r = await requestUrl({ url: u, method: 'GET' }); const o: any = {}; r.json.models?.forEach((m: any) => o[m.name] = m.name); dropdown.selectEl.innerHTML = ''; dropdown.addOptions(o); dropdown.setDisabled(false); const c = this.plugin.settings.ollamaModel; if (c && o[c]) dropdown.setValue(c); else { const f = Object.keys(o)[0]; if (f) { this.plugin.settings.ollamaModel = f; dropdown.setValue(f); await this.plugin.saveSettings(); } } } catch (e) { dropdown.selectEl.innerHTML = ''; dropdown.addOption(this.plugin.settings.ollamaModel, "Fehler"); }
 	}
+
 	async updateOpenAiModels(apiKey: string, dropdown: DropdownComponent) {
 		if (!apiKey) { dropdown.addOption("", "Kein API Key"); dropdown.setDisabled(true); return; }
 		try { const r = await requestUrl({ url: 'https://api.openai.com/v1/models', method: 'GET', headers: { 'Authorization': `Bearer ${apiKey}` } }); const o: any = {}; r.json.data?.filter((m: any) => m.id.startsWith('gpt')).sort((a: any, b: any) => b.created - a.created).forEach((m: any) => o[m.id] = m.id); dropdown.selectEl.innerHTML = ''; dropdown.addOptions(o); dropdown.setDisabled(false); const c = this.plugin.settings.openAiModel; if (c && o[c]) dropdown.setValue(c); else { const d = 'gpt-4o'; if (o[d]) { this.plugin.settings.openAiModel = d; dropdown.setValue(d); } else { const f = Object.keys(o)[0]; if (f) { this.plugin.settings.openAiModel = f; dropdown.setValue(f); } } await this.plugin.saveSettings(); } } catch (e) { dropdown.selectEl.innerHTML = ''; dropdown.addOption(this.plugin.settings.openAiModel || 'gpt-4o', "Fehler"); }

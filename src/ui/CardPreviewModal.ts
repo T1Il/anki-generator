@@ -1,17 +1,19 @@
-import { App, Modal, Setting, Notice } from 'obsidian';
+import { App, Modal, Setting, Notice, MarkdownRenderer } from 'obsidian';
 import { Card } from '../types';
 import { CardEditModal } from './CardEditModal';
 
 export class CardPreviewModal extends Modal {
 	cards: Card[];
 	deckName: string;
+	instruction?: string;
 	onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void;
 	deletedCardIds: number[] = []; // Speichert die IDs der gelöschten Karten
 
-	constructor(app: App, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void) {
+	constructor(app: App, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
 		super(app);
 		this.cards = [...cards];
 		this.deckName = deckName || "";
+		this.instruction = instruction;
 		this.onSave = onSave;
 		this.modalEl.addClass('anki-preview-modal-wide');
 	}
@@ -24,6 +26,21 @@ export class CardPreviewModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.createEl("h2", { text: "Karten bearbeiten & verwalten" });
+
+		// --- Instruction Display ---
+		if (this.instruction) {
+			const instructionEl = contentEl.createDiv({ cls: 'anki-instruction-preview' });
+			instructionEl.style.color = '#4a90e2';
+			instructionEl.style.fontStyle = 'italic';
+			instructionEl.style.borderLeft = '3px solid #4a90e2';
+			instructionEl.style.paddingLeft = '10px';
+			instructionEl.style.marginBottom = '15px';
+			instructionEl.style.padding = '10px';
+			instructionEl.style.backgroundColor = 'rgba(74, 144, 226, 0.1)';
+			instructionEl.style.borderRadius = '5px';
+			instructionEl.createEl('strong', { text: 'Anweisung: ' });
+			instructionEl.createSpan({ text: `"${this.instruction}"` });
+		}
 
 		// --- Deck Name Input ---
 		new Setting(contentEl)
@@ -72,9 +89,18 @@ export class CardPreviewModal extends Modal {
 		this.cards.forEach((card, index) => {
 			const cardEl = container.createDiv({ cls: 'anki-preview-card' });
 			const content = cardEl.createDiv({ cls: 'anki-preview-content' });
-			content.createEl('div', { cls: 'anki-preview-question', text: card.q });
+
+			// Question
+			const questionDiv = content.createDiv({ cls: 'anki-preview-question' });
+			const highlightedQ = this.highlightClozes(card.q);
+			MarkdownRenderer.render(this.app, highlightedQ, questionDiv, '', null as any);
+
 			content.createEl('hr', { cls: 'anki-preview-separator' });
-			content.createEl('div', { cls: 'anki-preview-answer', text: card.a });
+
+			// Answer
+			const answerDiv = content.createDiv({ cls: 'anki-preview-answer' });
+			const highlightedA = this.highlightClozes(card.a);
+			MarkdownRenderer.render(this.app, highlightedA, answerDiv, '', null as any);
 
 			const actions = cardEl.createDiv({ cls: 'anki-card-actions' });
 			actions.createEl('button', { text: '✏️ Bearbeiten' }).addEventListener('click', () => {
@@ -93,6 +119,14 @@ export class CardPreviewModal extends Modal {
 				}
 				this.render();
 			});
+		});
+	}
+
+	highlightClozes(text: string): string {
+		// Highlight cloze deletions: {{c1::answer}}
+		// Replace with markdown highlighting
+		return text.replace(/\{\{c(\d+)::([^}]+)\}\}/g, (match, num, content) => {
+			return `==**[c${num}]** ${content}==`;
 		});
 	}
 
