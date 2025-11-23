@@ -488,7 +488,6 @@ function cleanAiGeneratedText(rawText: string): string {
 		const isStartMarker = trimmedLine.startsWith('Q:') ||
 			trimmedLine.startsWith('A:') ||
 			trimmedLine.startsWith('ID:') ||
-			trimmedLine === 'xxx' ||
 			line.includes('____');
 
 		if (isStartMarker) {

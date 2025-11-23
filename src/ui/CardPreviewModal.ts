@@ -1,16 +1,19 @@
-import { App, Modal, Setting, Notice, MarkdownRenderer } from 'obsidian';
+import { Modal, Setting, Notice, MarkdownRenderer } from 'obsidian';
 import { Card } from '../types';
 import { CardEditModal } from './CardEditModal';
+import AnkiGeneratorPlugin from '../main';
 
 export class CardPreviewModal extends Modal {
+	plugin: AnkiGeneratorPlugin;
 	cards: Card[];
 	deckName: string;
 	instruction?: string;
 	onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void;
-	deletedCardIds: number[] = []; // Speichert die IDs der gelöschten Karten
+	deletedCardIds: number[] = [];
 
-	constructor(app: App, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
-		super(app);
+	constructor(plugin: AnkiGeneratorPlugin, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
+		super(plugin.app);
+		this.plugin = plugin;
 		this.cards = [...cards];
 		this.deckName = deckName || "";
 		this.instruction = instruction;
@@ -69,7 +72,6 @@ export class CardPreviewModal extends Modal {
 		deleteAllBtn.style.marginLeft = '10px';
 		deleteAllBtn.addEventListener('click', () => {
 			if (confirm("Möchtest du wirklich ALLE Karten in diesem Block löschen? Dies kann nicht rückgängig gemacht werden.")) {
-				// Alle existierenden IDs zur Löschliste hinzufügen
 				this.cards.forEach(card => {
 					if (card.id) {
 						this.deletedCardIds.push(card.id);
@@ -86,6 +88,10 @@ export class CardPreviewModal extends Modal {
 			container.setText('Keine Karten in diesem Block gefunden.');
 		}
 
+		// Pfad der aktuellen Datei holen für Bilder-Auflösung
+		const activeFile = this.app.workspace.getActiveFile();
+		const sourcePath = activeFile ? activeFile.path : '';
+
 		this.cards.forEach((card, index) => {
 			const cardEl = container.createDiv({ cls: 'anki-preview-card' });
 			const content = cardEl.createDiv({ cls: 'anki-preview-content' });
@@ -93,14 +99,16 @@ export class CardPreviewModal extends Modal {
 			// Question
 			const questionDiv = content.createDiv({ cls: 'anki-preview-question' });
 			const highlightedQ = this.highlightClozes(card.q);
-			MarkdownRenderer.render(this.app, highlightedQ, questionDiv, '', null as any);
+			// FIX: Wir übergeben 'this.plugin' statt 'this'
+			MarkdownRenderer.render(this.app, highlightedQ, questionDiv, sourcePath, this.plugin);
 
 			content.createEl('hr', { cls: 'anki-preview-separator' });
 
 			// Answer
 			const answerDiv = content.createDiv({ cls: 'anki-preview-answer' });
 			const highlightedA = this.highlightClozes(card.a);
-			MarkdownRenderer.render(this.app, highlightedA, answerDiv, '', null as any);
+			// FIX: Wir übergeben 'this.plugin' statt 'this'
+			MarkdownRenderer.render(this.app, highlightedA, answerDiv, sourcePath, this.plugin);
 
 			const actions = cardEl.createDiv({ cls: 'anki-card-actions' });
 			actions.createEl('button', { text: '✏️ Bearbeiten' }).addEventListener('click', () => {
@@ -111,9 +119,7 @@ export class CardPreviewModal extends Modal {
 			});
 
 			actions.createEl('button', { text: '🗑️ Löschen', cls: 'anki-delete-button' }).addEventListener('click', () => {
-				// Karte aus der lokalen Liste entfernen
 				const [deletedCard] = this.cards.splice(index, 1);
-				// Wenn die Karte eine ID hatte, diese für die Löschung in Anki vormerken
 				if (deletedCard && deletedCard.id) {
 					this.deletedCardIds.push(deletedCard.id);
 				}
@@ -123,15 +129,12 @@ export class CardPreviewModal extends Modal {
 	}
 
 	highlightClozes(text: string): string {
-		// Highlight cloze deletions: {{c1::answer}}
-		// Replace with markdown highlighting
 		return text.replace(/\{\{c(\d+)::([^}]+)\}\}/g, (match, num, content) => {
 			return `==**[c${num}]** ${content}==`;
 		});
 	}
 
 	onClose() {
-		// Beim Schließen die aktualisierte Kartenliste UND die Liste der gelöschten IDs zurückgeben
 		this.onSave(this.cards, this.deletedCardIds, this.deckName);
 		this.contentEl.empty();
 	}

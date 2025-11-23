@@ -63,7 +63,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 				if (match) {
 					const fullBlock = match[0];
 					const newBlock = fullBlock.replace(`STATUS: ${status}`, ''); // Remove status line
-					// Clean up empty lines if needed, but simple replace is safer for now
 					newContent = content.replace(fullBlock, newBlock);
 					await plugin.app.vault.modify(file, newContent);
 				}
@@ -77,7 +76,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		const isEnabled = !!instruction;
 		const text = isEnabled ? instruction : disabledInstruction;
 
-		instructionEl.style.color = isEnabled ? '#4a90e2' : '#888'; // Blue or Gray
+		instructionEl.style.color = isEnabled ? '#4a90e2' : '#888';
 		instructionEl.style.fontStyle = 'italic';
 		instructionEl.style.borderLeft = isEnabled ? '3px solid #4a90e2' : '3px solid #888';
 		instructionEl.style.paddingLeft = '10px';
@@ -98,14 +97,6 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			if (file instanceof TFile) {
 				const content = await plugin.app.vault.read(file);
 				let newContent = content;
-				// We need to find the EXACT block in the file.
-				// This is tricky because we only have 'source' which is the block content.
-				// But we can use replace on the file content if we find the unique block.
-				// Or use the same logic as syncManager.
-
-				// Simple approach: Replace the specific line in the block context.
-				// But we don't have the block context here easily.
-				// Let's use the source to find the block in the file.
 				const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 				const matches = [...content.matchAll(blockRegex)];
 				const match = matches.find(m => m[1].trim() === source.trim());
@@ -132,29 +123,26 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		const totalCardCount = cards.length;
 		const localStatusText = `✅ ${synchronizedCount} ${t('anki.synced')} | 📝 ${totalCardCount} ${t('anki.local')}`;
 
-		// Initial render with loading state
 		const pEl = el.createEl('p', { text: `${t('anki.check')} | ${localStatusText}`, cls: 'anki-card-count' });
 
-		// Async check
 		getCardCountForDeck(deckName).then(totalAnkiCount => {
 			const ankiStatusText = `📈 ${totalAnkiCount} ${t('anki.inAnki')} | `;
 			pEl.setText(ankiStatusText + localStatusText);
-			pEl.removeClass('anki-error'); // Ensure error class is removed if it was there (re-render case)
+			pEl.removeClass('anki-error');
 		}).catch(e => {
 			const ankiStatusText = `${t('anki.connectionFailed')} | `;
 			pEl.setText(ankiStatusText + localStatusText);
 			pEl.addClass('anki-error');
 		});
 	}
+
 	// --- BUTTONS LAYOUT ---
-	// Row 1: Generation
 	const genContainer = el.createDiv({ cls: 'anki-btn-row' });
 	genContainer.style.display = 'flex';
 	genContainer.style.flexWrap = 'wrap';
 	genContainer.style.gap = '6px';
 	genContainer.style.marginBottom = '6px';
 
-	// Row 2: Actions
 	const actionContainer = el.createDiv({ cls: 'anki-btn-row' });
 	actionContainer.style.display = 'flex';
 	actionContainer.style.flexWrap = 'wrap';
@@ -257,7 +245,8 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		const onSave = async (updatedCards: Card[], deletedCardIds: number[], newDeckName: string) => {
 			await saveAnkiBlockChanges(plugin, source, updatedCards, deletedCardIds, newDeckName);
 		};
-		new CardPreviewModal(plugin.app, cardsForModal, currentDeckName, onSave, instruction || undefined).open();
+		// FIX: Hier übergeben wir 'plugin' statt 'plugin.app'
+		new CardPreviewModal(plugin, cardsForModal, currentDeckName, onSave, instruction || undefined).open();
 	};
 
 	const syncButton = actionContainer.createEl('button', { text: '🔄 Sync mit Anki' });
@@ -308,22 +297,19 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		}
 	};
 
-	// Check for cached feedback (from recent generation)
 	const cachedFeedback = plugin.feedbackCache.get(ctx.sourcePath);
 	if (cachedFeedback) {
 		console.log("Found cached feedback for", ctx.sourcePath, "rendering it.");
 		renderFeedback(el, cachedFeedback, plugin);
-		plugin.feedbackCache.delete(ctx.sourcePath); // Clear after rendering
+		plugin.feedbackCache.delete(ctx.sourcePath);
 	}
 }
 
-// Helper function to render feedback
-function renderFeedback(container: HTMLElement, feedback: string, plugin: AnkiGeneratorPlugin) { // Renamed 'el' to 'container' for consistency with original
-	// Remove existing feedback box if any
-	const existingBox = container.querySelector('.anki-feedback-box'); // Changed selector to match new class
+function renderFeedback(container: HTMLElement, feedback: string, plugin: AnkiGeneratorPlugin) {
+	const existingBox = container.querySelector('.anki-feedback-box');
 	if (existingBox) existingBox.remove();
 
-	const feedbackBox = container.createDiv({ cls: 'anki-feedback-box' }); // Changed class name to 'anki-feedback-box'
+	const feedbackBox = container.createDiv({ cls: 'anki-feedback-box' });
 
 	const header = feedbackBox.createDiv({ cls: 'anki-feedback-header' });
 	header.createSpan({ text: '🤖 KI Feedback zum Aufschrieb' });

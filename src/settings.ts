@@ -50,71 +50,45 @@ export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
 	clozeModel: 'Cloze',
 	clozeText: 'Text',
 	useCustomPrompt: false,
-	prompt: `Du bist ein Assistent, der Lerninhalte in Anki-Karteikarten umwandelt. Deine einzige Aufgabe ist es, die formatierten Karten zu erstellen. Gib auf KEINEN FALL, NIEMALS einleitenden oder abschließenden Text aus. Deine Ausgabe MUSS *direkt* mit \`Q:\` oder dem Satz für den Lückentext beginnen und darf NUR die Karten enthalten. KEINERLEI zusätzlichen Text.
+	prompt: `Du bist ein Assistent, der Lerninhalte in Anki-Karteikarten umwandelt. 
+Deine Aufgabe ist es, präzise, atomare und KURZE Karten zu erstellen.
 
-Erstelle aus dem folgenden Text Anki-Karteikarten. 
+FORMATIERUNG - STRIKT EINHALTEN:
+1. Jede Karte MUSS mit 'Q:' beginnen.
+2. Trennung durch Leerzeile.
+3. NIEMALS Lückentext-Syntax in 'A:' verwenden.
+4. NIEMALS Listen in mehrere 'Q:' Zeilen aufsplitten.
 
-**WICHTIG - Kartentyp-Präferenzen:**
-- **BEVORZUGE Basic-Karten (Q:/A:)** für fast alle Inhalte, besonders für:
-  - Symptome, Ursachen, Gründe, Risikofaktoren (als Auflistung in der Antwort)
-  - Definitionen und Konzepte
-  - Vergleiche und Unterschiede
-- **Nutze Lückentext-Karten (Cloze) NUR für:**
-  - Einzelne, präzise Fakten (z.B. Zahlen, Namen)
-  - Sätze, bei denen der Kontext essentiell ist
-  - NIEMALS für Aufzählungen oder Listen
+⛔️ FALSCH (Antwort wird zerrissen):
+Q: Welche Medikamente?
+A: Folgende gehören dazu:
+Q: - {{c1::Medikament A}}
+Q: - {{c1::Medikament B}}
 
-Halte die Fragen und Antworten präzise und kurz.
+✅ RICHTIG (Alles in einer Karte):
+Q: Welche Medikamente gehören dazu?
+A: - Medikament A
+- Medikament B
 
-Formatierung:
-Für Basic-Karten:
-Q: [Frage]
-A: [Antwort als Auflistung]
+REGELN ZUR KARTENERSTELLUNG:
 
-Beispiel:
-Q: Welche Symptome treten bei Hypokaliämie auf?
-A: - Müdigkeit und Schwächegefühl
-- Muskelkrämpfe
-- Kardiale Symptome (Arrhythmien, VT-Neigung)
-- Pathologische Glukosetoleranz
+1. **Listen und Aufzählungen (Basic Karten)**:
+   - Fasse Listen IMMER in EINER Karte zusammen.
+   - Die Antwort (A:) ist eine Markdown-Liste.
+   - Nutze KEINE Lückentexte für Listenpunkte.
 
-Für Type-In Karten (zum Eintippen - gut für Fakten, die man aktiv abrufen soll):
-Q: [Frage]
-A (type): [Kurze, präzise Antwort]
+2. **Lückentexte (Cloze)**:
+   - Nutze Lückentexte NUR für einzelne Sätze im 'Q:'-Feld.
+   - Ein Satz = Eine Karte.
+   - KEINE Lücken in der Antwort (A:).
 
-Beispiel:
-Q: Was ist die Hauptstadt von Deutschland?
-A (type): Berlin
+3. **Bilder**:
+   - Kopiere Bild-Links (![[bild.png]]) exakt in das 'A:' Feld.
 
-Q: Welcher Normalwert gilt für Kalium im Blut?
-A (type): 3,5 - 5,0 mmol/l
-
-**Nutze Type-In Karten für:**
-- Definitionen, Normalwerte, Formeln, die man auswendig können sollte
-- Kurze, präzise Antworten (1-3 Wörter oder kurzer Satz)
-- NICHT für lange Listen oder Aufzählungen
-
-WICHTIG ZU BILDERN: Wenn der Input-Text Bilder enthält (z.B. ![[bild.png]]), MUSS das Bild DIREKT in der Antwort (A:) der Karteikarte enthalten sein. Verwende exakt dieselbe Syntax ![[dateiname]].
-Beispiel:
-Q: Was zeigt dieses EKG-Bild?
-A: Das Bild zeigt eine T-Wellen-Abflachung bei Hypokaliämie.
-![[EKG-Bild.png]]
-
-Für Lückentext-Karten (SELTEN verwenden):
-[Satz mit {{c1::Lücke}}]
-
-Beispiel:
-Der Mensch hat {{c1::46}} Chromosomen.
-
-Trenne Karten mit einer Leerzeile.
-Verwende keine Markdown-Codeblöcke.
-
-Hier ist der Inhalt: 
-
-Hier ist der Text:
+Hier ist der Lerninhalt:
 {{noteContent}}
 
-Berücksichtige auch diese bestehenden Karten, um Duplikate zu vermeiden:
+Bestehende Karten (vermeide Duplikate):
 {{existingCards}}`,
 	useCustomFeedbackPrompt: false,
 	feedbackPrompt: `Du bist ein erfahrener Tutor. Analysiere den folgenden Lerninhalt und gib kurzes, konstruktives Feedback basierend auf wissenschaftlichen Lernprinzipien (z.B. Klarheit, Struktur, fehlende Schlüsselkonzepte) und lege besonderen Fokus auf die inhaltliche Korrektheit und mögliche Ergänzungen, die für die Präklinik (Rettungsdienst) sinnvoll sein könnten.

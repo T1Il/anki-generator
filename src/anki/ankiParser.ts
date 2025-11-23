@@ -6,42 +6,50 @@ export const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
 export interface AnkiParsedInfo {
 	subdeck: string;
-	existingCardsText: string; // This text should ONLY contain card data, formatted for the AI
+	existingCardsText: string;
 	deckName: string | null;
 	instruction?: string;
 	disabledInstruction?: string;
 	status?: string;
 }
 
-// Formats parsed cards back into the string expected by the AI prompt
+// Helper: Formatiert eine einzelne Karte konsistent als Q:/A: Block
+function formatSingleCard(card: Card): string[] {
+	const lines: string[] = [];
+
+	const qPrefix = 'Q:';
+	const qLines = card.q.split('\n');
+	qLines.forEach((line, i) => {
+		lines.push(i === 0 ? `${qPrefix} ${line}` : line);
+	});
+
+	if (card.a && card.a.trim().length > 0) {
+		const answerPrefix = card.typeIn ? 'A (type):' : 'A:';
+		const aLines = card.a.split('\n');
+		aLines.forEach((line, i) => {
+			lines.push(i === 0 ? `${answerPrefix} ${line}` : line);
+		});
+	} else if (card.type === 'Basic') {
+		lines.push(card.typeIn ? 'A (type):' : 'A:');
+	}
+
+	if (card.id) {
+		lines.push(`ID: ${card.id}`);
+	}
+
+	return lines;
+}
+
 export function formatCardsToExistingCardsString(cards: Card[]): string {
-	// KORREKTUR: Explizit "Keine." zurückgeben, wenn keine Karten vorhanden sind.
 	if (!cards || cards.length === 0) {
 		return 'Keine.';
 	}
-	const lines: string[] = [];
-	cards.forEach((card, cardIndex) => {
-		if (card.type === 'Basic') {
-			card.q.split('\n').forEach((qLine, index) => lines.push(index === 0 ? `Q: ${qLine}` : qLine));
-			if (card.a && card.a.trim().length > 0) {
-				const answerPrefix = card.typeIn ? 'A (type):' : 'A:';
-				card.a.split('\n').forEach((aLine, index) => lines.push(index === 0 ? `${answerPrefix} ${aLine}` : aLine));
-			} else {
-				lines.push(card.typeIn ? 'A (type):' : 'A:');
-			}
-		} else { // Cloze
-			card.q.split('\n').forEach(qLine => lines.push(qLine));
-			lines.push('xxx');
-			(card.a || "").split('\n').forEach(aLine => lines.push(aLine));
-		}
-		if (card.id) {
-			lines.push(`ID: ${card.id}`);
-		}
-		if (cardIndex < cards.length - 1) {
-			lines.push(''); // Add blank line separator ONLY between cards
-		}
+	const allLines: string[] = [];
+	cards.forEach((card, index) => {
+		allLines.push(...formatSingleCard(card));
+		if (index < cards.length - 1) allLines.push('');
 	});
-	return lines.join('\n');
+	return allLines.join('\n');
 }
 
 export function formatCardsToString(deckLine: string, cards: Card[], instruction?: string, status?: string): string {
@@ -51,25 +59,10 @@ export function formatCardsToString(deckLine: string, cards: Card[], instruction
 
 	if (cards.length > 0) newLines.push('');
 
-	cards.forEach((card, cardIndex) => {
-		if (card.type === 'Basic') {
-			card.q.split('\n').forEach((qLine, index) => newLines.push(index === 0 ? `Q: ${qLine}` : qLine));
-			if (card.a && card.a.trim().length > 0) {
-				const answerPrefix = card.typeIn ? 'A (type):' : 'A:';
-				card.a.split('\n').forEach((aLine, index) => newLines.push(index === 0 ? `${answerPrefix} ${aLine}` : aLine));
-			} else {
-				newLines.push(card.typeIn ? 'A (type):' : 'A:');
-			}
-		} else { // Cloze
-			card.q.split('\n').forEach(qLine => newLines.push(qLine));
-			newLines.push('xxx');
-			(card.a || "").split('\n').forEach(aLine => newLines.push(aLine));
-		}
-		if (card.id) {
-			newLines.push(`ID: ${card.id}`);
-		}
-		if (cardIndex < cards.length - 1) {
-			newLines.push(''); // Leerzeile
+	cards.forEach((card, index) => {
+		newLines.push(...formatSingleCard(card));
+		if (index < cards.length - 1) {
+			newLines.push('');
 		}
 	});
 	return newLines.join('\n').trimEnd();
@@ -95,24 +88,25 @@ export function findSpecificAnkiBlock(fullContent: string, originalSourceContent
 				originalFullBlockSource = fallbackMatch[0];
 				matchIndex = fallbackMatch.index ?? -1;
 			} else {
-				console.warn("Konnte spezifischen Anki-Block nicht exakt finden (via source content), verwende letzten Block.");
 				const lastMatch = matches[matches.length - 1];
 				originalFullBlockSource = lastMatch[0];
 				matchIndex = lastMatch.index ?? -1;
 			}
 		}
 	}
-	if (matchIndex === -1) {
-		console.error("findSpecificAnkiBlock: Konnte keinen Block finden. Regex:", ANKI_BLOCK_REGEX, "Content snippet:", fullContent.substring(0, 500));
-	}
 	return { matchIndex, originalFullBlockSource };
 }
 
-// Robust card parsing logic (remains the same)
+// Helper zum Entfernen von Cloze-Syntax {{c1::Text}} -> Text
+function stripClozeSyntax(text: string): string {
+	return text.replace(/\{\{c\d+::(.*?)(?:::[^}]*)?\}\}/g, '$1');
+}
+
 export function parseCardsFromBlockSource(source: string): Card[] {
 	const lines = source.trim().split('\n');
 	const cards: Card[] = [];
 	let i = 0;
+
 	while (i < lines.length) {
 		const line = lines[i];
 		const trimmedLine = line.trim();
@@ -120,124 +114,98 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 		if (trimmedLine.length === 0 ||
 			trimmedLine.startsWith('TARGET DECK:') ||
 			trimmedLine.startsWith('INSTRUCTION:') ||
-			trimmedLine.startsWith('STATUS:')) {
+			trimmedLine.startsWith('STATUS:') ||
+			trimmedLine === 'xxx') {
 			i++;
 			continue;
 		}
 
-		if (line.startsWith('Q:')) {
-			let q = line.substring(2).trim();
+		// --- INTELLIGENTE LISTEN-ZUSAMMENFÜHRUNG ---
+		// Erkennt, ob die KI fälschlicherweise "Q: - Item" geschrieben hat, obwohl es eine Liste sein sollte.
+		// Wir prüfen auf "Q: -" oder "Q: 1." (mit Leerzeichen danach)
+		const isListFragment = trimmedLine.match(/^Q:\s*(?:(?:-|•|\*)\s|\d+\.\s)/);
+
+		if (isListFragment && cards.length > 0) {
+			// Wir haben ein Fragment gefunden! 
+			// 1. Inhalt extrahieren (alles nach "Q:")
+			let content = trimmedLine.substring(2).trim();
+
+			// 2. Cloze-Syntax entfernen (Listen in Basic-Karten haben keine Lücken)
+			content = stripClozeSyntax(content);
+
+			// 3. An die Antwort der VORHERIGEN Karte anhängen
+			const lastCard = cards[cards.length - 1];
+
+			// Als neue Zeile anhängen
+			if (lastCard.a) {
+				lastCard.a += '\n' + content;
+			} else {
+				lastCard.a = content;
+			}
+
+			// Wir konsumieren diese Zeile und springen zur nächsten
+			i++;
+			continue;
+		}
+		// ---------------------------------------------
+
+		const isQ = line.startsWith('Q:');
+		const isLegacyCloze = !isQ && (line.includes('{{c') || line.includes('____'));
+
+		if (isQ || isLegacyCloze) {
+			let q = isQ ? line.substring(2).trim() : line;
 			let a = '';
 			let id: number | null = null;
-			let typeIn = false; // Track if this is a type-in card
+			let typeIn = false;
 			let currentLineIndex = i + 1;
 
-			while (currentLineIndex < lines.length &&
-				!lines[currentLineIndex].startsWith('A:') &&
-				!lines[currentLineIndex].startsWith('A (type):') &&
-				!lines[currentLineIndex].startsWith('ID:') &&
-				!lines[currentLineIndex].startsWith('Q:')) {
-				if (lines[currentLineIndex].trim() === 'xxx' || lines[currentLineIndex].includes('____')) break;
-				q += '\n' + lines[currentLineIndex];
+			// Lese Q
+			while (currentLineIndex < lines.length) {
+				const nextLine = lines[currentLineIndex];
+				const trimmedNext = nextLine.trim();
+
+				if (nextLine.startsWith('A:') ||
+					nextLine.startsWith('A (type):') ||
+					nextLine.startsWith('ID:') ||
+					nextLine.startsWith('Q:') ||
+					trimmedNext === 'xxx') break;
+
+				if (isLegacyCloze && (nextLine.includes('{{c') || nextLine.includes('____'))) break;
+
+				q += '\n' + nextLine;
 				currentLineIndex++;
 			}
 
-			if (currentLineIndex < lines.length && (lines[currentLineIndex].startsWith('A:') || lines[currentLineIndex].startsWith('A (type):'))) {
-				const answerLine = lines[currentLineIndex];
-				if (answerLine.startsWith('A (type):')) {
-					typeIn = true;
-					a = answerLine.substring(9).trim(); // 'A (type):' has 9 characters
-				} else {
-					a = answerLine.substring(2).trim(); // 'A:' has 2 characters
-				}
-				currentLineIndex++;
-				while (currentLineIndex < lines.length &&
-					!lines[currentLineIndex].startsWith('ID:') &&
-					!lines[currentLineIndex].startsWith('Q:') &&
-					!lines[currentLineIndex].startsWith('INSTRUCTION:') && // Added to stop parsing A if these lines are encountered
-					!lines[currentLineIndex].startsWith('STATUS:')) { // Added to stop parsing A if these lines are encountered
-					// Stop if we see a separator OR a Cloze deletion pattern (start of a new Cloze card)
-					if (lines[currentLineIndex].trim() === 'xxx' ||
-						lines[currentLineIndex].includes('____') ||
-						/{{c\d+::/.test(lines[currentLineIndex])) break;
+			// Lese A
+			if (currentLineIndex < lines.length) {
+				const nextLine = lines[currentLineIndex];
 
-					a += '\n' + lines[currentLineIndex];
+				let isAnswerStart = nextLine.startsWith('A:') || nextLine.startsWith('A (type):');
+
+				if (isAnswerStart) {
+					if (nextLine.startsWith('A (type):')) {
+						typeIn = true;
+						a = nextLine.substring(9).trim();
+					} else {
+						a = nextLine.substring(2).trim();
+					}
+
 					currentLineIndex++;
-				}
-			}
 
-			if (currentLineIndex < lines.length && lines[currentLineIndex].trim().startsWith('ID:')) {
-				id = parseInt(lines[currentLineIndex].trim().substring(3).trim(), 10) || null;
-				currentLineIndex++;
-			}
+					while (currentLineIndex < lines.length) {
+						const aNextLine = lines[currentLineIndex];
+						if (aNextLine.startsWith('ID:') ||
+							aNextLine.startsWith('Q:') ||
+							aNextLine.startsWith('INSTRUCTION:') ||
+							aNextLine.startsWith('STATUS:') ||
+							aNextLine.trim() === 'xxx' ||
+							aNextLine.includes('{{c') ||
+							aNextLine.includes('____')) break;
 
-			cards.push({ type: 'Basic', q: q.trim(), a: a.trim(), id, typeIn });
-			i = currentLineIndex;
-
-		} else {
-			let q = line;
-			let a = '';
-			let id: number | null = null;
-			let currentLineIndex = i + 1;
-			let foundXxx = false;
-
-			while (currentLineIndex < lines.length &&
-				lines[currentLineIndex].trim() !== 'xxx' &&
-				!lines[currentLineIndex].startsWith('Q:') &&
-				!lines[currentLineIndex].startsWith('ID:') &&
-				!lines[currentLineIndex].startsWith('INSTRUCTION:') && // Added to stop parsing Q if these lines are encountered
-				!lines[currentLineIndex].startsWith('STATUS:')) { // Added to stop parsing Q if these lines are encountered
-
-				// Stop if we see a legacy Cloze placeholder (____) - though usually part of the card
-				// But if we see a NEW Cloze card pattern on a new line, we might want to split?
-				// For now, assume Cloze cards are single blocks or separated by newlines which are consumed.
-				// But if we have multiple one-liner Cloze cards:
-				// Cloze 1
-				// Cloze 2
-				// The loop consumes Cloze 2 into Cloze 1?
-				// Yes, unless we define a boundary.
-				// The prompt generates blank lines between cards.
-				// The `split('\n')` keeps blank lines? Yes.
-				// `trimmedLine.length === 0` check at top of loop (line 112) skips blank lines.
-				// So `lines` here does NOT contain blank lines?
-				// No, `lines` contains ALL lines.
-				// But the outer loop `while (i < lines.length)` processes `lines[i]`.
-				// If `lines[i]` is empty, it continues.
-				// So `q` starts with a non-empty line.
-				// The inner loop consumes subsequent lines.
-				// If subsequent line is empty?
-				// `lines[currentLineIndex]` might be empty.
-				// If it's empty, we probably should stop consuming if it's a Cloze card?
-				// Or treat it as part of the card?
-				// Anki cards can be multi-line.
-				// But if we have two Cloze cards:
-				// Text 1 {{c1::...}}
-				// Text 2 {{c1::...}}
-				// They will be merged into one card!
-				// We need to stop if we see ANOTHER Cloze pattern?
-				if (lines[currentLineIndex].includes('____') || /{{c\d+::/.test(lines[currentLineIndex])) {
-					// If the CURRENT line `q` already has a cloze, and we see ANOTHER one, it's likely a new card.
-					if (q.includes('____') || /{{c\d+::/.test(q)) {
-						break;
+						a += '\n' + aNextLine;
+						currentLineIndex++;
 					}
 				}
-
-				q += '\n' + lines[currentLineIndex];
-				currentLineIndex++;
-			}
-
-			if (currentLineIndex < lines.length && lines[currentLineIndex].trim() === 'xxx') {
-				foundXxx = true;
-				currentLineIndex++;
-				while (currentLineIndex < lines.length &&
-					!lines[currentLineIndex].startsWith('ID:') &&
-					!lines[currentLineIndex].startsWith('Q:') &&
-					!lines[currentLineIndex].startsWith('INSTRUCTION:') && // Added to stop parsing A if these lines are encountered
-					!lines[currentLineIndex].startsWith('STATUS:')) { // Added to stop parsing A if these lines are encountered
-					if (lines[currentLineIndex].trim() === 'xxx' || lines[currentLineIndex].includes('____')) break;
-					a += '\n' + lines[currentLineIndex];
-					currentLineIndex++;
-				}
 			}
 
 			if (currentLineIndex < lines.length && lines[currentLineIndex].trim().startsWith('ID:')) {
@@ -245,36 +213,30 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 				currentLineIndex++;
 			}
 
-			// Check for Cloze patterns (legacy ____ or Anki {{c::}})
-			if (foundXxx || q.includes('____') || /{{c\d+::/.test(q)) {
-				cards.push({ type: 'Cloze', q: q.trim(), a: a.trim(), id });
-			} else {
-				if (q.trim().length > 0) {
-					// console.warn("Anki Parser (Cards): Ignoriere unerwartete Zeile:", line);
-				}
+			const type = (q.includes('{{c') || q.includes('____')) ? 'Cloze' : 'Basic';
+
+			// Bereinigung für Basic-Karten: Falls Cloze-Syntax in A: gelandet ist, entfernen
+			if (type === 'Basic' && a.includes('{{c')) {
+				a = stripClozeSyntax(a);
 			}
+
+			cards.push({ type, q: q.trim(), a: a.trim(), id, typeIn });
 			i = currentLineIndex;
+		} else {
+			i++;
 		}
 	}
-	cards.forEach(card => {
-		if (card.a) card.a = card.a.trim();
-	});
 	return cards;
 }
 
-// Parses the last anki-cards block found in the editor content
 export function parseAnkiSection(editor: Editor, mainDeck: string): AnkiParsedInfo | null {
 	const fileContent = editor.getValue();
 	const matches = [...fileContent.matchAll(ANKI_BLOCK_REGEX)];
 
-	if (matches.length === 0) {
-		console.log("parseAnkiSection: No anki-cards block found.");
-		return null;
-	}
+	if (matches.length === 0) return null;
 
 	const lastMatch = matches[matches.length - 1];
-	const blockContent = lastMatch[1]; // Nur der Inhalt innerhalb der Zäune
-	console.log("parseAnkiSection: Found block content:", JSON.stringify(blockContent));
+	const blockContent = lastMatch[1];
 	const lines = blockContent.trim().split('\n');
 
 	const deckLine = lines.find(l => l.trim().startsWith('TARGET DECK:'));
@@ -282,7 +244,6 @@ export function parseAnkiSection(editor: Editor, mainDeck: string): AnkiParsedIn
 	const disabledInstructionLine = lines.find(l => l.trim().startsWith('# INSTRUCTION:'));
 	const statusLine = lines.find(l => l.trim().startsWith('STATUS:'));
 
-	// WICHTIG: Erlaube Blöcke ohne Deck-Zeile, aber gib deckName als null zurück
 	const fullDeckPath = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
 	const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : undefined;
 	const disabledInstruction = disabledInstructionLine ? disabledInstructionLine.replace('# INSTRUCTION:', '').trim() : undefined;
@@ -290,15 +251,10 @@ export function parseAnkiSection(editor: Editor, mainDeck: string): AnkiParsedIn
 
 	const subdeck = fullDeckPath && fullDeckPath.startsWith(mainDeck + '::')
 		? fullDeckPath.substring(mainDeck.length + 2)
-		: ''; // Wenn kein Deck oder kein Subdeck, ist subdeck leer
+		: '';
 
-	// Parse Karten *nur aus dem Blockinhalt*
 	const parsedCards = parseCardsFromBlockSource(blockContent);
-	console.log("parseAnkiSection: Parsed cards:", parsedCards);
-	const existingCardsText = formatCardsToExistingCardsString(parsedCards); // Gibt "Keine." zurück, wenn leer
-	console.log("parseAnkiSection: Formatted existingCardsText for AI:", JSON.stringify(existingCardsText));
+	const existingCardsText = formatCardsToExistingCardsString(parsedCards);
 
-
-	// Gib immer ein Objekt zurück, auch wenn deckName null ist, solange ein Block gefunden wurde
 	return { subdeck, existingCardsText, deckName: fullDeckPath, instruction, disabledInstruction, status };
 }
