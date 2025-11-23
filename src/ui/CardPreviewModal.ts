@@ -1,15 +1,17 @@
-import { App, Modal } from 'obsidian';
+import { App, Modal, Setting, Notice } from 'obsidian';
 import { Card } from '../types';
 import { CardEditModal } from './CardEditModal';
 
 export class CardPreviewModal extends Modal {
 	cards: Card[];
-	onSave: (cards: Card[], deletedCardIds: number[]) => void;
+	deckName: string;
+	onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void;
 	deletedCardIds: number[] = []; // Speichert die IDs der gelöschten Karten
 
-	constructor(app: App, cards: Card[], onSave: (cards: Card[], deletedCardIds: number[]) => void) {
+	constructor(app: App, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void) {
 		super(app);
 		this.cards = [...cards];
+		this.deckName = deckName || "";
 		this.onSave = onSave;
 		this.modalEl.addClass('anki-preview-modal-wide');
 	}
@@ -23,12 +25,43 @@ export class CardPreviewModal extends Modal {
 		contentEl.empty();
 		contentEl.createEl("h2", { text: "Karten bearbeiten & verwalten" });
 
+		// --- Deck Name Input ---
+		new Setting(contentEl)
+			.setName("Target Deck")
+			.setDesc("Der Name des Decks in Anki, in das diese Karten synchronisiert werden.")
+			.addText(text => text
+				.setValue(this.deckName)
+				.onChange(value => {
+					this.deckName = value;
+				})
+				.inputEl.style.width = '100%'
+			);
+
 		const buttonContainer = contentEl.createDiv({ cls: 'anki-preview-button-container' });
+		buttonContainer.style.marginTop = '20px';
+
 		buttonContainer.createEl('button', { text: '➕ Neue Karte hinzufügen' }).addEventListener('click', () => {
 			new CardEditModal(this.app, {}, (newCard) => {
 				this.cards.push(newCard);
 				this.render();
 			}).open();
+		});
+
+		// --- Delete All Button ---
+		const deleteAllBtn = buttonContainer.createEl('button', { text: '🗑️ Alle löschen', cls: 'anki-delete-button' });
+		deleteAllBtn.style.marginLeft = '10px';
+		deleteAllBtn.addEventListener('click', () => {
+			if (confirm("Möchtest du wirklich ALLE Karten in diesem Block löschen? Dies kann nicht rückgängig gemacht werden.")) {
+				// Alle existierenden IDs zur Löschliste hinzufügen
+				this.cards.forEach(card => {
+					if (card.id) {
+						this.deletedCardIds.push(card.id);
+					}
+				});
+				this.cards = [];
+				this.render();
+				new Notice("Alle Karten wurden zum Löschen markiert.");
+			}
 		});
 
 		const container = contentEl.createDiv({ cls: 'anki-preview-container' });
@@ -65,7 +98,7 @@ export class CardPreviewModal extends Modal {
 
 	onClose() {
 		// Beim Schließen die aktualisierte Kartenliste UND die Liste der gelöschten IDs zurückgeben
-		this.onSave(this.cards, this.deletedCardIds);
+		this.onSave(this.cards, this.deletedCardIds, this.deckName);
 		this.contentEl.empty();
 	}
 }

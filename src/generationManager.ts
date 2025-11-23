@@ -17,7 +17,7 @@ export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor:
 	const initialSubdeck = initialAnkiInfo ? initialAnkiInfo.subdeck : '';
 
 	const geminiAvailable = !!plugin.settings.geminiApiKey;
-	const openAiAvailable = !!plugin.settings.openAiApiKey; // NEU
+	const openAiAvailable = !!plugin.settings.openAiApiKey;
 	const ollamaAvailable = plugin.settings.ollamaEnabled && !!plugin.settings.ollamaEndpoint && !!plugin.settings.ollamaModel;
 
 	const startGen = (provider: 'gemini' | 'ollama' | 'openai') => {
@@ -64,7 +64,7 @@ export async function runGenerationProcess(
 	provider: 'gemini' | 'ollama' | 'openai',
 	subdeck: string,
 	additionalInstructions: string = ''
-) {
+): Promise<string> {
 	let notice = new Notice(`Bereite Anki-Block für ${provider} vor...`, 0);
 
 	try {
@@ -92,7 +92,7 @@ export async function runGenerationProcess(
 		}
 
 		// --- ÜBERGABE der images an generateCardsWithAI ---
-		const generatedTextRaw = await generateCardsWithAI(
+		const { cards: generatedTextRaw, feedback } = await generateCardsWithAI(
 			plugin.app,
 			currentContentForAI,
 			existingCards,
@@ -103,6 +103,28 @@ export async function runGenerationProcess(
 		);
 		// --- ENDE ÜBERGABE ---
 
+		console.log("runGenerationProcess received feedback:", feedback ? "YES (Length: " + feedback.length + ")" : "NO");
+
+		if (!generatedTextRaw) {
+			new Notice("Keine Karten generiert.");
+			return "";
+		}
+
+		// Store feedback in cache BEFORE modifying the file (which triggers re-render)
+		if (feedback) {
+			const activeFile = plugin.app.workspace.getActiveFile();
+			if (activeFile) {
+				console.log("Caching feedback for:", activeFile.path);
+				plugin.feedbackCache.set(activeFile.path, feedback);
+			}
+		}
+
+		// --- NEU: LOGGING DES ROHEN AI-OUTPUTS ---
+		console.log("%c=== RAW AI OUTPUT (UNBEREINIGT) START ===", "color: red; font-weight: bold; font-size: 12px;");
+		console.log(generatedTextRaw);
+		console.log("%c=== RAW AI OUTPUT (UNBEREINIGT) END ===", "color: red; font-weight: bold; font-size: 12px;");
+		// ------------------------------------------
+
 		const generatedText = cleanAiGeneratedText(generatedTextRaw);
 		console.log("Generierter Text (bereinigt):", JSON.stringify(generatedText));
 
@@ -111,9 +133,11 @@ export async function runGenerationProcess(
 			insertGeneratedText(editor, blockStartIndex, insertionPoint, generatedText);
 			notice.hide();
 			new Notice(`Anki-Block wurde mit ${provider} aktualisiert/hinzugefügt.`);
+			return feedback;
 		} else if (!generatedText) {
 			notice.hide();
-			new Notice(`Kein neuer Text von ${provider} generiert.`, 5000);
+			new Notice(`Kein neuer Text von ${provider} generiert. Prüfe die Konsole (Strg+Shift+I) für Details.`, 7000);
+			return "";
 		} else {
 			throw new Error("Interner Fehler: Einfügepunkt war ungültig nach ensureAnkiBlock.");
 		}
@@ -124,6 +148,7 @@ export async function runGenerationProcess(
 		if (!(error instanceof Error && (error.message.startsWith("API Fehler") || error.message.startsWith("Netzwerkfehler")))) {
 			new Notice(`Fehler: ${error.message}`, 7000);
 		}
+		return "";
 	}
 }
 
@@ -352,7 +377,8 @@ function cleanAiGeneratedText(rawText: string): string {
 			validCardLines.push(line);
 		}
 		else {
-			console.warn("CleanAI: Ignoriere ungültige Zeile:", line);
+			// --- DEBUG: WARUM WURDE EINE ZEILE IGNORIERT? ---
+			console.warn("CleanAI: Ignoriere ungültige Zeile (kein Start-Marker und nicht in einer Karte):", line);
 		}
 	}
 

@@ -1,5 +1,8 @@
 import { Editor } from 'obsidian';
 import { Card } from '../types';
+import { normalizeNewlines } from '../utils';
+
+export const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
 export interface AnkiParsedInfo {
 	subdeck: string;
@@ -8,7 +11,7 @@ export interface AnkiParsedInfo {
 }
 
 // Formats parsed cards back into the string expected by the AI prompt
-function formatCardsToExistingCardsString(cards: Card[]): string {
+export function formatCardsToExistingCardsString(cards: Card[]): string {
 	// KORREKTUR: Explizit "Keine." zurückgeben, wenn keine Karten vorhanden sind.
 	if (!cards || cards.length === 0) {
 		return 'Keine.';
@@ -35,6 +38,66 @@ function formatCardsToExistingCardsString(cards: Card[]): string {
 		}
 	});
 	return lines.join('\n');
+}
+
+export function formatCardsToString(deckLine: string, cards: Card[]): string {
+	const newLines: string[] = [deckLine.trim()];
+	if (cards.length > 0) newLines.push('');
+
+	cards.forEach((card, cardIndex) => {
+		if (card.type === 'Basic') {
+			card.q.split('\n').forEach((qLine, index) => newLines.push(index === 0 ? `Q: ${qLine}` : qLine));
+			if (card.a && card.a.trim().length > 0) {
+				card.a.split('\n').forEach((aLine, index) => newLines.push(index === 0 ? `A: ${aLine}` : aLine));
+			} else {
+				newLines.push('A:');
+			}
+		} else { // Cloze
+			card.q.split('\n').forEach(qLine => newLines.push(qLine));
+			newLines.push('xxx');
+			(card.a || "").split('\n').forEach(aLine => newLines.push(aLine));
+		}
+		if (card.id) {
+			newLines.push(`ID: ${card.id}`);
+		}
+		if (cardIndex < cards.length - 1) {
+			newLines.push(''); // Leerzeile
+		}
+	});
+	return newLines.join('\n').trimEnd();
+}
+
+export function findSpecificAnkiBlock(fullContent: string, originalSourceContent: string): { matchIndex: number, originalFullBlockSource: string } {
+	ANKI_BLOCK_REGEX.lastIndex = 0;
+	const matches = [...fullContent.matchAll(ANKI_BLOCK_REGEX)];
+	let originalFullBlockSource = "";
+	let matchIndex = -1;
+
+	const normalizedSource = normalizeNewlines(originalSourceContent);
+
+	if (matches.length > 0) {
+		const match = Array.from(matches).find(m => normalizeNewlines(m[1]) === normalizedSource);
+		if (match) {
+			originalFullBlockSource = match[0];
+			matchIndex = match.index ?? -1;
+		} else {
+			const normalizedSourceTrimmed = normalizedSource.trim();
+			const fallbackMatch = Array.from(matches).find(m => normalizeNewlines(m[1]).trim() === normalizedSourceTrimmed);
+			if (fallbackMatch) {
+				originalFullBlockSource = fallbackMatch[0];
+				matchIndex = fallbackMatch.index ?? -1;
+			} else {
+				console.warn("Konnte spezifischen Anki-Block nicht exakt finden (via source content), verwende letzten Block.");
+				const lastMatch = matches[matches.length - 1];
+				originalFullBlockSource = lastMatch[0];
+				matchIndex = lastMatch.index ?? -1;
+			}
+		}
+	}
+	if (matchIndex === -1) {
+		console.error("findSpecificAnkiBlock: Konnte keinen Block finden. Regex:", ANKI_BLOCK_REGEX, "Content snippet:", fullContent.substring(0, 500));
+	}
+	return { matchIndex, originalFullBlockSource };
 }
 
 // Robust card parsing logic (remains the same)
@@ -138,8 +201,7 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 // Parses the last anki-cards block found in the editor content
 export function parseAnkiSection(editor: Editor, mainDeck: string): AnkiParsedInfo | null {
 	const fileContent = editor.getValue();
-	const ankiBlockRegex = /^```anki-cards\s*([\s\S]*?)^```/gm;
-	const matches = [...fileContent.matchAll(ankiBlockRegex)];
+	const matches = [...fileContent.matchAll(ANKI_BLOCK_REGEX)];
 
 	if (matches.length === 0) {
 		console.log("parseAnkiSection: No anki-cards block found.");

@@ -1,11 +1,12 @@
-import { MarkdownPostProcessorContext, Notice, TFile, normalizePath, MarkdownView } from 'obsidian';
+import { MarkdownPostProcessorContext, Notice, MarkdownView } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { Card } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
-import { deleteAnkiNotes, createAnkiDeck, getCardCountForDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './anki/AnkiConnect';
-import { arrayBufferToBase64, basicMarkdownToHtml, normalizeNewlines, convertObsidianLatexToAnki, convertObsidianLinks } from './utils';
+import { getCardCountForDeck } from './anki/AnkiConnect';
 import { parseCardsFromBlockSource } from './anki/ankiParser';
 import { runGenerationProcess } from './generationManager';
+import { syncAnkiBlock, saveAnkiBlockChanges } from './anki/syncManager';
+import { generateFeedbackOnly } from './aiGenerator';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
@@ -23,60 +24,84 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		const synchronizedCount = cards.filter(card => card.id !== null).length;
 		const totalCardCount = cards.length;
 		const localStatusText = `✅ ${synchronizedCount} Synchronisiert | 📝 ${totalCardCount} Lokal`;
-		let ankiStatusText = '';
-		let errorClass = '';
-		try {
-			const totalAnkiCount = await getCardCountForDeck(deckName);
-			ankiStatusText = `📈 ${totalAnkiCount} in Anki | `;
-		} catch (e) {
-			ankiStatusText = '⚠️ Anki-Verbindung fehlgeschlagen | ';
-			errorClass = 'anki-error';
-		}
-		const fullText = ankiStatusText + localStatusText;
-		const pEl = el.createEl('p', { text: fullText, cls: 'anki-card-count' });
-		if (errorClass) pEl.addClass(errorClass);
+
+		// Initial render with loading state
+		const pEl = el.createEl('p', { text: `⏳ Prüfe Anki... | ${localStatusText}`, cls: 'anki-card-count' });
+
+		// Async check
+		getCardCountForDeck(deckName).then(totalAnkiCount => {
+			const ankiStatusText = `📈 ${totalAnkiCount} in Anki | `;
+			pEl.setText(ankiStatusText + localStatusText);
+			pEl.removeClass('anki-error'); // Ensure error class is removed if it was there (re-render case)
+		}).catch(e => {
+			const ankiStatusText = '⚠️ Anki-Verbindung fehlgeschlagen | ';
+			pEl.setText(ankiStatusText + localStatusText);
+			pEl.addClass('anki-error');
+		});
+	}
+	// --- BUTTONS LAYOUT ---
+	// Row 1: Generation
+	const genContainer = el.createDiv({ cls: 'anki-btn-row' });
+	genContainer.style.display = 'flex';
+	genContainer.style.flexWrap = 'wrap';
+	genContainer.style.gap = '6px';
+	genContainer.style.marginBottom = '6px';
+
+	// Row 2: Actions
+	const actionContainer = el.createDiv({ cls: 'anki-btn-row' });
+	actionContainer.style.display = 'flex';
+	actionContainer.style.flexWrap = 'wrap';
+	actionContainer.style.gap = '6px';
+	actionContainer.style.marginBottom = '10px';
+
+	// --- GENERATE BUTTONS (Row 1) ---
+	let hasAnyProvider = false;
+
+	if (plugin.settings.geminiApiKey) {
+		hasAnyProvider = true;
+		const genGeminiBtn = genContainer.createEl('button', { text: '✨ Gemini Generieren' });
+		genGeminiBtn.style.flex = '1';
+		genGeminiBtn.onclick = async () => {
+			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
+
+			let subdeck = "";
+			if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
+				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
+			}
+
+			const feedback = await runGenerationProcess(plugin, view.editor, 'gemini', subdeck, "");
+			if (feedback) {
+				renderFeedback(el, feedback);
+			}
+		};
 	}
 
-	const buttonContainer = el.createDiv({ cls: 'anki-button-container' });
+	if (plugin.settings.openAiApiKey) {
+		hasAnyProvider = true;
+		const genOpenAiBtn = genContainer.createEl('button', { text: '🤖 OpenAI Generieren' });
+		genOpenAiBtn.style.flex = '1';
+		genOpenAiBtn.onclick = async () => {
+			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
 
-	const previewButton = buttonContainer.createEl('button', { text: 'Vorschau & Bearbeiten' });
-	previewButton.onclick = () => {
-		const cardsForModal = JSON.parse(JSON.stringify(cards)) as Card[];
-		const onSave = async (updatedCards: Card[], deletedCardIds: number[]) => {
-			await saveAnkiBlockChanges(plugin, source, updatedCards, deletedCardIds);
+			let subdeck = "";
+			if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
+				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
+			}
+
+			const feedback = await runGenerationProcess(plugin, view.editor, 'openai', subdeck, "");
+			if (feedback) {
+				renderFeedback(el, feedback);
+			}
 		};
-		new CardPreviewModal(plugin.app, cardsForModal, onSave).open();
-	};
-
-	const syncButton = buttonContainer.createEl('button', { text: 'Mit Anki synchronisieren' });
-	syncButton.onclick = async () => {
-		await syncAnkiBlock(plugin, source, deckName, cards);
-	};
-
-	const quickGenButton = buttonContainer.createEl('button', { text: '⚡ KI Generieren' });
-	quickGenButton.title = "Generiert Karten (Gemini bevorzugt)";
-	quickGenButton.onclick = async () => {
-		const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
-
-		let subdeck = "";
-		if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
-			subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
-		}
-
-		const provider = plugin.settings.geminiApiKey ? 'gemini' :
-			(plugin.settings.openAiApiKey ? 'openai' :
-				(plugin.settings.ollamaEnabled ? 'ollama' : null));
-
-		if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
-
-		await runGenerationProcess(plugin, view.editor, provider, subdeck, "");
-	};
+	}
 
 	if (plugin.settings.ollamaEnabled) {
-		const localGenButton = buttonContainer.createEl('button', { text: '💻 Lokal (Ollama)' });
-		localGenButton.title = "Erzwingt Generierung mit dem lokalen Modell";
-		localGenButton.onclick = async () => {
+		hasAnyProvider = true;
+		const genOllamaBtn = genContainer.createEl('button', { text: '💻 Ollama Generieren' });
+		genOllamaBtn.style.flex = '1';
+		genOllamaBtn.onclick = async () => {
 			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
 
@@ -88,277 +113,119 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			await runGenerationProcess(plugin, view.editor, 'ollama', subdeck, "");
 		};
 	}
-}
 
+	if (hasAnyProvider) {
+		const quickGenButton = genContainer.createEl('button', { text: '⚡ Auto Generieren' });
+		quickGenButton.style.flex = '1';
+		quickGenButton.title = "Generiert Karten (Gemini bevorzugt)";
+		quickGenButton.onclick = async () => {
+			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
 
-async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, originalSourceContent: string, updatedCards: Card[], deletedCardIds: number[]) {
-	const notice = new Notice('Speichere Änderungen...', 0);
-	try {
-		if (deletedCardIds.length > 0) {
-			await deleteAnkiNotes(deletedCardIds);
-			new Notice(`${deletedCardIds.length} Karte(n) gelöscht!`);
-		}
-		const file = plugin.app.workspace.getActiveFile();
-		if (!file) throw new Error("Keine aktive Datei.");
-		const currentFileContent = await plugin.app.vault.read(file);
+			let subdeck = "";
+			if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
+				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
+			}
 
-		const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
+			const provider = plugin.settings.geminiApiKey ? 'gemini' :
+				(plugin.settings.openAiApiKey ? 'openai' :
+					(plugin.settings.ollamaEnabled ? 'ollama' : null));
 
-		if (matchIndex === -1) {
-			throw new Error("Konnte den zu speichernden Anki-Block nicht finden.");
-		}
+			if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
 
-		const deckLine = originalFullBlockSource.split('\n').find(l => l.trim().startsWith('TARGET DECK:')) || `TARGET DECK: ${plugin.settings.mainDeck}::Standard`;
-		const newBlockContent = formatCardsToString(deckLine, updatedCards);
-
-		const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
-		const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
-
-		await plugin.app.vault.modify(file, updatedFileContent);
-		notice.hide();
-		new Notice("Änderungen gespeichert!");
-		plugin.app.workspace.trigger('markdown-preview-rerender');
-
-	} catch (e) {
-		notice.hide();
-		new Notice("Fehler beim Speichern: " + e.message, 7000);
-		console.error("Fehler beim Speichern:", e);
+			const feedback = await runGenerationProcess(plugin, view.editor, provider, subdeck, "");
+			if (feedback) {
+				renderFeedback(el, feedback);
+			}
+		};
 	}
-}
 
-async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent: string, deckName: string | null, cards: Card[]) {
-	const notice = new Notice('Synchronisiere mit Anki...', 0);
-	try {
+	// --- ACTION BUTTONS (Row 2) ---
+	const previewButton = actionContainer.createEl('button', { text: '📝 Vorschau & Bearbeiten' });
+	previewButton.style.flex = '1';
+	previewButton.onclick = () => {
+		const cardsForModal = JSON.parse(JSON.stringify(cards)) as Card[];
+		const currentDeckName = deckName || `${plugin.settings.mainDeck}::Standard`;
+
+		const onSave = async (updatedCards: Card[], deletedCardIds: number[], newDeckName: string) => {
+			await saveAnkiBlockChanges(plugin, source, updatedCards, deletedCardIds, newDeckName);
+		};
+		new CardPreviewModal(plugin.app, cardsForModal, currentDeckName, onSave).open();
+	};
+
+	const syncButton = actionContainer.createEl('button', { text: '🔄 Sync mit Anki' });
+	syncButton.style.flex = '1';
+	syncButton.onclick = async () => {
 		const activeFile = plugin.app.workspace.getActiveFile();
-		if (!activeFile) throw new Error("Keine aktive Datei gefunden.");
-		if (!deckName) throw new Error("Kein 'TARGET DECK' im anki-cards Block gefunden.");
-		await createAnkiDeck(deckName);
-
-		let vaultName = plugin.settings.vaultName;
-		if (!vaultName) { try { /* @ts-ignore */ vaultName = plugin.app.vault.getName(); } catch (e) { console.log("getName error", e); } }
-		if (!vaultName) { try { /* @ts-ignore */ if (plugin.app.vault.adapter && plugin.app.vault.adapter.getName) { /* @ts-ignore */ vaultName = plugin.app.vault.adapter.getName(); } } catch (e) { console.log("adapter.getName error", e); } }
-		if (!vaultName) { vaultName = "Obsidian"; console.warn("Vault Name konnte nicht ermittelt werden. Verwende 'Obsidian'."); }
-
-		const updatedCardsWithIds: Card[] = [];
-		const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
-
-		for (const card of cards) {
-			if (!card.q || card.q.trim().length === 0) {
-				console.warn("Überspringe Karte mit leerer Frage:", card);
-				continue;
-			}
-
-			notice.setMessage(`Verarbeite Karte: ${card.q.substring(0, 30)}...`);
-			let ankiNoteId = card.id;
-			const originalQ = card.q;
-			const originalA = card.a;
-			let processedQ = originalQ;
-			let processedA = originalA;
-			const imageProcessedMap = new Map<string, string>();
-
-			const processImages = async (text: string): Promise<string> => {
-				let processedText = text;
-				const matches = Array.from(text.matchAll(imageRegex));
-				for (const match of matches) {
-					const originalLink = match[0];
-					let imageName = match[1]?.trim();
-					if (!imageName && match[2]) {
-						const pathParts = match[2].split(/[\\/]/);
-						imageName = pathParts[pathParts.length - 1]?.trim();
-						if (imageName) imageName = decodeURIComponent(imageName);
-					}
-					if (!imageName) continue;
-					if (imageProcessedMap.has(imageName)) {
-						processedText = processedText.split(originalLink).join(`<img src="${imageProcessedMap.get(imageName)}">`);
-						continue;
-					}
-					try {
-						const file = plugin.app.metadataCache.getFirstLinkpathDest(normalizePath(imageName), activeFile.path);
-						if (file instanceof TFile) {
-							notice.setMessage(`Lade Bild hoch: ${file.name}...`);
-							const fileData = await plugin.app.vault.readBinary(file);
-							const base64Data = arrayBufferToBase64(fileData);
-							const ankiFilename = await storeAnkiMediaFile(file.name, base64Data);
-							imageProcessedMap.set(imageName, ankiFilename);
-							processedText = processedText.split(originalLink).join(`<img src="${ankiFilename}">`);
-						} else {
-							console.warn(`Bilddatei nicht gefunden beim Sync: ${imageName}`);
-							processedText = processedText.split(originalLink).join(`[Bild nicht gefunden: ${imageName}]`);
-						}
-					} catch (imgError) {
-						console.error(`Fehler bei Bild ${imageName} beim Sync:`, imgError);
-						new Notice(`Fehler bei Bild ${imageName}: ${imgError.message}`, 5000);
-						processedText = processedText.split(originalLink).join(`[Fehler bei Bild: ${imageName}]`);
-					}
-				}
-				return processedText;
-			};
-
-			processedQ = await processImages(processedQ);
-			processedA = await processImages(processedA);
-
-			processedQ = convertObsidianLatexToAnki(processedQ);
-			processedA = convertObsidianLatexToAnki(processedA);
-
-			processedQ = convertObsidianLinks(processedQ, vaultName);
-			processedA = convertObsidianLinks(processedA, vaultName);
-
-			const htmlQ = basicMarkdownToHtml(processedQ);
-			const htmlA = basicMarkdownToHtml(processedA);
-			let ankiFieldQ = htmlQ;
-			let ankiFieldA = htmlA;
-			let ankiClozeTextField = "";
-
-			if (card.type === 'Cloze') {
-				const clozeRegex = /(?<!\w)____(?!\w)/;
-				ankiClozeTextField = clozeRegex.test(htmlQ)
-					? htmlQ.replace(clozeRegex, `{{c1::${htmlA}}}`)
-					: `${htmlQ} {{c1::${htmlA}}}`;
-				ankiFieldQ = ankiClozeTextField;
-				ankiFieldA = "";
-			}
-
-			if (card.type === 'Basic' && (!ankiFieldQ || ankiFieldQ.trim().length === 0)) {
-				console.warn("Überspringe Basic Karte (leeres Front-Feld):", originalQ);
-				continue;
-			}
-			if (card.type === 'Cloze' && (!ankiClozeTextField || ankiClozeTextField.trim().length === 0)) {
-				console.warn("Überspringe Cloze Karte (leeres Text-Feld):", originalQ);
-				continue;
-			}
-
-			if (!ankiNoteId) {
-				ankiNoteId = card.type === 'Basic'
-					? await findAnkiNoteId(originalQ, plugin.settings.basicFrontField) // FIX: Feldname
-					: await findAnkiClozeNoteId(originalQ, plugin.settings.clozeTextField); // FIX: Feldname
-			}
-
-			if (ankiNoteId) {
-				try {
-					notice.setMessage(`Aktualisiere Karte ${ankiNoteId}...`);
-					if (card.type === 'Basic') {
-						await updateAnkiNoteFields(ankiNoteId, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA); // FIX
-					} else {
-						await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeTextField, ankiClozeTextField); // FIX
-					}
-				} catch (e) {
-					if (e.message?.includes("Note was not found")) {
-						new Notice(`Karte ${ankiNoteId} nicht gefunden. Erstelle neu.`);
-						ankiNoteId = null;
-					} else { throw e; }
-				}
-			}
-
-			if (!ankiNoteId) {
-				try {
-					notice.setMessage(`Erstelle neue Karte für ${originalQ.substring(0, 30)}...`);
-					ankiNoteId = card.type === 'Basic'
-						? await addAnkiNote(deckName, plugin.settings.basicModelName, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA) // FIX
-						: await addAnkiClozeNote(deckName, plugin.settings.clozeModelName, plugin.settings.clozeTextField, ankiClozeTextField); // FIX
-				} catch (e) {
-					if (e.message?.includes("cannot create note because it is a duplicate")) {
-						new Notice(`Duplikat gefunden. Suche ID...`, 3000);
-						ankiNoteId = card.type === 'Basic'
-							? await findAnkiNoteId(originalQ, plugin.settings.basicFrontField) // FIX
-							: await findAnkiClozeNoteId(originalQ, plugin.settings.clozeTextField); // FIX
-						if (!ankiNoteId) {
-							throw new Error(`Duplikat "${originalQ.substring(0, 20)}..." ID nicht gefunden.`);
-						} else {
-							new Notice(`ID ${ankiNoteId} für Duplikat gefunden. Update...`);
-							if (card.type === 'Basic') {
-								await updateAnkiNoteFields(ankiNoteId, plugin.settings.basicFrontField, plugin.settings.basicBackField, ankiFieldQ, ankiFieldA); // FIX
-							} else {
-								await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeTextField, ankiClozeTextField); // FIX
-							}
-						}
-					} else { throw e; }
-				}
-			}
-			updatedCardsWithIds.push({ ...card, id: ankiNoteId });
-		}
-
-		const currentFileContent = await plugin.app.vault.read(activeFile);
-		const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
-
-		if (matchIndex === -1) {
-			throw new Error("Konnte den zu synchronisierenden Anki-Block nicht finden.");
-		}
-
-		const deckLine = `TARGET DECK: ${deckName}`;
-		const newBlockContent = formatCardsToString(deckLine, updatedCardsWithIds);
-		const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
-		const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
-
-		await plugin.app.vault.modify(activeFile, updatedFileContent);
-		notice.hide();
-		new Notice('Synchronisation erfolgreich!');
-		plugin.app.workspace.trigger('markdown-preview-rerender');
-
-	} catch (error) {
-		notice.hide();
-		const errorMsg = error instanceof Error ? error.message : String(error);
-		new Notice('Anki-Sync Fehler: ' + errorMsg, 10000);
-		console.error("Anki-Sync Fehler:", error);
-	}
-}
-
-
-function formatCardsToString(deckLine: string, cards: Card[]): string {
-	const newLines: string[] = [deckLine.trim()];
-	if (cards.length > 0) newLines.push('');
-
-	cards.forEach((card, cardIndex) => {
-		if (card.type === 'Basic') {
-			card.q.split('\n').forEach((qLine, index) => newLines.push(index === 0 ? `Q: ${qLine}` : qLine));
-			if (card.a && card.a.trim().length > 0) {
-				card.a.split('\n').forEach((aLine, index) => newLines.push(index === 0 ? `A: ${aLine}` : aLine));
-			} else {
-				newLines.push('A:');
-			}
-		} else { // Cloze
-			card.q.split('\n').forEach(qLine => newLines.push(qLine));
-			newLines.push('xxx');
-			(card.a || "").split('\n').forEach(aLine => newLines.push(aLine));
-		}
-		if (card.id) {
-			newLines.push(`ID: ${card.id}`);
-		}
-		if (cardIndex < cards.length - 1) {
-			newLines.push(''); // Leerzeile
-		}
-	});
-	return newLines.join('\n').trimEnd();
-}
-
-function findSpecificAnkiBlock(fullContent: string, originalSourceContent: string): { matchIndex: number, originalFullBlockSource: string } {
-	ANKI_BLOCK_REGEX.lastIndex = 0;
-	const matches = [...fullContent.matchAll(ANKI_BLOCK_REGEX)];
-	let originalFullBlockSource = "";
-	let matchIndex = -1;
-
-	const normalizedSource = normalizeNewlines(originalSourceContent);
-
-	if (matches.length > 0) {
-		const match = Array.from(matches).find(m => normalizeNewlines(m[1]) === normalizedSource);
-		if (match) {
-			originalFullBlockSource = match[0];
-			matchIndex = match.index ?? -1;
+		if (activeFile) {
+			await syncAnkiBlock(plugin, source, deckName, cards, activeFile);
 		} else {
-			const normalizedSourceTrimmed = normalizedSource.trim();
-			const fallbackMatch = Array.from(matches).find(m => normalizeNewlines(m[1]).trim() === normalizedSourceTrimmed);
-			if (fallbackMatch) {
-				originalFullBlockSource = fallbackMatch[0];
-				matchIndex = fallbackMatch.index ?? -1;
-			} else {
-				console.warn("Konnte spezifischen Anki-Block nicht exakt finden (via source content), verwende letzten Block.");
-				const lastMatch = matches[matches.length - 1];
-				originalFullBlockSource = lastMatch[0];
-				matchIndex = lastMatch.index ?? -1;
-			}
+			new Notice("Keine aktive Datei gefunden.");
 		}
+	};
+
+	// --- FEEDBACK BUTTON ---
+	const feedbackButton = actionContainer.createEl('button', { text: '🔍 Feedback einholen' });
+	feedbackButton.style.flex = '1';
+	feedbackButton.title = "Fragt die KI nach Feedback zur Notiz (ohne Kartengenerierung)";
+	feedbackButton.onclick = async () => {
+		const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
+
+		feedbackButton.disabled = true;
+		feedbackButton.setText("⏳ Lade...");
+
+		try {
+			let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
+			if (plugin.settings.geminiApiKey) provider = 'gemini';
+			else if (plugin.settings.openAiApiKey) provider = 'openai';
+			else if (plugin.settings.ollamaEnabled) provider = 'ollama';
+
+			const noteContent = view.editor.getValue();
+			const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings);
+
+			if (feedback) {
+				renderFeedback(el, feedback);
+				if (ctx.sourcePath) {
+					plugin.feedbackCache.set(ctx.sourcePath, feedback);
+				}
+			} else {
+				new Notice("Kein Feedback erhalten.");
+			}
+		} catch (e: any) {
+			new Notice("Fehler beim Abrufen des Feedbacks: " + e.message);
+			console.error(e);
+		} finally {
+			feedbackButton.disabled = false;
+			feedbackButton.setText('🔍 Feedback einholen');
+		}
+	};
+
+	// Check for cached feedback (from recent generation)
+	const cachedFeedback = plugin.feedbackCache.get(ctx.sourcePath);
+	if (cachedFeedback) {
+		console.log("Found cached feedback for", ctx.sourcePath, "rendering it.");
+		renderFeedback(el, cachedFeedback);
+		plugin.feedbackCache.delete(ctx.sourcePath); // Clear after rendering
 	}
-	if (matchIndex === -1) {
-		console.error("findSpecificAnkiBlock: Konnte keinen Block finden. Regex:", ANKI_BLOCK_REGEX, "Content snippet:", fullContent.substring(0, 500));
-	}
-	return { matchIndex, originalFullBlockSource };
+}
+
+// Helper function to render feedback
+function renderFeedback(container: HTMLElement, feedback: string) { // Renamed 'el' to 'container' for consistency with original
+	// Remove existing feedback box if any
+	const existingBox = container.querySelector('.anki-feedback-box'); // Changed selector to match new class
+	if (existingBox) existingBox.remove();
+
+	const feedbackBox = container.createDiv({ cls: 'anki-feedback-box' }); // Changed class name to 'anki-feedback-box'
+
+	const header = feedbackBox.createDiv({ cls: 'anki-feedback-header' });
+	header.createSpan({ text: '🤖 KI Feedback zum Aufschrieb' });
+
+	const closeBtn = header.createEl('button', { cls: 'anki-feedback-close', text: '✖' });
+	closeBtn.onclick = () => {
+		feedbackBox.remove();
+	};
+
+	const content = feedbackBox.createDiv({ cls: 'anki-feedback-content' });
+	content.setText(feedback);
 }

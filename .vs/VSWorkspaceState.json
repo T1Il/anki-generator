@@ -5,6 +5,6 @@
     "\\src\\anki",
     "\\src\\ui"
   ],
-  "SelectedNode": "\\src\\ui\\SubdeckModal.ts",
+  "SelectedNode": "\\src\\anki\\ankiParser.ts",
   "PreviewInSolutionExplorer": false
 }
