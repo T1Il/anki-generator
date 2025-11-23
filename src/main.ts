@@ -5,11 +5,12 @@ import { triggerCardGeneration } from './generationManager';
 import { parseAnkiSection as parseAnkiSectionType } from './anki/ankiParser'; // Nur für Typdeklaration
 import { SyncReviewModal } from './ui/SyncReviewModal';
 import { QuestionSearchModal } from './ui/QuestionSearchModal';
+import { Card, ChatMessage } from './types';
 import { t } from './lang/helpers';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
-	feedbackCache: Map<string, string> = new Map(); // Stores feedback by file path to persist across re-renders
+	feedbackCache: Map<string, ChatMessage[]> = new Map(); // Stores feedback history by file path
 
 	async onload() {
 		await this.loadSettings();

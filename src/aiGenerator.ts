@@ -1,7 +1,7 @@
 import { requestUrl, Notice, App } from 'obsidian';
 import { AnkiGeneratorSettings, DEFAULT_SETTINGS } from './settings';
 import { DebugModal } from './ui/DebugModal';
-import { ImageInput } from './types';
+import { ImageInput, ChatMessage } from './types';
 
 export async function generateCardsWithAI(
 	app: App,
@@ -10,11 +10,12 @@ export async function generateCardsWithAI(
 	provider: 'gemini' | 'ollama' | 'openai',
 	settings: AnkiGeneratorSettings,
 	additionalInstructions: string | null,
-	images: ImageInput[] = []
+	images: ImageInput[] = [],
+	isRevision: boolean = false
 ): Promise<{ cards: string, feedback: string }> {
 
 	// --- 1. Construct Card Prompt (User's Prompt) ---
-	let basePrompt = settings.prompt;
+	let basePrompt = settings.useCustomPrompt ? settings.prompt : DEFAULT_SETTINGS.prompt;
 	if (typeof basePrompt !== 'string') {
 		console.warn("generateCardsWithAI: settings.prompt war kein String. Fallback auf DEFAULT_SETTINGS.prompt.");
 		basePrompt = DEFAULT_SETTINGS.prompt;
@@ -24,26 +25,55 @@ export async function generateCardsWithAI(
 	}
 
 	let cardPrompt = basePrompt;
-	if (additionalInstructions && additionalInstructions.trim().length > 0) {
-		const insertionMarker = "Hier ist der Text";
-		const markerIndex = basePrompt.indexOf(insertionMarker);
 
-		if (markerIndex !== -1) {
-			const beforeMarker = basePrompt.substring(0, markerIndex);
-			const afterMarker = basePrompt.substring(markerIndex);
-			cardPrompt = `${beforeMarker.trimRight()}\n\n**Zusätzliche Anweisungen für diese Generierung:**\n${additionalInstructions.trim()}\n\n${afterMarker.trimLeft()}`;
-		} else {
-			console.warn("Konnte den Einfüge-Marker im Prompt nicht finden. Füge zusätzliche Anweisungen am Anfang ein.");
-			cardPrompt = `${additionalInstructions.trim()}\n\n---\n\n${basePrompt}`;
+	if (isRevision) {
+		// Special Prompt for Revision
+		cardPrompt = `Du bist ein Assistent, der bestehende Anki-Karteikarten überarbeitet.
+Deine Aufgabe ist es, die unten aufgeführten "Bestehenden Karten" basierend auf der folgenden Anweisung zu ändern.
+Behalte das Format strikt bei (Q:/A:).
+Lösche keine Karten, es sei denn, die Anweisung verlangt es explizit.
+Ändere den Inhalt der Karten entsprechend der Anweisung.
+
+Anweisung zur Überarbeitung:
+"${additionalInstructions || 'Überarbeite die Karten sinnvoll.'}"
+
+Hier ist der Kontext (Notizinhalt), falls benötigt:
+"""
+{{noteContent}}
+"""
+
+Bestehende Karten (diese sollen überarbeitet werden):
+{{existingCards}}
+
+Gib NUR die überarbeiteten Karten zurück.`;
+	} else {
+		// Standard Generation Logic
+		if (additionalInstructions && additionalInstructions.trim().length > 0) {
+			const insertionMarker = "Hier ist der Text";
+			const markerIndex = basePrompt.indexOf(insertionMarker);
+
+			if (markerIndex !== -1) {
+				const beforeMarker = basePrompt.substring(0, markerIndex);
+				const afterMarker = basePrompt.substring(markerIndex);
+				cardPrompt = `${beforeMarker.trimRight()}\n\n**Zusätzliche Anweisungen für diese Generierung:**\n${additionalInstructions.trim()}\n\n${afterMarker.trimLeft()}`;
+			} else {
+				console.warn("Konnte den Einfüge-Marker im Prompt nicht finden. Füge zusätzliche Anweisungen am Anfang ein.");
+				cardPrompt = `${additionalInstructions.trim()}\n\n---\n\n${basePrompt}`;
+			}
 		}
+
+		cardPrompt = cardPrompt
+			.replace('{{noteContent}}', noteContent)
+			.replace('{{existingCards}}', existingCards);
 	}
 
+	// Final replacement for Revision prompt as well (it uses the placeholders)
 	cardPrompt = cardPrompt
 		.replace('{{noteContent}}', noteContent)
 		.replace('{{existingCards}}', existingCards);
 
 	// --- 2. Construct Feedback Prompt ---
-	let feedbackPrompt = settings.feedbackPrompt;
+	let feedbackPrompt = settings.useCustomFeedbackPrompt ? settings.feedbackPrompt : DEFAULT_SETTINGS.feedbackPrompt;
 	if (!feedbackPrompt || typeof feedbackPrompt !== 'string') {
 		feedbackPrompt = DEFAULT_SETTINGS.feedbackPrompt;
 	}
@@ -92,13 +122,35 @@ export async function generateFeedbackOnly(
 	provider: 'gemini' | 'ollama' | 'openai',
 	settings: AnkiGeneratorSettings
 ): Promise<string> {
-	let feedbackPrompt = settings.feedbackPrompt;
+	let feedbackPrompt = settings.useCustomFeedbackPrompt ? settings.feedbackPrompt : DEFAULT_SETTINGS.feedbackPrompt;
 	if (!feedbackPrompt || typeof feedbackPrompt !== 'string') {
 		feedbackPrompt = DEFAULT_SETTINGS.feedbackPrompt;
 	}
 	feedbackPrompt = feedbackPrompt.replace('{{noteContent}}', noteContent);
 
 	return await callAIProvider(app, provider, settings, feedbackPrompt, []);
+}
+
+export async function generateChatResponse(
+	app: App,
+	history: ChatMessage[],
+	newMessage: string,
+	noteContent: string,
+	provider: 'gemini' | 'ollama' | 'openai',
+	settings: AnkiGeneratorSettings
+): Promise<string> {
+
+	let systemContext = `Du bist ein hilfreicher Tutor. Hier ist der Kontext (Lerninhalt):\n"""\n${noteContent}\n"""\n\n`;
+
+	let fullPrompt = systemContext;
+
+	history.forEach(msg => {
+		fullPrompt += `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.content}\n`;
+	});
+
+	fullPrompt += `User: ${newMessage}\nAI:`;
+
+	return await callAIProvider(app, provider, settings, fullPrompt, []);
 }
 
 async function callAIProvider(

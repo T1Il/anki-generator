@@ -22,8 +22,22 @@ export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor:
 	const ollamaAvailable = plugin.settings.ollamaEnabled && !!plugin.settings.ollamaEndpoint && !!plugin.settings.ollamaModel;
 
 	const startGen = (provider: 'gemini' | 'ollama' | 'openai') => {
+		let subdeckToUse = initialSubdeck;
+		if (!subdeckToUse) {
+			const activeFile = plugin.app.workspace.getActiveFile();
+			if (activeFile && activeFile.parent) {
+				// Use parent folder path as default deck structure
+				// Replace slashes with double colons for Anki deck structure
+				// e.g. "Folder/Subfolder" -> "Folder::Subfolder"
+				// We strip the root "/" if present (though obsidian paths usually don't start with it)
+				const parentPath = activeFile.parent.path;
+				if (parentPath !== '/') {
+					subdeckToUse = parentPath.replace(/\//g, '::');
+				}
+			}
+		}
 		// Rufe startGenerationProcess direkt auf, der Modal wird dort geöffnet
-		startGenerationProcess(plugin, editor, provider, initialSubdeck);
+		startGenerationProcess(plugin, editor, provider, subdeckToUse);
 	};
 
 	// Prüfen wie viele Provider verfügbar sind
@@ -64,7 +78,8 @@ export async function runGenerationProcess(
 	editor: Editor,
 	provider: 'gemini' | 'ollama' | 'openai',
 	subdeck: string,
-	additionalInstructions: string = ''
+	additionalInstructions: string = '',
+	isRevision: boolean = false
 ): Promise<string> {
 	let notice = new Notice(t('notice.preparing', { provider }), 0);
 
@@ -75,7 +90,7 @@ export async function runGenerationProcess(
 		// Ensure block exists AND update header (Instruction, clear Status)
 		// Pass undefined for instruction if it's empty string, so we don't overwrite existing instruction with empty.
 		const instructionToUpdate = additionalInstructions && additionalInstructions.trim().length > 0 ? additionalInstructions : undefined;
-		const { blockStartIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath, instructionToUpdate, undefined);
+		const { blockStartIndex, blockEndIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath, instructionToUpdate, undefined);
 		console.log(`ensureAnkiBlock completed. Start: ${blockStartIndex}, InsertionPoint Line: ${insertionPoint.line}, Ch: ${insertionPoint.ch}`);
 
 		notice.setMessage(t('notice.readingCards'));
@@ -88,13 +103,22 @@ export async function runGenerationProcess(
 
 		// Bilder extrahieren und Content vorbereiten
 		const activeFile = plugin.app.workspace.getActiveFile();
-		const { images, preparedContent } = await extractImagesAndPrepareContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
+		const fileTitle = activeFile ? activeFile.basename : "Unbenannt";
+		const { images, preparedContent: preparedBody } = await extractImagesAndPrepareContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
+
+		// Add Title to Content
+		const preparedContent = `# ${fileTitle}\n\n${preparedBody}`;
 
 		if (images.length > 0) {
 			notice.setMessage(t('notice.foundImages', { count: images.length, provider }));
 		} else {
 			notice.setMessage(t('notice.generating', { provider }));
 		}
+
+		// Determine instructions to use: prefer passed instructions, fallback to existing block instruction
+		const instructionsToUse = (additionalInstructions && additionalInstructions.trim().length > 0)
+			? additionalInstructions
+			: (currentAnkiInfo?.instruction || "");
 
 		// --- ÜBERGABE der images an generateCardsWithAI ---
 		const { cards: generatedTextRaw, feedback } = await generateCardsWithAI(
@@ -103,8 +127,9 @@ export async function runGenerationProcess(
 			existingCards,
 			provider,
 			plugin.settings,
-			additionalInstructions,
-			images // Bilder übergeben
+			instructionsToUse, // Use determined instructions
+			images, // Bilder übergeben
+			isRevision // Revision Flag
 		);
 		// --- ENDE ÜBERGABE ---
 
@@ -120,7 +145,8 @@ export async function runGenerationProcess(
 			const activeFile = plugin.app.workspace.getActiveFile();
 			if (activeFile) {
 				console.log("Caching feedback for:", activeFile.path);
-				plugin.feedbackCache.set(activeFile.path, feedback);
+				// Update feedback cache with ChatMessage[]
+				plugin.feedbackCache.set(activeFile.path, [{ role: 'ai', content: feedback }]);
 			}
 		}
 
@@ -133,18 +159,86 @@ export async function runGenerationProcess(
 		const generatedText = cleanAiGeneratedText(generatedTextRaw);
 		console.log("Generierter Text (bereinigt):", JSON.stringify(generatedText));
 
-		if (insertionPoint && generatedText) {
-			console.log("Inserting generated text at:", insertionPoint);
-			insertGeneratedText(editor, blockStartIndex, insertionPoint, generatedText);
+		if (generatedText) {
+			if (isRevision) {
+				// REVISION MODE: Replace existing cards
+				console.log("Replacing existing cards with revised content.");
+				// We need to find the range of the existing cards within the block.
+				// ensureAnkiBlock gives us blockStartIndex and blockEndIndex.
+				// We can reconstruct the block with the NEW cards.
+
+				// Re-read block content to be safe
+				const fileContent = editor.getValue();
+				const blockContent = fileContent.substring(blockStartIndex, blockEndIndex);
+
+				// We want to keep the header (Deck, Instruction, Status) but replace the body.
+				// The body starts after the header lines.
+				const lines = blockContent.split('\n');
+				const headerLines = [];
+				let bodyStartIndex = -1;
+
+				for (let i = 0; i < lines.length; i++) {
+					const line = lines[i].trim();
+					if (line.startsWith('```anki-cards') ||
+						line.startsWith('TARGET DECK:') ||
+						line.startsWith('INSTRUCTION:') ||
+						line.startsWith('# INSTRUCTION:') ||
+						line.startsWith('STATUS:')) {
+						headerLines.push(lines[i]);
+					} else if (line === '') {
+						// Empty line after header?
+						if (bodyStartIndex === -1) headerLines.push(lines[i]);
+					} else {
+						// First non-header line (likely start of cards or empty lines before cards)
+						// Actually, let's just keep the header lines we know and discard the rest.
+						// But we need to be careful not to discard the closing ``` if it's there?
+						// No, blockContent includes the closing ```.
+						// Let's just reconstruct the block completely.
+					}
+				}
+
+				// Simpler approach: Use the same logic as ensureAnkiBlock to reconstruct header, 
+				// then append the NEW generated text, then close block.
+
+				// Let's parse the header info again or use what we have.
+				// We have fullDeckPath, instructionToUpdate (or currentAnkiInfo.instruction).
+
+				let newBlockContent = `TARGET DECK: ${fullDeckPath}`;
+				if (instructionsToUse) {
+					newBlockContent += `\nINSTRUCTION: ${instructionsToUse}`;
+				}
+				// Preserve disabled instruction if exists
+				if (currentAnkiInfo?.disabledInstruction) {
+					newBlockContent += `\n# INSTRUCTION: ${currentAnkiInfo.disabledInstruction}`;
+				}
+				// Clear status on revision? Or keep? Usually clear or set to something?
+				// Let's clear it as we just generated new cards.
+
+				newBlockContent += `\n\n${generatedText}`;
+
+				const newBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
+
+				const startPos = editor.offsetToPos(blockStartIndex);
+				const endPos = editor.offsetToPos(blockEndIndex);
+				editor.replaceRange(newBlockSource, startPos, endPos);
+
+			} else {
+				// NORMAL MODE: Append
+				if (insertionPoint) {
+					console.log("Inserting generated text at:", insertionPoint);
+					insertGeneratedText(editor, blockStartIndex, insertionPoint, generatedText);
+				} else {
+					throw new Error("Interner Fehler: Einfügepunkt war ungültig.");
+				}
+			}
+
 			notice.hide();
 			new Notice(t('notice.updated', { provider }));
 			return feedback;
-		} else if (!generatedText) {
+		} else {
 			notice.hide();
 			new Notice(t('notice.noNewText', { provider }), 7000);
 			return "";
-		} else {
-			throw new Error("Interner Fehler: Einfügepunkt war ungültig nach ensureAnkiBlock.");
 		}
 
 	} catch (error) {
@@ -453,21 +547,36 @@ function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionP
 
 // Bereinigt den KI-Output (Korrigierte Version mit Status-Tracking)
 function cleanAiGeneratedText(rawText: string): string {
-	const lines = rawText.trim().split('\n');
+	let textToProcess = rawText.trim();
+
+	// Remove outer code blocks if present (e.g. ```anki-cards ... ``` or just ``` ... ```)
+	// We check if it starts with ``` and ends with ```
+	if (textToProcess.startsWith('```')) {
+		const lines = textToProcess.split('\n');
+		if (lines.length >= 2 && lines[lines.length - 1].trim().startsWith('```')) {
+			// Remove first and last line
+			textToProcess = lines.slice(1, -1).join('\n').trim();
+		}
+	}
+
+	const lines = textToProcess.split('\n');
 	const validCardLines: string[] = [];
-	let insideNestedBlock = false;
 	let isInsideCard = false;
 
 	for (const line of lines) {
 		const trimmedLine = line.trim();
 
-		if (trimmedLine.startsWith('```')) {
-			insideNestedBlock = !insideNestedBlock;
-			continue;
-		}
-		if (insideNestedBlock) {
-			continue;
-		}
+		// We still want to ignore internal code blocks if they are not part of the card content?
+		// But usually we don't expect nested code blocks in the AI output for cards unless it's code snippets IN the card.
+		// If it is code snippets in the card, we WANT to keep them.
+		// The previous logic was:
+		// if (trimmedLine.startsWith('```')) { insideNestedBlock = !insideNestedBlock; continue; }
+		// if (insideNestedBlock) { continue; }
+		// This logic removed ALL code blocks. If a card had code, it was removed.
+		// If the whole output was a code block, it was removed.
+
+		// Let's assume we just want to extract Q/A lines and related content.
+		// We should filter out "Here is..." text, but keep code blocks if they are part of an answer.
 
 		if (trimmedLine.length === 0) {
 			if (validCardLines.length > 0 && validCardLines[validCardLines.length - 1].trim().length > 0) {
@@ -480,10 +589,17 @@ function cleanAiGeneratedText(rawText: string): string {
 		if (lowerTrimmed.startsWith("here are the anki cards") ||
 			lowerTrimmed.startsWith("note that i've only created cards") ||
 			lowerTrimmed.startsWith("target deck:") ||
+			lowerTrimmed.startsWith("instruction:") ||
+			lowerTrimmed.startsWith("# instruction:") ||
+			lowerTrimmed.startsWith("status:") ||
 			lowerTrimmed.startsWith("---")
 		) {
 			continue;
 		}
+
+		// Also skip ```anki-cards if it was left over or inside
+		if (lowerTrimmed.startsWith("```anki-cards")) continue;
+		if (lowerTrimmed === "```") continue; // Skip standalone backticks if they are artifacts of the wrapper
 
 		const isStartMarker = trimmedLine.startsWith('Q:') ||
 			trimmedLine.startsWith('A:') ||
@@ -505,7 +621,10 @@ function cleanAiGeneratedText(rawText: string): string {
 		}
 		else {
 			// --- DEBUG: WARUM WURDE EINE ZEILE IGNORIERT? ---
-			console.warn("CleanAI: Ignoriere ungültige Zeile (kein Start-Marker und nicht in einer Karte):", line);
+			// console.warn("CleanAI: Ignoriere ungültige Zeile (kein Start-Marker und nicht in einer Karte):", line);
+			// Maybe it's a continuation of a card but didn't look like one?
+			// If we are NOT isInsideCard, we ignore it.
+			// If we ARE isInsideCard, we keep it (handled above).
 		}
 	}
 

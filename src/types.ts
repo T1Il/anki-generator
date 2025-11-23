@@ -11,3 +11,8 @@ export interface ImageInput {
 	mimeType: string;
 	filename: string;
 }
+
+export interface ChatMessage {
+	role: 'user' | 'ai';
+	content: string;
+}
