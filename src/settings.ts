@@ -53,7 +53,7 @@ Hier ist der Text:
 
 Berücksichtige auch diese bestehenden Karten, um Duplikate zu vermeiden:
 {{existingCards}}`,
-	feedbackPrompt: `Du bist ein erfahrener Tutor. Analysiere den folgenden Lerninhalt und gib kurzes, konstruktives Feedback basierend auf wissenschaftlichen Lernprinzipien (z.B. Klarheit, Struktur, fehlende Schlüsselkonzepte).
+	feedbackPrompt: `Du bist ein erfahrener Tutor. Analysiere den folgenden Lerninhalt und gib kurzes, konstruktives Feedback basierend auf wissenschaftlichen Lernprinzipien (z.B. Klarheit, Struktur, fehlende Schlüsselkonzepte) und lege besonderen Fokus auf die inhaltliche Korrektheit und mögliche Ergänzungen, die für die Präklinik (Rettungsdienst) sinnvoll sein könnten.
 WICHTIG: Das Feedback MUSS auf DEUTSCH sein.
 Halte das Feedback präzise (2-3 Sätze).
 Erstelle KEINE Karteikarten hier, nur den Feedback-Text.
