@@ -57,79 +57,132 @@ export class SubdeckModal extends Modal {
 
 		// Suggestions Container
 		const suggestionsContainer = contentEl.createDiv({ cls: 'anki-deck-suggestions-container' });
-		suggestionsContainer.style.maxHeight = '150px';
+		suggestionsContainer.style.maxHeight = '400px';
 		suggestionsContainer.style.overflowY = 'auto';
 		suggestionsContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
 		suggestionsContainer.style.borderRadius = '5px';
 		suggestionsContainer.style.padding = '5px';
 		suggestionsContainer.style.marginTop = '-10px'; // Pull closer to input
 		suggestionsContainer.style.marginBottom = '20px';
-		suggestionsContainer.style.display = 'none'; // Hidden by default
+		suggestionsContainer.style.display = 'block'; // Always visible
 
 		const renderSuggestions = (inputValue: string) => {
 			suggestionsContainer.empty();
-			const lowerInput = inputValue.toLowerCase();
+			suggestionsContainer.style.display = 'block'; // Always show
 
-			// Filter decks that start with mainDeck (optional, but good for context)
-			// Actually, user might want to see all decks or just subdecks of mainDeck?
-			// Let's show all relevant decks.
-			// If input is empty, show all (or top level).
-			// If input has value, filter.
+			// Build a tree structure from all deck names
+			interface TreeNode {
+				name: string;
+				fullPath: string;
+				children: Map<string, TreeNode>;
+				level: number;
+			}
 
-			const matches = this.deckNames.filter(d =>
-				d.toLowerCase().includes(lowerInput) &&
-				d !== this.mainDeck // Don't suggest main deck itself as subdeck? Or maybe yes?
-			);
+			const root: TreeNode = { name: '', fullPath: '', children: new Map(), level: -1 };
 
-			if (matches.length > 0) {
-				suggestionsContainer.style.display = 'block';
-				matches.forEach(deck => {
-					// We want to suggest the SUBDECK part if it starts with mainDeck
-					let displayValue = deck;
-					let insertValue = deck;
+			// Parse all decks into tree - only include decks within mainDeck
+			this.deckNames.forEach(deckPath => {
+				// Skip if not a subdeck of mainDeck
+				if (!deckPath.startsWith(this.mainDeck + "::")) return;
 
-					if (deck.startsWith(this.mainDeck + "::")) {
-						insertValue = deck.substring(this.mainDeck.length + 2);
-						displayValue = `... ${insertValue}`;
-					} else if (deck === this.mainDeck) {
-						return; // Skip main deck
+				// Extract subdeck part
+				let relevantPath = deckPath.substring(this.mainDeck.length + 2);
+
+
+				const parts = relevantPath.split('::');
+				let currentNode = root;
+
+				parts.forEach((part, index) => {
+					if (!currentNode.children.has(part)) {
+						const pathSoFar = parts.slice(0, index + 1).join('::');
+						currentNode.children.set(part, {
+							name: part,
+							fullPath: pathSoFar,
+							children: new Map(),
+							level: index
+						});
 					}
+					currentNode = currentNode.children.get(part)!;
+				});
+			});
 
-					const item = suggestionsContainer.createDiv({ cls: 'anki-deck-suggestion-item' });
-					item.setText(displayValue);
+			// Render tree recursively
+			const renderNode = (node: TreeNode, parentEl: HTMLElement) => {
+				node.children.forEach(child => {
+					const item = parentEl.createDiv({ cls: 'anki-deck-suggestion-item' });
+					item.style.paddingLeft = `${child.level * 20}px`;
 					item.style.padding = '5px';
+					item.style.paddingLeft = `${child.level * 20 + 5}px`;
 					item.style.cursor = 'pointer';
 					item.style.borderRadius = '3px';
+					item.style.transition = 'background-color 0.2s';
+
+					const emoji = child.level === 0 ? '🗂️' : '📂';
+					item.setText(`${emoji} ${child.name}`);
+					item.style.fontSize = '0.9em';
+
+					// Check if this deck is in the path of the input
+					const normalizedInput = inputValue.replace(/->/g, '::').toLowerCase();
+					const isMatch = child.fullPath.toLowerCase() === normalizedInput;
+					const isInPath = normalizedInput.startsWith(child.fullPath.toLowerCase() + '::') || isMatch;
+
+					if (isInPath) {
+						item.style.backgroundColor = isMatch ? 'rgba(74, 144, 226, 0.4)' : 'rgba(74, 144, 226, 0.2)'; // Darker for exact match
+						item.style.fontWeight = isMatch ? 'bold' : '600';
+					}
 
 					item.onmouseover = () => {
-						item.style.backgroundColor = 'rgba(74, 144, 226, 0.2)';
+						if (!isInPath) {
+							item.style.backgroundColor = 'rgba(74, 144, 226, 0.15)';
+						}
 					};
 					item.onmouseout = () => {
-						item.style.backgroundColor = 'transparent';
+						if (!isInPath) {
+							item.style.backgroundColor = 'transparent';
+						} else {
+							item.style.backgroundColor = isMatch ? 'rgba(74, 144, 226, 0.4)' : 'rgba(74, 144, 226, 0.2)';
+						}
 					};
 
 					item.onclick = () => {
-						this.subdeck = insertValue;
-						subdeckInput.setValue(insertValue);
-						updatePreview(insertValue);
-						suggestionsContainer.style.display = 'none';
+						this.subdeck = child.fullPath;
+						subdeckInput.setValue(child.fullPath);
+						updatePreview(child.fullPath);
+						renderSuggestions(child.fullPath); // Re-render to highlight
 					};
+
+					// Recursively render children
+					if (child.children.size > 0) {
+						renderNode(child, parentEl);
+					}
 				});
-			} else {
-				suggestionsContainer.style.display = 'none';
-			}
+			};
+
+			renderNode(root, suggestionsContainer);
 		};
 
 		// --- NEU: Textarea für zusätzliche Anweisungen ---
-		new Setting(contentEl)
+		const instructionSetting = new Setting(contentEl)
 			.setName("Zusätzliche Anweisungen (optional)")
 			.setDesc("Füge hier temporäre Anweisungen hinzu, die *nur für diese Generierung* dem Hauptprompt vorangestellt werden (z.B. 'Fokussiere dich auf Definitionen').")
 			.addTextArea((text: TextAreaComponent) => {
 				text.setPlaceholder("Beispiel: Erstelle nur Lückentext-Karten...")
-					.onChange(value => this.additionalInstructions = value)
-					.inputEl.rows = 4;
-				text.inputEl.style.width = '100%'; // Sorge für volle Breite
+					.onChange(value => this.additionalInstructions = value);
+				text.inputEl.rows = 15;
+				text.inputEl.cols = 50;
+				text.inputEl.style.width = '100%';
+				text.inputEl.style.minHeight = '300px';
+				text.inputEl.style.height = '300px';
+				text.inputEl.style.maxHeight = '500px';
+				text.inputEl.style.resize = 'vertical';
+				text.inputEl.style.setProperty('height', '300px', 'important');
 			});
+
+		// Make the control element full width
+		instructionSetting.settingEl.style.display = 'grid';
+		instructionSetting.settingEl.style.gridTemplateColumns = '1fr';
+		instructionSetting.controlEl.style.width = '100%';
+		instructionSetting.controlEl.style.maxWidth = '100%';
 		// --- ENDE NEU ---
 
 		// Button (aktualisiert, um beide Werte zu übergeben)
@@ -151,10 +204,7 @@ export class SubdeckModal extends Modal {
 			}));
 
 		updatePreview(this.initialValue); // Initiale Vorschau
-		// renderSuggestions(this.initialValue); // Don't show suggestions initially to keep it clean? Or yes?
-		// Let's show them if input is empty to show available decks?
-		// Or maybe only on focus? For now, let's leave it hidden until typed or if we want to show all.
-		// If I want to show all, I can call renderSuggestions("") but that might be too many.
+		renderSuggestions(this.initialValue); // Initial suggestions anzeigen
 	}
 
 	onClose() {

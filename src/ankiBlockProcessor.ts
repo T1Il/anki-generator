@@ -304,6 +304,8 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		}
 	};
 
+
+
 	const changeDeckButton = actionContainer.createEl('button', { text: '📁 Deck ändern' });
 	changeDeckButton.style.flex = '1';
 	changeDeckButton.title = "Verschiebe Karten in ein anderes Deck";
@@ -642,11 +644,14 @@ class DeckSelectionModal extends Modal {
 	onSubmit: (result: string) => void;
 	deckName: string;
 	deckNames: string[];
+	mainDeck: string;
 	constructor(app: ObsidianApp, currentDeck: string, deckNames: string[], onSubmit: (result: string) => void) {
 		super(app);
 		this.onSubmit = onSubmit;
 		this.deckName = currentDeck;
 		this.deckNames = deckNames;
+		// Extract mainDeck from currentDeck or use first part of any deck
+		this.mainDeck = currentDeck.split('::')[0] || 'Default';
 	}
 	onOpen() {
 		const { contentEl } = this;
@@ -683,14 +688,14 @@ class DeckSelectionModal extends Modal {
 		});
 		// Suggestions List
 		const suggestionsEl = container.createDiv({ cls: 'anki-deck-suggestions' });
-		suggestionsEl.style.maxHeight = '150px';
+		suggestionsEl.style.maxHeight = '400px';
 		suggestionsEl.style.overflowY = 'auto';
 		suggestionsEl.style.border = '1px solid rgba(255, 255, 255, 0.1)';
 		suggestionsEl.style.borderRadius = '5px';
 		suggestionsEl.style.padding = '5px';
 		suggestionsEl.style.marginTop = '-10px';
 		suggestionsEl.style.marginBottom = '10px';
-		suggestionsEl.style.display = 'none';
+		suggestionsEl.style.display = 'block'; // Always visible
 		this.renderSuggestions(suggestionsEl, deckInput!, previewEl);
 		// Focus input
 		setTimeout(() => deckInput.inputEl.focus(), 50);
@@ -718,32 +723,83 @@ class DeckSelectionModal extends Modal {
 	}
 	renderSuggestions(container: HTMLElement, input: TextComponent, previewEl: HTMLElement) {
 		container.empty();
-		const lowerInput = this.deckName.toLowerCase();
-		const matches = this.deckNames.filter(d => d.toLowerCase().includes(lowerInput));
-		if (matches.length === 0) {
-			container.style.display = 'none';
-			return;
+		container.style.display = 'block'; // Always show
+		// Build a tree structure from filtered deck names
+		interface TreeNode {
+			name: string;
+			fullPath: string;
+			children: Map<string, TreeNode>;
+			level: number;
 		}
-		container.style.display = 'block';
-		matches.forEach(deck => {
-			const item = container.createDiv({ cls: 'anki-deck-suggestion-item' });
-			item.setText(deck);
-			item.style.padding = '5px';
-			item.style.cursor = 'pointer';
-			item.style.borderRadius = '3px';
-			item.onmouseover = () => {
-				item.style.backgroundColor = 'rgba(74, 144, 226, 0.2)';
-			};
-			item.onmouseout = () => {
-				item.style.backgroundColor = 'transparent';
-			};
-			item.onclick = () => {
-				this.deckName = deck;
-				input.setValue(deck);
-				this.updatePreview(previewEl, deck);
-				container.style.display = 'none';
-			};
+		const root: TreeNode = { name: '', fullPath: '', children: new Map(), level: -1 };
+		// Parse all decks into tree - ONLY decks within mainDeck
+		this.deckNames.forEach(deckPath => {
+			// Skip if not a subdeck of mainDeck
+			if (!deckPath.startsWith(this.mainDeck + "::")) return;
+			// Extract subdeck part (remove mainDeck prefix)
+			const relevantPath = deckPath.substring(this.mainDeck.length + 2);
+			const parts = relevantPath.split('::');
+			let currentNode = root;
+			parts.forEach((part, index) => {
+				if (!currentNode.children.has(part)) {
+					const pathSoFar = parts.slice(0, index + 1).join('::');
+					currentNode.children.set(part, {
+						name: part,
+						fullPath: pathSoFar,
+						children: new Map(),
+						level: index
+					});
+				}
+				currentNode = currentNode.children.get(part)!;
+			});
 		});
+		// Render tree recursively
+		const renderNode = (node: TreeNode, parentEl: HTMLElement) => {
+			node.children.forEach(child => {
+				const item = parentEl.createDiv({ cls: 'anki-deck-suggestion-item' });
+				item.style.padding = '5px';
+				item.style.paddingLeft = `${child.level * 20 + 5}px`;
+				item.style.cursor = 'pointer';
+				item.style.borderRadius = '3px';
+				item.style.transition = 'background-color 0.2s';
+				const emoji = child.level === 0 ? '🗂️' : '📂';
+				item.setText(`${emoji} ${child.name}`);
+				item.style.fontSize = '0.9em';
+				// Check if this deck is in the path of the input
+				// Normalize both to compare relative paths
+				const normalizedInput = this.deckName.replace(this.mainDeck + '::', '').toLowerCase();
+				const isMatch = child.fullPath.toLowerCase() === normalizedInput;
+				const isInPath = normalizedInput.startsWith(child.fullPath.toLowerCase() + '::') || isMatch;
+				if (isInPath) {
+					item.style.backgroundColor = isMatch ? 'rgba(74, 144, 226, 0.4)' : 'rgba(74, 144, 226, 0.2)';
+					item.style.fontWeight = isMatch ? 'bold' : '600';
+				}
+				item.onmouseover = () => {
+					if (!isInPath) {
+						item.style.backgroundColor = 'rgba(74, 144, 226, 0.15)';
+					}
+				};
+				item.onmouseout = () => {
+					if (!isInPath) {
+						item.style.backgroundColor = 'transparent';
+					} else {
+						item.style.backgroundColor = isMatch ? 'rgba(74, 144, 226, 0.4)' : 'rgba(74, 144, 226, 0.2)';
+					}
+				};
+				item.onclick = () => {
+					// Set full path including mainDeck
+					this.deckName = this.mainDeck + '::' + child.fullPath;
+					input.setValue(this.deckName);
+					this.updatePreview(previewEl, this.deckName);
+					this.renderSuggestions(container, input, previewEl); // Re-render to highlight
+				};
+				// Recursively render children
+				if (child.children.size > 0) {
+					renderNode(child, parentEl);
+				}
+			});
+		};
+		renderNode(root, container);
 	}
 	onClose() {
 		const { contentEl } = this;
