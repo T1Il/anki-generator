@@ -6,9 +6,9 @@ export class SubdeckModal extends Modal {
 	initialValue: string;
 	mainDeck: string;
 	// Aktualisierte Callback-Signatur
-	onSubmit: (subdeck: string, additionalInstructions: string) => void;
+	onSubmit: (subdeck: string, additionalInstructions: string, isBlockOnly: boolean) => void;
 
-	constructor(app: App, mainDeck: string, initialValue: string, onSubmit: (subdeck: string, additionalInstructions: string) => void) {
+	constructor(app: App, mainDeck: string, initialValue: string, onSubmit: (subdeck: string, additionalInstructions: string, isBlockOnly: boolean) => void) {
 		super(app);
 		this.mainDeck = mainDeck;
 		this.initialValue = initialValue;
@@ -58,11 +58,21 @@ export class SubdeckModal extends Modal {
 		// --- ENDE NEU ---
 
 		// Button (aktualisiert, um beide Werte zu übergeben)
-		new Setting(contentEl).addButton((btn) =>
+		const btnSetting = new Setting(contentEl);
+
+		btnSetting.addButton((btn) =>
+			btn.setButtonText("Nur Block erstellen")
+				.setTooltip("Erstellt nur den Anki-Block Header ohne KI-Generierung")
+				.onClick(() => {
+					this.close();
+					this.onSubmit(this.subdeck || 'Standard', this.additionalInstructions, true);
+				}));
+
+		btnSetting.addButton((btn) =>
 			btn.setButtonText("Generieren").setCta().onClick(() => {
 				this.close();
 				// Übergib beide Werte an den Callback
-				this.onSubmit(this.subdeck || 'Standard', this.additionalInstructions);
+				this.onSubmit(this.subdeck || 'Standard', this.additionalInstructions, false);
 			}));
 
 		updatePreview(this.initialValue); // Initiale Vorschau

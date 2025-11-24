@@ -63,9 +63,9 @@ async function startGenerationProcess(
 	initialSubdeck: string
 ) {
 	// Öffne den SubdeckModal, der jetzt auch die zusätzlichen Anweisungen sammelt
-	new SubdeckModal(plugin.app, plugin.settings.mainDeck, initialSubdeck, async (newSubdeck, additionalInstructions) => {
+	new SubdeckModal(plugin.app, plugin.settings.mainDeck, initialSubdeck, async (newSubdeck, additionalInstructions, isBlockOnly) => {
 		// Rufe die ausgelagerte Logik auf
-		await runGenerationProcess(plugin, editor, provider, newSubdeck, additionalInstructions);
+		await runGenerationProcess(plugin, editor, provider, newSubdeck, additionalInstructions, false, isBlockOnly);
 	}).open();
 }
 
@@ -79,9 +79,10 @@ export async function runGenerationProcess(
 	provider: 'gemini' | 'ollama' | 'openai',
 	subdeck: string,
 	additionalInstructions: string = '',
-	isRevision: boolean = false
+	isRevision: boolean = false,
+	isBlockOnly: boolean = false
 ): Promise<string> {
-	let notice = new Notice(t('notice.preparing', { provider }), 0);
+	let notice = new Notice(isBlockOnly ? "Erstelle Anki-Block..." : t('notice.preparing', { provider }), 0);
 
 	try {
 		const sub = subdeck || 'Standard';
@@ -92,6 +93,12 @@ export async function runGenerationProcess(
 		const instructionToUpdate = additionalInstructions && additionalInstructions.trim().length > 0 ? additionalInstructions : undefined;
 		const { blockStartIndex, blockEndIndex, insertionPoint } = await ensureAnkiBlock(editor, fullDeckPath, instructionToUpdate, undefined);
 		console.log(`ensureAnkiBlock completed. Start: ${blockStartIndex}, InsertionPoint Line: ${insertionPoint.line}, Ch: ${insertionPoint.ch}`);
+
+		if (isBlockOnly) {
+			notice.hide();
+			new Notice("Anki-Block erstellt/aktualisiert.");
+			return "";
+		}
 
 		notice.setMessage(t('notice.readingCards'));
 		const currentAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);

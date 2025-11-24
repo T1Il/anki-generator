@@ -56,6 +56,27 @@ export class SyncReviewModal extends Modal {
             row.style.justifyContent = 'space-between';
             row.style.padding = '5px 0';
             row.style.borderBottom = '1px solid var(--background-modifier-border-hover)';
+            row.style.cursor = 'pointer'; // Make it look clickable
+
+            // Hover effect
+            row.addEventListener('mouseenter', () => {
+                row.style.backgroundColor = 'var(--background-modifier-hover)';
+            });
+            row.addEventListener('mouseleave', () => {
+                row.style.backgroundColor = 'transparent';
+            });
+
+            // Click handler to open file
+            row.onclick = async () => {
+                const leaf = this.app.workspace.getLeaf(false);
+                await leaf.openFile(item.file);
+                this.close(); // Optional: close modal after clicking? User might want to keep it open. Let's keep it open for now or close? 
+                // User request: "bei der Übersicht der nicht-synchronisierten Karten die Aufschriebe anklickbar machen"
+                // Usually navigation closes modals, but let's see. 
+                // If I open in background, modal stays. If I open in active leaf, modal might obscure it.
+                // Let's close it to be safe and standard behavior.
+                this.close();
+            };
 
             row.createSpan({ text: item.file.basename, cls: 'anki-sync-filename' });
             row.createSpan({ text: `${item.unsyncedCount} Karten (${item.deckName})`, cls: 'anki-sync-details' });

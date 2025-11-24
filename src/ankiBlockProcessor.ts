@@ -379,12 +379,19 @@ function renderFeedback(container: HTMLElement, history: ChatMessage[], plugin: 
 
 	header.createSpan({ text: '🤖 KI Chat & Feedback', cls: 'anki-feedback-title' }).style.fontWeight = 'bold';
 
-	const closeBtn = header.createEl('button', { cls: 'anki-feedback-close', text: 'Schließen' });
+	const closeBtn = header.createEl('button', { cls: 'anki-feedback-close', text: '✖' });
+	closeBtn.title = "Schließen";
 	closeBtn.onclick = () => {
 		feedbackBox.remove();
-		// We don't delete cache on close, only on explicit "Clear" if we had one.
-		// Or maybe we want to keep it persistent? User said "einklappbar".
-		// So just remove from DOM.
+	};
+
+	const clearBtn = header.createEl('button', { cls: 'anki-feedback-close', text: '🗑️' });
+	clearBtn.title = "Chat leeren";
+	clearBtn.style.marginRight = "5px";
+	clearBtn.onclick = () => {
+		history.length = 0; // Clear array
+		if (sourcePath) plugin.feedbackCache.delete(sourcePath);
+		renderFeedback(container, history, plugin, sourcePath);
 	};
 
 	const contentArea = feedbackBox.createDiv({ cls: 'anki-feedback-content' });
@@ -404,14 +411,13 @@ function renderFeedback(container: HTMLElement, history: ChatMessage[], plugin: 
 			border-radius: 6px;
 		}
 		.anki-feedback-content::-webkit-scrollbar-thumb {
-			background-color: #4a90e2; /* High contrast blue */
+			background-color: #2e6da4; /* High contrast blue (darker) */
 			border-radius: 6px;
-			border: 2px solid rgba(0, 0, 0, 0.1); /* Slight border to separate from track */
+			border: 2px solid #ffffff; /* White border for contrast against track */
 		}
 		.anki-feedback-content::-webkit-scrollbar-thumb:hover {
-			background-color: #357abd;
+			background-color: #1d4e7a;
 		}
-		/* Dark mode adjustments if possible, but hardcoded high contrast is safer for now */
 	`;
 
 	// Render History
