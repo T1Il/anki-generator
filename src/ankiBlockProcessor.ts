@@ -1,8 +1,8 @@
-import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp } from 'obsidian';
+import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp, Setting, TextComponent } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { Card, ChatMessage } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
-import { getCardCountForDeck } from './anki/AnkiConnect';
+import { getCardCountForDeck, moveAnkiNotesToDeck, deleteAnkiDeck, getDeckNames } from './anki/AnkiConnect';
 import { parseCardsFromBlockSource } from './anki/ankiParser';
 import { runGenerationProcess } from './generationManager';
 import { syncAnkiBlock, saveAnkiBlockChanges } from './anki/syncManager';
@@ -304,6 +304,53 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		}
 	};
 
+	const changeDeckButton = actionContainer.createEl('button', { text: '📁 Deck ändern' });
+	changeDeckButton.style.flex = '1';
+	changeDeckButton.title = "Verschiebe Karten in ein anderes Deck";
+	changeDeckButton.onclick = async () => {
+		// Fetch live deck names
+		let deckNames: string[] = [];
+		try {
+			deckNames = await getDeckNames();
+		} catch (e: any) {
+			new Notice("Anki ist nicht verbunden. Bitte starte Anki und versuche es erneut.");
+			return;
+		}
+		// Open modal
+		new DeckSelectionModal(plugin.app, deckName || plugin.settings.mainDeck, deckNames, async (newDeckName: string) => {
+			if (!newDeckName || newDeckName === deckName) return;
+			try {
+				// Move cards
+				const noteIds = cards.map(c => c.id).filter(Boolean) as number[];
+				if (noteIds.length > 0) {
+					await moveAnkiNotesToDeck(noteIds, newDeckName);
+					new Notice(`${noteIds.length} Karte(n) nach "${newDeckName}" verschoben.`);
+					// Check if old deck is empty and delete it
+					if (deckName) {
+						const cardCount = await getCardCountForDeck(deckName);
+						if (cardCount === 0) {
+							await deleteAnkiDeck(deckName);
+							new Notice(`Leeres Deck "${deckName}" gelöscht.`);
+						}
+					}
+					// Update markdown block
+					const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+					if (view) {
+						const editor = view.editor;
+						const content = editor.getValue();
+						const updatedContent = content.replace(
+							/TARGET DECK: .*$/m,
+							`TARGET DECK: ${newDeckName}`
+						);
+						editor.setValue(updatedContent);
+					}
+				}
+			} catch (e: any) {
+				new Notice("Fehler beim Verschieben: " + e.message);
+			}
+		}).open();
+	};
+
 	// --- REVISE BUTTON ---
 	const reviseButton = actionContainer.createEl('button', { text: '✏️ Karten überarbeiten' });
 	reviseButton.style.flex = '1';
@@ -585,6 +632,119 @@ class RevisionInputModal extends Modal {
 			});
 	}
 
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
+class DeckSelectionModal extends Modal {
+	onSubmit: (result: string) => void;
+	deckName: string;
+	deckNames: string[];
+	constructor(app: ObsidianApp, currentDeck: string, deckNames: string[], onSubmit: (result: string) => void) {
+		super(app);
+		this.onSubmit = onSubmit;
+		this.deckName = currentDeck;
+		this.deckNames = deckNames;
+	}
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: "Deck ändern" });
+		contentEl.createEl("p", { text: "Wähle ein existierendes Deck oder gib einen neuen Namen ein." });
+		const container = contentEl.createDiv();
+		container.style.display = 'flex';
+		container.style.flexDirection = 'column';
+		container.style.gap = '10px';
+		// Preview Area
+		const previewEl = container.createDiv({ cls: 'anki-deck-preview' });
+		previewEl.style.padding = '10px';
+		previewEl.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
+		previewEl.style.borderRadius = '5px';
+		previewEl.style.fontFamily = 'monospace';
+		previewEl.style.marginBottom = '10px';
+		this.updatePreview(previewEl, this.deckName);
+		// Input field using Setting
+		const deckSetting = new Setting(container)
+			.setName("Deck Name")
+			.setDesc("Gib den Namen des Decks ein oder wähle aus der Liste.");
+		let deckInput: TextComponent;
+		deckSetting.addText((text) => {
+			deckInput = text;
+			text.setValue(this.deckName)
+				.setPlaceholder("Deck Name")
+				.onChange((value) => {
+					this.deckName = value;
+					this.updatePreview(previewEl, value);
+					this.renderSuggestions(suggestionsEl, deckInput, previewEl);
+				});
+			text.inputEl.style.width = '100%';
+		});
+		// Suggestions List
+		const suggestionsEl = container.createDiv({ cls: 'anki-deck-suggestions' });
+		suggestionsEl.style.maxHeight = '150px';
+		suggestionsEl.style.overflowY = 'auto';
+		suggestionsEl.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+		suggestionsEl.style.borderRadius = '5px';
+		suggestionsEl.style.padding = '5px';
+		suggestionsEl.style.marginTop = '-10px';
+		suggestionsEl.style.marginBottom = '10px';
+		suggestionsEl.style.display = 'none';
+		this.renderSuggestions(suggestionsEl, deckInput!, previewEl);
+		// Focus input
+		setTimeout(() => deckInput.inputEl.focus(), 50);
+		const btnContainer = contentEl.createDiv();
+		btnContainer.style.marginTop = '10px';
+		btnContainer.style.display = 'flex';
+		btnContainer.style.justifyContent = 'flex-end';
+		new ButtonComponent(btnContainer)
+			.setButtonText("Ändern & Verschieben")
+			.setCta()
+			.onClick(() => {
+				this.close();
+				this.onSubmit(this.deckName);
+			});
+	}
+	updatePreview(el: HTMLElement, name: string) {
+		el.empty();
+		if (!name) {
+			el.setText("Vorschau: (Kein Name)");
+			return;
+		}
+		const parts = name.split("::");
+		const hierarchy = parts.join(" ➤ ");
+		el.setText("Vorschau: " + hierarchy);
+	}
+	renderSuggestions(container: HTMLElement, input: TextComponent, previewEl: HTMLElement) {
+		container.empty();
+		const lowerInput = this.deckName.toLowerCase();
+		const matches = this.deckNames.filter(d => d.toLowerCase().includes(lowerInput));
+		if (matches.length === 0) {
+			container.style.display = 'none';
+			return;
+		}
+		container.style.display = 'block';
+		matches.forEach(deck => {
+			const item = container.createDiv({ cls: 'anki-deck-suggestion-item' });
+			item.setText(deck);
+			item.style.padding = '5px';
+			item.style.cursor = 'pointer';
+			item.style.borderRadius = '3px';
+			item.onmouseover = () => {
+				item.style.backgroundColor = 'rgba(74, 144, 226, 0.2)';
+			};
+			item.onmouseout = () => {
+				item.style.backgroundColor = 'transparent';
+			};
+			item.onclick = () => {
+				this.deckName = deck;
+				input.setValue(deck);
+				this.updatePreview(previewEl, deck);
+				container.style.display = 'none';
+			};
+		});
+	}
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();

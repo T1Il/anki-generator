@@ -60,6 +60,21 @@ export async function createAnkiDeck(deckName: string): Promise<void> {
 	return ankiConnectRequest('createDeck', { deck: deckName });
 }
 
+export async function deleteAnkiDeck(deckName: string): Promise<void> {
+	console.log(`Lösche Deck '${deckName}'`);
+	return ankiConnectRequest('deleteDecks', { decks: [deckName], cardsToo: true });
+}
+
+export async function getDeckNames(): Promise<string[]> {
+	try {
+		const result = await ankiConnectRequest('deckNames', {});
+		return result || [];
+	} catch (e) {
+		console.error("Error fetching deck names:", e);
+		return [];
+	}
+}
+
 export async function addAnkiNote(deckName: string, modelName: string, frontField: string, backField: string, front: string, back: string): Promise<number> {
 	const fields: any = {};
 	fields[frontField] = front;
@@ -135,5 +150,37 @@ export async function storeAnkiMediaFile(filename: string, base64Data: string): 
 	} catch (e) {
 		console.error(`Fehler beim Speichern der Mediendatei ${filename} in Anki:`, e);
 		throw new Error(`Konnte Mediendatei ${filename} nicht in Anki speichern. ${e.message}`);
+	}
+}
+
+export async function getCardIdsForNote(noteId: number): Promise<number[]> {
+	console.log(`Suche Karten für Note ID: ${noteId}`);
+	const result = await ankiConnectRequest('findCards', { query: `nid:${noteId}` });
+	console.log(`Gefundene Karten für Note ${noteId}:`, result);
+	return result || [];
+}
+
+export async function changeDeck(cardIds: number[], deckName: string): Promise<void> {
+	if (cardIds.length === 0) return;
+	console.log(`Verschiebe Karten ${cardIds} nach Deck '${deckName}'`);
+	return ankiConnectRequest('changeDeck', { cards: cardIds, deck: deckName });
+}
+
+export async function moveAnkiNotesToDeck(noteIds: number[], deckName: string): Promise<void> {
+	if (noteIds.length === 0) return;
+
+	console.log(`Starte Verschieben von ${noteIds.length} Notes nach '${deckName}'`);
+
+	// First ensure the deck exists
+	await createAnkiDeck(deckName);
+
+	// For each note, find its cards and move them
+	for (const noteId of noteIds) {
+		const cardIds = await getCardIdsForNote(noteId);
+		if (cardIds.length > 0) {
+			await changeDeck(cardIds, deckName);
+		} else {
+			console.warn(`Keine Karten für Note ID ${noteId} gefunden.`);
+		}
 	}
 }

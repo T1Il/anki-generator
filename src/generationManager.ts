@@ -6,6 +6,7 @@ import { SubdeckModal } from './ui/SubdeckModal';
 import { ModelSelectionModal } from './ui/ModelSelectionModal';
 // DebugModal wird in aiGenerator verwendet
 import { parseAnkiSection } from './anki/ankiParser';
+import { getDeckNames } from './anki/AnkiConnect';
 import { generateCardsWithAI } from './aiGenerator';
 import { ImageInput } from './types';
 import { arrayBufferToBase64, getMimeType } from './utils';
@@ -62,8 +63,16 @@ async function startGenerationProcess(
 	provider: 'gemini' | 'ollama' | 'openai',
 	initialSubdeck: string
 ) {
+	// Fetch deck names for suggestions
+	let deckNames: string[] = [];
+	try {
+		deckNames = await getDeckNames();
+	} catch (e) {
+		console.warn("Could not fetch deck names for suggestions:", e);
+	}
+
 	// Öffne den SubdeckModal, der jetzt auch die zusätzlichen Anweisungen sammelt
-	new SubdeckModal(plugin.app, plugin.settings.mainDeck, initialSubdeck, async (newSubdeck, additionalInstructions, isBlockOnly) => {
+	new SubdeckModal(plugin.app, plugin.settings.mainDeck, initialSubdeck, deckNames, async (newSubdeck, additionalInstructions, isBlockOnly) => {
 		// Rufe die ausgelagerte Logik auf
 		await runGenerationProcess(plugin, editor, provider, newSubdeck, additionalInstructions, false, isBlockOnly);
 	}).open();
