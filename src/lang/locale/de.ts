@@ -8,7 +8,9 @@ export default {
     "settings.enableFeedbackDesc": "Wenn aktiviert, gibt die AI nach der Kartengenerierung kurzes Feedback zum Lerninhalt.",
     "settings.aiProvider": "AI Provider",
     "settings.geminiApiKey": "Gemini API Key",
+    "settings.geminiApiKeyDesc": "Der API Key für Google Gemini.",
     "settings.geminiModel": "Gemini Modell",
+    "settings.geminiModelDesc": "Das zu verwendende Gemini Modell.",
     "settings.openAiApiKey": "OpenAI API Key",
     "settings.openAiModel": "OpenAI Modell",
     "settings.ollama": "Ollama (Lokal)",
@@ -36,6 +38,8 @@ export default {
     "settings.useCustomFeedbackPromptDesc": "Wenn deaktiviert, wird der Standard-Feedback-Prompt verwendet.",
     "settings.feedbackPrompt": "Feedback Prompt",
     "settings.feedbackPromptDesc": "Der Prompt für das AI Feedback. Platzhalter: {{noteContent}}",
+    "settings.fileDecorations": "Dateidekorationen anzeigen",
+    "settings.fileDecorationsDesc": "Zeigt ein Icon im Dateiexplorer für Dateien mit Anki-Karten.",
 
     // Anki Block
     "anki.check": "⏳ Prüfe Anki...",

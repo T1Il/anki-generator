@@ -75,6 +75,16 @@ export async function getDeckNames(): Promise<string[]> {
 	}
 }
 
+export async function getModelFieldNames(modelName: string): Promise<string[]> {
+	try {
+		const result = await ankiConnectRequest('modelFieldNames', { modelName });
+		return result || [];
+	} catch (e) {
+		console.error(`Error fetching field names for model ${modelName}:`, e);
+		return [];
+	}
+}
+
 export async function addAnkiNote(deckName: string, modelName: string, frontField: string, backField: string, front: string, back: string): Promise<number> {
 	const fields: any = {};
 	fields[frontField] = front;
@@ -82,15 +92,12 @@ export async function addAnkiNote(deckName: string, modelName: string, frontFiel
 
 	const result = await ankiConnectRequest('addNote', {
 		note: {
-			deckName,
-			modelName,
+			deckName: deckName,
+			modelName: modelName,
 			fields: fields,
-			tags: []
+			tags: ['obsidian-anki-generator']
 		}
 	});
-	if (typeof result !== 'number') {
-		throw new Error(`Ungültige Note ID von addNote zurückgegeben: ${result}`);
-	}
 	return result;
 }
 
@@ -100,38 +107,35 @@ export async function addAnkiClozeNote(deckName: string, modelName: string, text
 
 	const result = await ankiConnectRequest('addNote', {
 		note: {
-			deckName,
-			modelName,
+			deckName: deckName,
+			modelName: modelName,
 			fields: fields,
-			tags: []
+			tags: ['obsidian-anki-generator']
 		}
 	});
-	if (typeof result !== 'number') {
-		throw new Error(`Ungültige Note ID von addNote (Cloze) zurückgegeben: ${result}`);
-	}
 	return result;
 }
 
-export async function updateAnkiNoteFields(id: number, frontField: string, backField: string, front: string, back: string): Promise<void> {
+export async function updateAnkiNoteFields(noteId: number, frontField: string, backField: string, front: string, back: string): Promise<void> {
 	const fields: any = {};
 	fields[frontField] = front;
 	fields[backField] = back;
 
 	return ankiConnectRequest('updateNoteFields', {
 		note: {
-			id,
+			id: noteId,
 			fields: fields
 		}
 	});
 }
 
-export async function updateAnkiClozeNoteFields(id: number, textField: string, textWithCloze: string): Promise<void> {
+export async function updateAnkiClozeNoteFields(noteId: number, textField: string, text: string): Promise<void> {
 	const fields: any = {};
-	fields[textField] = textWithCloze;
+	fields[textField] = text;
 
 	return ankiConnectRequest('updateNoteFields', {
 		note: {
-			id,
+			id: noteId,
 			fields: fields
 		}
 	});

@@ -153,13 +153,19 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 		const isLegacyCloze = !isQ && (line.includes('{{c') || line.includes('____'));
 
 		if (isQ || isLegacyCloze) {
-			let q = isQ ? line.substring(2).trim() : line;
+			let q = '';
+			if (isQ) {
+				q = line.substring(2).trim();
+			} else {
+				q = line;
+			}
+
 			let a = '';
 			let id: number | null = null;
 			let typeIn = false;
 			let currentLineIndex = i + 1;
 
-			// Lese Q
+			// Lese Q (nur für Basic/Cloze, IO hat Q in einer Zeile)
 			while (currentLineIndex < lines.length) {
 				const nextLine = lines[currentLineIndex];
 				const trimmedNext = nextLine.trim();
@@ -199,8 +205,7 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 							aNextLine.startsWith('INSTRUCTION:') ||
 							aNextLine.startsWith('STATUS:') ||
 							aNextLine.trim() === 'xxx' ||
-							aNextLine.includes('{{c') ||
-							aNextLine.includes('____')) break;
+							(aNextLine.includes('{{c') || aNextLine.includes('____'))) break;
 
 						a += '\n' + aNextLine;
 						currentLineIndex++;
@@ -213,14 +218,18 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 				currentLineIndex++;
 			}
 
-			const type = (q.includes('{{c') || q.includes('____')) ? 'Cloze' : 'Basic';
+			let type: 'Basic' | 'Cloze' = 'Basic';
+			if (q.includes('{{c') || q.includes('____')) {
+				type = 'Cloze';
+			}
 
 			// Bereinigung für Basic-Karten: Falls Cloze-Syntax in A: gelandet ist, entfernen
 			if (type === 'Basic' && a.includes('{{c')) {
 				a = stripClozeSyntax(a);
 			}
 
-			cards.push({ type, q: q.trim(), a: a.trim(), id, typeIn });
+			const card: Card = { type, q: q.trim(), a: a.trim(), id, typeIn };
+			cards.push(card);
 			i = currentLineIndex;
 		} else {
 			i++;

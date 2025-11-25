@@ -7,31 +7,33 @@ import { SyncReviewModal } from './ui/SyncReviewModal';
 import { QuestionSearchModal } from './ui/QuestionSearchModal';
 import { Card, ChatMessage } from './types';
 import { t } from './lang/helpers';
+import { AnkiFileDecorationProvider } from './ui/AnkiFileDecorationProvider';
+import { LegacyFileDecorator } from './ui/LegacyFileDecorator';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
 	feedbackCache: Map<string, ChatMessage[]> = new Map(); // Stores feedback history by file path
+	legacyFileDecorator: LegacyFileDecorator | null = null;
+	ankiFileDecorationProvider: AnkiFileDecorationProvider | null = null;
 
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new AnkiGeneratorSettingTab(this.app, this));
 
+		// Initialize File Decorations
+		if ((this as any).registerFileDecorationProvider) {
+			this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
+			(this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
+		} else {
+			// Legacy handling initialized based on settings
+			this.updateLegacyFileDecoration();
+		}
+
 		// Check for updates
 		this.checkForUpdates();
 
 		// Ribbon Icon - Generate Cards
-		this.addRibbonIcon('brain-circuit', t('anki.generateGemini'), (evt: MouseEvent) => { // Using generic generate label or specific? Let's use generic "Generate Cards" if available or just one of them. 
-			// Actually, the ribbon icon is general. Let's use a new key or just hardcode "Anki-Karten generieren" if not in lang file?
-			// "Anki-Karten generieren" is not in lang file yet as a generic term. 
-			// Let's use "anki.generateGemini" as a placeholder or add a generic one?
-			// The user wants German default.
-			// Let's add "ribbon.generate" to lang file later. For now, I'll use a hardcoded string or existing key.
-			// "settings.title" is "Anki Generator Einstellungen".
-			// Let's just use the hardcoded string for now if I don't want to edit lang file yet, OR update lang file.
-			// I'll stick to hardcoded for now and update lang file in next step to be clean.
-			// Wait, I should use t() if I can.
-			// I'll use 'Anki-Karten generieren' for now and update lang file in a separate step to be comprehensive.
-			// Actually, I can just add it to the lang file in the next step.
+		this.addRibbonIcon('brain-circuit', t('anki.generateGemini'), (evt: MouseEvent) => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView) {
 				triggerCardGeneration(this, activeView.editor);
@@ -75,6 +77,24 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			}
 		});
 
+		this.addCommand({
+			id: 'toggle-file-decorations',
+			name: 'Toggle Anki File Decorations',
+			callback: async () => {
+				this.settings.fileDecorations = !this.settings.fileDecorations;
+				await this.saveSettings();
+
+				// Update decorations
+				if (this.ankiFileDecorationProvider) {
+					this.ankiFileDecorationProvider.triggerUpdate();
+				} else {
+					this.updateLegacyFileDecoration();
+				}
+
+				new Notice(`Anki File Decorations ${this.settings.fileDecorations ? 'enabled' : 'disabled'}`);
+			}
+		});
+
 		// Status Bar Item
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.addClass('anki-generate-button');
@@ -89,8 +109,26 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		});
 	}
 
+	updateLegacyFileDecoration() {
+		if (this.settings.fileDecorations) {
+			if (!this.legacyFileDecorator) {
+				console.log("AnkiGenerator: Enabling legacy file decorator.");
+				this.legacyFileDecorator = new LegacyFileDecorator(this.app);
+				this.legacyFileDecorator.load();
+			}
+		} else {
+			if (this.legacyFileDecorator) {
+				console.log("AnkiGenerator: Disabling legacy file decorator.");
+				this.legacyFileDecorator.destroy();
+				this.legacyFileDecorator = null;
+			}
+		}
+	}
+
 	onunload() {
-		// Cleanup logic, if needed in the future
+		if (this.legacyFileDecorator) {
+			this.legacyFileDecorator.destroy();
+		}
 	}
 
 	async loadSettings() {

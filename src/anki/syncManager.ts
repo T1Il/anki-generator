@@ -1,4 +1,4 @@
-import { Notice, TFile, normalizePath, App } from 'obsidian';
+import { Notice, TFile, normalizePath } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 import { Card } from '../types';
 import { deleteAnkiNotes, createAnkiDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './AnkiConnect';
@@ -94,7 +94,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                         }
                     } catch (imgError) {
                         console.error(`Fehler bei Bild ${imageName} beim Sync:`, imgError);
-                        new Notice(`Fehler bei Bild ${imageName}: ${imgError.message}`, 5000);
+                        notice.setMessage(`Fehler bei Bild ${imageName}: ${imgError.message}`);
                         processedText = processedText.split(originalLink).join(`[Fehler bei Bild: ${imageName}]`);
                     }
                 }
@@ -138,7 +138,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                 if (card.type === 'Basic') {
                     const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
                     ankiNoteId = await findAnkiNoteId(originalQ, frontField);
-                } else {
+                } else if (card.type === 'Cloze') {
                     ankiNoteId = await findAnkiClozeNoteId(originalQ, plugin.settings.clozeText);
                 }
             }
@@ -150,12 +150,12 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                         const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
                         const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
                         await updateAnkiNoteFields(ankiNoteId, frontField, backField, ankiFieldQ, ankiFieldA);
-                    } else {
+                    } else if (card.type === 'Cloze') {
                         await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeText, ankiClozeTextField);
                     }
                 } catch (e) {
                     if (e.message?.includes("Note was not found")) {
-                        new Notice(`Karte ${ankiNoteId} nicht gefunden. Erstelle neu.`);
+                        notice.setMessage(`Karte ${ankiNoteId} nicht gefunden. Erstelle neu.`);
                         ankiNoteId = null;
                     } else { throw e; }
                 }
@@ -166,30 +166,48 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                     notice.setMessage(`Erstelle neue Karte für ${originalQ.substring(0, 30)}...`);
                     if (card.type === 'Basic') {
                         const model = card.typeIn ? plugin.settings.typeInModel : plugin.settings.basicModel;
-                        const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
-                        const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+                        let frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                        let backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+
+                        // Validate Field Names
+                        const modelFields = await import('./AnkiConnect').then(m => m.getModelFieldNames(model));
+                        if (modelFields.length > 0) {
+                            if (!modelFields.includes(frontField) || !modelFields.includes(backField)) {
+                                console.warn(`Feldnamen stimmen nicht überein für Modell '${model}'. Konfiguriert: ${frontField}/${backField}. Verfügbar: ${modelFields.join(', ')}`);
+                                // Try to auto-map if we have exactly 2 fields
+                                if (modelFields.length === 2) {
+                                    frontField = modelFields[0];
+                                    backField = modelFields[1];
+                                    notice.setMessage(`Feldnamen automatisch angepasst: ${frontField} / ${backField}`);
+                                } else {
+                                    throw new Error(`Feldnamen '${frontField}'/'${backField}' existieren nicht im Modell '${model}'. Verfügbar: ${modelFields.join(', ')}. Bitte in den Einstellungen korrigieren.`);
+                                }
+                            }
+                        }
+
                         ankiNoteId = await addAnkiNote(deckName, model, frontField, backField, ankiFieldQ, ankiFieldA);
-                    } else {
+                    } else if (card.type === 'Cloze') {
                         ankiNoteId = await addAnkiClozeNote(deckName, plugin.settings.clozeModel, plugin.settings.clozeText, ankiClozeTextField);
                     }
                 } catch (e) {
                     if (e.message?.includes("cannot create note because it is a duplicate")) {
-                        new Notice(`Duplikat gefunden. Suche ID...`, 3000);
+                        notice.setMessage(`Duplikat gefunden. Suche ID...`);
                         if (card.type === 'Basic') {
                             const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
                             ankiNoteId = await findAnkiNoteId(originalQ, frontField);
-                        } else {
+                        } else if (card.type === 'Cloze') {
                             ankiNoteId = await findAnkiClozeNoteId(originalQ, plugin.settings.clozeText);
                         }
+
                         if (!ankiNoteId) {
                             throw new Error(`Duplikat "${originalQ.substring(0, 20)}..." ID nicht gefunden.`);
                         } else {
-                            new Notice(`ID ${ankiNoteId} für Duplikat gefunden. Update...`);
+                            notice.setMessage(`ID ${ankiNoteId} für Duplikat gefunden. Update...`);
                             if (card.type === 'Basic') {
                                 const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
                                 const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
                                 await updateAnkiNoteFields(ankiNoteId, frontField, backField, ankiFieldQ, ankiFieldA);
-                            } else {
+                            } else if (card.type === 'Cloze') {
                                 await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeText, ankiClozeTextField);
                             }
                         }

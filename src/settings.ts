@@ -10,23 +10,23 @@ export interface AnkiGeneratorSettings {
 	geminiModel: string;
 	openAiApiKey: string;
 	openAiModel: string;
-	ollamaEnabled: boolean;
 	ollamaEndpoint: string;
 	ollamaModel: string;
+	ollamaEnabled: boolean;
+	prompt: string;
+	feedbackPrompt: string;
+	useCustomPrompt: boolean;
+	useCustomFeedbackPrompt: boolean;
 	mainDeck: string;
 	basicModel: string;
 	basicFront: string;
 	basicBack: string;
+	clozeModel: string;
+	clozeText: string;
 	typeInModel: string;
 	typeInFront: string;
 	typeInBack: string;
-	clozeModel: string;
-	clozeText: string;
-	useCustomPrompt: boolean;
-	prompt: string;
-	useCustomFeedbackPrompt: boolean;
-	feedbackPrompt: string;
-	language: string;
+	fileDecorations: boolean;
 }
 
 export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
@@ -37,19 +37,9 @@ export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
 	geminiModel: 'gemini-1.5-flash',
 	openAiApiKey: '',
 	openAiModel: 'gpt-4o',
-	ollamaEnabled: false,
 	ollamaEndpoint: 'http://localhost:11434',
 	ollamaModel: 'llama3',
-	mainDeck: 'Default',
-	basicModel: 'Basic',
-	basicFront: 'Front',
-	basicBack: 'Back',
-	typeInModel: 'Basic (type in the answer)',
-	typeInFront: 'Front',
-	typeInBack: 'Back',
-	clozeModel: 'Cloze',
-	clozeText: 'Text',
-	useCustomPrompt: false,
+	ollamaEnabled: false,
 	prompt: `Du bist ein Assistent, der Lerninhalte in Anki-Karteikarten umwandelt. 
 Deine Aufgabe ist es, präzise, atomare und KURZE Karten zu erstellen.
 
@@ -77,12 +67,19 @@ REGELN ZUR KARTENERSTELLUNG:
    - Die Antwort (A:) ist eine Markdown-Liste.
    - Nutze KEINE Lückentexte für Listenpunkte.
 
-2. **Lückentexte (Cloze)**:
+2. **Eintipp-Karten (Type-In)**:
+   - Nutze dies für kurze, präzise Fakten, die exakt reproduziert werden müssen (z.B. Vitalwerte, Dosierungen, Formeln, Jahreszahlen).
+   - Format: 'A (type):' statt 'A:'.
+   - Beispiel:
+     Q: Normalwert Herzfrequenz Erwachsene?
+     A (type): 60-100 bpm
+
+3. **Lückentexte (Cloze)**:
    - Nutze Lückentexte NUR für einzelne Sätze im 'Q:'-Feld.
    - Ein Satz = Eine Karte.
    - KEINE Lücken in der Antwort (A:).
 
-3. **Bilder**:
+4. **Bilder**:
    - Kopiere Bild-Links (![[bild.png]]) exakt in das 'A:' Feld.
 
 Hier ist der Lerninhalt:
@@ -90,18 +87,20 @@ Hier ist der Lerninhalt:
 
 Bestehende Karten (vermeide Duplikate):
 {{existingCards}}`,
+	feedbackPrompt: `Analysiere die folgenden Anki-Karten auf Qualität, Atomarität und Einhaltung der Regeln (kurz, präzise, keine Listen-Splits). Gib konstruktives Feedback und Verbesserungsvorschläge.`,
+	useCustomPrompt: false,
 	useCustomFeedbackPrompt: false,
-	feedbackPrompt: `Du bist ein erfahrener Tutor. Analysiere den folgenden Lerninhalt und gib kurzes, konstruktives Feedback basierend auf wissenschaftlichen Lernprinzipien (z.B. Klarheit, Struktur, fehlende Schlüsselkonzepte) und lege besonderen Fokus auf die inhaltliche Korrektheit und mögliche Ergänzungen, die für die Präklinik (Rettungsdienst) sinnvoll sein könnten.
-WICHTIG: Das Feedback MUSS auf DEUTSCH sein.
-Halte das Feedback präzise (2-3 Sätze).
-Erstelle KEINE Karteikarten hier, nur den Feedback-Text.
-
-Notiz Inhalt:
-"""
-{{noteContent}}
-"""`,
-	language: 'de'
-}
+	mainDeck: 'Default',
+	basicModel: 'Basic',
+	basicFront: 'Front',
+	basicBack: 'Back',
+	clozeModel: 'Cloze',
+	clozeText: 'Text',
+	typeInModel: 'Basic (Type in the answer)',
+	typeInFront: 'Front',
+	typeInBack: 'Back',
+	fileDecorations: false
+};
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {
 	plugin: AnkiGeneratorPlugin;
@@ -117,48 +116,29 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 
 		containerEl.createEl('h2', { text: t('settings.title') });
 
-		// General Settings
-		containerEl.createEl('h3', { text: t('settings.general') });
+		// --- AI Provider Settings ---
+		containerEl.createEl('h3', { text: 'AI Provider Settings' });
 
 		new Setting(containerEl)
-			.setName(t('settings.vaultName'))
-			.addText(text => text
-				.setValue(this.plugin.settings.vaultName)
-				.onChange(async (value) => {
-					this.plugin.settings.vaultName = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName(t('settings.enableFeedback'))
-			.setDesc(t('settings.enableFeedbackDesc'))
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableFeedback)
-				.onChange(async (value) => {
-					this.plugin.settings.enableFeedback = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// AI Provider
-		new Setting(containerEl)
-			.setName(t('settings.aiProvider'))
+			.setName('AI Provider')
+			.setDesc('Select the AI provider to use')
 			.addDropdown(dropdown => dropdown
 				.addOption('gemini', 'Google Gemini')
 				.addOption('openai', 'OpenAI')
-				.addOption('ollama', t('settings.ollama'))
+				.addOption('ollama', 'Ollama (Local)')
 				.setValue(this.plugin.settings.aiProvider)
 				.onChange(async (value) => {
 					this.plugin.settings.aiProvider = value;
 					await this.plugin.saveSettings();
-					this.display(); // Refresh to show relevant settings
+					this.display();
 				}));
 
-		// Gemini Settings
 		if (this.plugin.settings.aiProvider === 'gemini') {
 			new Setting(containerEl)
 				.setName(t('settings.geminiApiKey'))
+				.setDesc(t('settings.geminiApiKeyDesc'))
 				.addText(text => text
-					.setPlaceholder('API Key')
+					.setPlaceholder('Enter your API Key')
 					.setValue(this.plugin.settings.geminiApiKey)
 					.onChange(async (value) => {
 						this.plugin.settings.geminiApiKey = value;
@@ -167,6 +147,7 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 
 			new Setting(containerEl)
 				.setName(t('settings.geminiModel'))
+				.setDesc(t('settings.geminiModelDesc'))
 				.addDropdown(async (dropdown) => {
 					await this.updateGeminiModels(this.plugin.settings.geminiApiKey, dropdown);
 					dropdown.onChange(async (value) => {
@@ -174,12 +155,10 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 				});
-		}
-
-		// OpenAI Settings
-		if (this.plugin.settings.aiProvider === 'openai') {
+		} else if (this.plugin.settings.aiProvider === 'openai') {
 			new Setting(containerEl)
-				.setName(t('settings.openAiApiKey'))
+				.setName('OpenAI API Key')
+				.setDesc('Enter your OpenAI API Key')
 				.addText(text => text
 					.setPlaceholder('sk-...')
 					.setValue(this.plugin.settings.openAiApiKey)
@@ -189,7 +168,8 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					}));
 
 			new Setting(containerEl)
-				.setName(t('settings.openAiModel'))
+				.setName('OpenAI Model')
+				.setDesc('Select the OpenAI model')
 				.addDropdown(async (dropdown) => {
 					await this.updateOpenAiModels(this.plugin.settings.openAiApiKey, dropdown);
 					dropdown.onChange(async (value) => {
@@ -197,12 +177,10 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 				});
-		}
-
-		// Ollama Settings
-		if (this.plugin.settings.aiProvider === 'ollama') {
+		} else if (this.plugin.settings.aiProvider === 'ollama') {
 			new Setting(containerEl)
-				.setName(t('settings.ollamaEndpoint'))
+				.setName('Ollama Endpoint')
+				.setDesc('Enter your Ollama endpoint (e.g. http://localhost:11434)')
 				.addText(text => text
 					.setPlaceholder('http://localhost:11434')
 					.setValue(this.plugin.settings.ollamaEndpoint)
@@ -212,7 +190,8 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					}));
 
 			new Setting(containerEl)
-				.setName(t('settings.ollamaModel'))
+				.setName('Ollama Model')
+				.setDesc('Select the Ollama model')
 				.addDropdown(async (dropdown) => {
 					await this.updateOllamaModels(this.plugin.settings.ollamaEndpoint, dropdown);
 					dropdown.onChange(async (value) => {
@@ -222,11 +201,23 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				});
 		}
 
-		// Anki Configuration
+		new Setting(containerEl)
+			.setName(t('settings.fileDecorations'))
+			.setDesc(t('settings.fileDecorationsDesc'))
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.fileDecorations)
+				.onChange(async (value) => {
+					this.plugin.settings.fileDecorations = value;
+					await this.plugin.saveSettings();
+					new Notice("Bitte Plugin neu laden, um Änderungen anzuwenden.");
+				}));
+
+		// --- Anki Settings ---
 		containerEl.createEl('h3', { text: t('settings.ankiConfig') });
 
 		new Setting(containerEl)
-			.setName(t('settings.mainDeck'))
+			.setName('Standard Deck')
+			.setDesc('Das Standard-Deck, in das neue Karten importiert werden.')
 			.addText(text => text
 				.setValue(this.plugin.settings.mainDeck)
 				.onChange(async (value) => {
@@ -234,9 +225,10 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
+		// Basic Model
 		new Setting(containerEl)
-			.setName(t('settings.basicModel'))
-			.setDesc(t('settings.basicModelDesc'))
+			.setName('Basic Note Type')
+			.setDesc('Name des Notiztyps für Basic-Karten in Anki')
 			.addText(text => text
 				.setValue(this.plugin.settings.basicModel)
 				.onChange(async (value) => {
@@ -245,8 +237,8 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName(t('settings.basicFront'))
-			.setDesc(t('settings.basicFrontDesc'))
+			.setName('Basic Front Field')
+			.setDesc('Name des Feldes für die Vorderseite')
 			.addText(text => text
 				.setValue(this.plugin.settings.basicFront)
 				.onChange(async (value) => {
@@ -255,8 +247,8 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName(t('settings.basicBack'))
-			.setDesc(t('settings.basicBackDesc'))
+			.setName('Basic Back Field')
+			.setDesc('Name des Feldes für die Rückseite')
 			.addText(text => text
 				.setValue(this.plugin.settings.basicBack)
 				.onChange(async (value) => {
@@ -264,9 +256,31 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
+		// Cloze Model
 		new Setting(containerEl)
-			.setName('Type-In Model')
-			.setDesc('Anki-Modell für Type-In Karten (z.B. "Basic (type in the answer)")')
+			.setName('Cloze Note Type')
+			.setDesc('Name des Notiztyps für Lückentext-Karten in Anki')
+			.addText(text => text
+				.setValue(this.plugin.settings.clozeModel)
+				.onChange(async (value) => {
+					this.plugin.settings.clozeModel = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Cloze Text Field')
+			.setDesc('Name des Text-Feldes für Lückentexte')
+			.addText(text => text
+				.setValue(this.plugin.settings.clozeText)
+				.onChange(async (value) => {
+					this.plugin.settings.clozeText = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// Type-In Model
+		new Setting(containerEl)
+			.setName('Type-In Note Type')
+			.setDesc('Name des Notiztyps für Eintipp-Karten in Anki')
 			.addText(text => text
 				.setValue(this.plugin.settings.typeInModel)
 				.onChange(async (value) => {
@@ -276,7 +290,7 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Type-In Front Field')
-			.setDesc('Name des Front-Feldes im Type-In Modell')
+			.setDesc('Name des Feldes für die Vorderseite (Type-In)')
 			.addText(text => text
 				.setValue(this.plugin.settings.typeInFront)
 				.onChange(async (value) => {
@@ -286,31 +300,11 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Type-In Back Field')
-			.setDesc('Name des Back-Feldes im Type-In Modell')
+			.setDesc('Name des Feldes für die Rückseite (Type-In)')
 			.addText(text => text
 				.setValue(this.plugin.settings.typeInBack)
 				.onChange(async (value) => {
 					this.plugin.settings.typeInBack = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName(t('settings.clozeModel'))
-			.setDesc(t('settings.clozeModelDesc'))
-			.addText(text => text
-				.setValue(this.plugin.settings.clozeModel)
-				.onChange(async (value) => {
-					this.plugin.settings.clozeModel = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName(t('settings.clozeText'))
-			.setDesc(t('settings.clozeTextDesc'))
-			.addText(text => text
-				.setValue(this.plugin.settings.clozeText)
-				.onChange(async (value) => {
-					this.plugin.settings.clozeText = value;
 					await this.plugin.saveSettings();
 				}));
 
