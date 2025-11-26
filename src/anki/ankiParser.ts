@@ -190,12 +190,23 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 				let isAnswerStart = nextLine.startsWith('A:') || nextLine.startsWith('A (type):');
 
 				if (isAnswerStart) {
-					if (nextLine.startsWith('A (type):')) {
-						typeIn = true;
-						a = nextLine.substring(9).trim();
-					} else {
-						a = nextLine.substring(2).trim();
+					// Robust prefix stripping to handle cases like "A: A: (type)"
+					let rawLine = nextLine;
+					while (true) {
+						rawLine = rawLine.trim();
+						if (rawLine.startsWith('A (type):')) {
+							typeIn = true;
+							rawLine = rawLine.substring(9);
+						} else if (rawLine.startsWith('A:')) {
+							rawLine = rawLine.substring(2);
+						} else if (rawLine.startsWith('(type):')) {
+							typeIn = true;
+							rawLine = rawLine.substring(7);
+						} else {
+							break;
+						}
 					}
+					a = rawLine;
 
 					currentLineIndex++;
 

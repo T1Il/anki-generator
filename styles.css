@@ -26,8 +26,8 @@
 }
 
 .anki-preview-container {
-	max-height: 70vh;
-	overflow-y: auto;
+	/* max-height: 70vh;  REMOVED to allow expansion */
+	/* overflow-y: auto; REMOVED to allow expansion */
 	padding: 5px;
 }
 
@@ -47,9 +47,9 @@
 	transition: background-color 0.2s ease-in-out;
 }
 
-	.anki-preview-card:hover {
-		background-color: var(--background-modifier-hover);
-	}
+.anki-preview-card:hover {
+	background-color: var(--background-modifier-hover);
+}
 
 .anki-preview-content .anki-preview-question {
 	font-weight: 500;
@@ -79,20 +79,20 @@
 	padding-top: 15px;
 }
 
-	.anki-card-actions button {
-		background-color: transparent;
-		border: 1px solid var(--background-modifier-border);
-	}
+.anki-card-actions button {
+	background-color: transparent;
+	border: 1px solid var(--background-modifier-border);
+}
 
-	.anki-card-actions .anki-delete-button {
-		color: var(--text-error);
-	}
+.anki-card-actions .anki-delete-button {
+	color: var(--text-error);
+}
 
-		.anki-card-actions .anki-delete-button:hover {
-			background-color: var(--background-modifier-error);
-			border-color: var(--background-modifier-error);
-			color: var(--text-on-accent);
-		}
+.anki-card-actions .anki-delete-button:hover {
+	background-color: var(--background-modifier-error);
+	border-color: var(--background-modifier-error);
+	color: var(--text-on-accent);
+}
 
 /* --- NEU: Styles für den Button in der Statusleiste --- */
 .anki-generate-button {
@@ -103,13 +103,14 @@
 	border-radius: 5px;
 	cursor: pointer;
 	font-weight: 500;
-	margin: 0 10px; /* Fügt etwas Abstand hinzu */
+	margin: 0 10px;
+	/* Fügt etwas Abstand hinzu */
 	transition: background-color 0.2s ease-in-out;
 }
 
-	.anki-generate-button:hover {
-		background-color: var(--interactive-accent-hover);
-	}
+.anki-generate-button:hover {
+	background-color: var(--interactive-accent-hover);
+}
 
 /* --- AI Feedback Box --- */
 .anki-feedback-box {
@@ -124,8 +125,15 @@
 }
 
 @keyframes fadeIn {
-	from { opacity: 0; transform: translateY(-10px); }
-	to { opacity: 1; transform: translateY(0); }
+	from {
+		opacity: 0;
+		transform: translateY(-10px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 .anki-feedback-header {
@@ -147,10 +155,15 @@
 	color: var(--text-muted);
 	background: none;
 	border: none;
-	font-size: 1.2em;
-	padding: 0 5px;
+	padding: 4px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background-color 0.2s, color 0.2s;
 }
 
 .anki-feedback-close:hover {
 	color: var(--text-normal);
+	background-color: var(--background-modifier-hover);
 }

@@ -10,6 +10,8 @@ export class CardPreviewModal extends Modal {
 	instruction?: string;
 	onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void;
 	deletedCardIds: number[] = [];
+	currentSort: string = 'default';
+	currentFilter: 'all' | 'synced' | 'unsynced' = 'all';
 
 	constructor(plugin: AnkiGeneratorPlugin, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
 		super(plugin.app);
@@ -27,6 +29,7 @@ export class CardPreviewModal extends Modal {
 
 	render() {
 		const { contentEl } = this;
+		const scrollTop = contentEl.scrollTop;
 		contentEl.empty();
 		contentEl.createEl("h2", { text: "Karten bearbeiten & verwalten" });
 
@@ -326,10 +329,13 @@ export class CardPreviewModal extends Modal {
 			const highlightedA = this.highlightClozes(card.a);
 			MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
 		});
-	}
 
-	currentSort: string = 'default';
-	currentFilter: 'all' | 'synced' | 'unsynced' = 'all';
+		if (scrollTop) {
+			setTimeout(() => {
+				contentEl.scrollTop = scrollTop;
+			}, 0);
+		}
+	}
 
 	sortCards() {
 		if (this.currentSort === 'default') {

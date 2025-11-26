@@ -87,7 +87,7 @@ Hier ist der Lerninhalt:
 
 Bestehende Karten (vermeide Duplikate):
 {{existingCards}}`,
-	feedbackPrompt: `Analysiere den folgenden Lerninhalt (Aufschrieb) auf Vollständigkeit, Struktur und Verständlichkeit. Gib konstruktives Feedback und Verbesserungsvorschläge zum Inhalt selbst, nicht zu den daraus generierten Karten.`,
+	feedbackPrompt: `Analysiere den folgenden Lerninhalt (Aufschrieb) auf Vollständigkeit, Struktur und Verständlichkeit. Das Feedback soll kurz sein, ausschließlich inhaltlich und auf die Präklinik (Rettungsdienst) bezogen sein. Gib konstruktives Feedback und Verbesserungsvorschläge zum Inhalt selbst, nicht zu den daraus generierten Karten.`,
 	useCustomPrompt: false,
 	useCustomFeedbackPrompt: false,
 	mainDeck: 'Default',

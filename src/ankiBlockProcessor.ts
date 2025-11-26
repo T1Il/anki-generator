@@ -1,4 +1,4 @@
-import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp, Setting, TextComponent } from 'obsidian';
+import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp, Setting, TextComponent, setIcon } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { Card, ChatMessage } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
@@ -423,24 +423,28 @@ function renderFeedback(container: HTMLElement, history: ChatMessage[], plugin: 
 	header.style.justifyContent = 'space-between';
 	header.style.alignItems = 'center';
 	header.style.marginBottom = '10px';
-	header.style.borderBottom = '1px solid rgba(74, 144, 226, 0.3)';
-	header.style.paddingBottom = '5px';
+	header.style.marginBottom = '10px';
 
 	header.createSpan({ text: '🤖 KI Chat & Feedback', cls: 'anki-feedback-title' }).style.fontWeight = 'bold';
 
-	const closeBtn = header.createEl('button', { cls: 'anki-feedback-close', text: '✖' });
-	closeBtn.title = "Schließen";
-	closeBtn.onclick = () => {
-		feedbackBox.remove();
-	};
+	const controlsDiv = header.createDiv({ cls: 'anki-feedback-controls' });
+	controlsDiv.style.display = 'flex';
+	controlsDiv.style.gap = '5px';
 
-	const clearBtn = header.createEl('button', { cls: 'anki-feedback-close', text: '🗑️' });
+	const clearBtn = controlsDiv.createEl('button', { cls: 'anki-feedback-close' });
 	clearBtn.title = "Chat leeren";
-	clearBtn.style.marginRight = "5px";
+	setIcon(clearBtn, 'trash');
 	clearBtn.onclick = () => {
 		history.length = 0; // Clear array
 		if (sourcePath) plugin.feedbackCache.delete(sourcePath);
 		renderFeedback(container, history, plugin, sourcePath);
+	};
+
+	const closeBtn = controlsDiv.createEl('button', { cls: 'anki-feedback-close' });
+	closeBtn.title = "Schließen";
+	setIcon(closeBtn, 'x');
+	closeBtn.onclick = () => {
+		feedbackBox.remove();
 	};
 
 	const contentArea = feedbackBox.createDiv({ cls: 'anki-feedback-content' });
