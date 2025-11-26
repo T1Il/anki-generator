@@ -90,7 +90,8 @@ Gib NUR die überarbeiteten Karten zurück.`;
 		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images);
 
 		if (settings.enableFeedback) {
-			// Append generated cards to feedback prompt
+			// Append note content and generated cards to feedback prompt
+			feedbackPrompt += `\n\nOriginal Content:\n"""\n${noteContent}\n"""`;
 			feedbackPrompt += `\n\nGenerierte Karten:\n"""\n${cardsResponse}\n"""`;
 
 			console.log(`--- Feedback Prompt ---\n${feedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);

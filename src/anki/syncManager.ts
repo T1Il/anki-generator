@@ -49,9 +49,12 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         const updatedCardsWithIds: Card[] = [];
         const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
 
+        console.log(`[SyncManager] Starting sync for ${cards.length} cards.`);
+
         for (const card of cards) {
+            console.log(`[SyncManager] Processing card: "${card.q.substring(0, 50)}..." (ID: ${card.id})`);
             if (!card.q || card.q.trim().length === 0) {
-                console.warn("Überspringe Karte mit leerer Frage:", card);
+                console.warn("[SyncManager] Skipping card with empty question:", card);
                 continue;
             }
 

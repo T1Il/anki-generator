@@ -90,6 +90,30 @@ export class CardPreviewModal extends Modal {
 		sortContainer.style.alignItems = 'center';
 		sortContainer.style.gap = '10px';
 
+		// --- Filter Controls ---
+		sortContainer.createSpan({ text: 'Filter:' });
+		const filterDropdown = sortContainer.createEl('select');
+		filterDropdown.style.padding = '5px';
+		filterDropdown.style.borderRadius = '4px';
+		filterDropdown.style.border = '1px solid var(--background-modifier-border)';
+		filterDropdown.style.marginRight = '10px';
+
+		const filterOptions = [
+			{ value: 'all', text: 'Alle' },
+			{ value: 'synced', text: 'Synchronisiert' },
+			{ value: 'unsynced', text: 'Nicht Synchronisiert' }
+		];
+
+		filterOptions.forEach(opt => {
+			const option = filterDropdown.createEl('option', { text: opt.text, value: opt.value });
+			if (this.currentFilter === opt.value) option.selected = true;
+		});
+
+		filterDropdown.addEventListener('change', () => {
+			this.currentFilter = filterDropdown.value as any;
+			this.render();
+		});
+
 		sortContainer.createSpan({ text: 'Sortieren nach:' });
 		const sortDropdown = sortContainer.createEl('select');
 		sortDropdown.style.padding = '5px';
@@ -212,6 +236,9 @@ export class CardPreviewModal extends Modal {
 		const sourcePath = activeFile ? activeFile.path : '';
 
 		this.cards.forEach((card, index) => {
+			// Apply Filter
+			if (this.currentFilter === 'synced' && !card.id) return;
+			if (this.currentFilter === 'unsynced' && card.id) return;
 			const cardEl = container.createDiv({ cls: 'anki-compact-card' });
 
 			// --- Card Styling based on Type ---
@@ -245,11 +272,26 @@ export class CardPreviewModal extends Modal {
 			// --- Header: Type & Actions ---
 			const header = cardEl.createDiv({ cls: 'anki-card-header' });
 
+			// Badge Container (Left side)
+			const badgeContainer = header.createDiv({ cls: 'anki-badge-container' });
+			badgeContainer.style.display = 'flex';
+			badgeContainer.style.gap = '8px';
+			badgeContainer.style.alignItems = 'center';
+
 			// Type Badge
-			const typeBadge = header.createDiv({ cls: 'anki-card-type' });
+			const typeBadge = badgeContainer.createDiv({ cls: 'anki-card-type' });
 			typeBadge.setText(`${typeIcon} ${typeText}`);
 			typeBadge.style.color = typeColor;
 			typeBadge.style.backgroundColor = typeBg;
+
+			// Synced Badge
+			if (card.id) {
+				const syncBadge = badgeContainer.createDiv({ cls: 'anki-card-type' });
+				syncBadge.setText("✅ Synced");
+				syncBadge.style.backgroundColor = "rgba(46, 204, 113, 0.15)";
+				syncBadge.style.color = "#2ecc71";
+				syncBadge.style.border = "1px solid rgba(46, 204, 113, 0.3)";
+			}
 
 			// Actions (Icons only)
 			const actions = header.createDiv({ cls: 'anki-card-actions-compact' });
@@ -287,6 +329,7 @@ export class CardPreviewModal extends Modal {
 	}
 
 	currentSort: string = 'default';
+	currentFilter: 'all' | 'synced' | 'unsynced' = 'all';
 
 	sortCards() {
 		if (this.currentSort === 'default') {

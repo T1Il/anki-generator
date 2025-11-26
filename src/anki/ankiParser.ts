@@ -119,7 +119,6 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 			i++;
 			continue;
 		}
-
 		// --- INTELLIGENTE LISTEN-ZUSAMMENFÜHRUNG ---
 		// Erkennt, ob die KI fälschlicherweise "Q: - Item" geschrieben hat, obwohl es eine Liste sein sollte.
 		// Wir prüfen auf "Q: -" oder "Q: 1." (mit Leerzeichen danach)
@@ -132,6 +131,8 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 
 			// 2. Cloze-Syntax entfernen (Listen in Basic-Karten haben keine Lücken)
 			content = stripClozeSyntax(content);
+
+			console.log(`[AnkiParser] Merging List Fragment: "${content}" into previous card.`);
 
 			// 3. An die Antwort der VORHERIGEN Karte anhängen
 			const lastCard = cards[cards.length - 1];
