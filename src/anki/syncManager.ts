@@ -162,13 +162,27 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
             }
 
             if (!ankiNoteId) {
+                // Define variables for Basic cards
+                let model = "";
+                let frontField = "";
+                let backField = "";
+
+                // Define variables for Cloze cards
+                let clozeModel = "";
+                let clozeTextField = "";
+
+                if (card.type === 'Basic') {
+                    model = card.typeIn ? plugin.settings.typeInModel : plugin.settings.basicModel;
+                    frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                    backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+                } else if (card.type === 'Cloze') {
+                    clozeModel = plugin.settings.clozeModel;
+                    clozeTextField = plugin.settings.clozeText;
+                }
+
                 try {
                     notice.setMessage(`Erstelle neue Karte für ${originalQ.substring(0, 30)}...`);
                     if (card.type === 'Basic') {
-                        const model = card.typeIn ? plugin.settings.typeInModel : plugin.settings.basicModel;
-                        let frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
-                        let backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
-
                         // Validate Field Names
                         const modelFields = await import('./AnkiConnect').then(m => m.getModelFieldNames(model));
                         if (modelFields.length > 0) {
@@ -187,16 +201,15 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
 
                         ankiNoteId = await addAnkiNote(deckName, model, frontField, backField, ankiFieldQ, ankiFieldA);
                     } else if (card.type === 'Cloze') {
-                        ankiNoteId = await addAnkiClozeNote(deckName, plugin.settings.clozeModel, plugin.settings.clozeText, ankiClozeTextField);
+                        ankiNoteId = await addAnkiClozeNote(deckName, clozeModel, clozeTextField, ankiClozeTextField);
                     }
                 } catch (e) {
                     if (e.message?.includes("cannot create note because it is a duplicate")) {
                         notice.setMessage(`Duplikat gefunden. Suche ID...`);
                         if (card.type === 'Basic') {
-                            const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
                             ankiNoteId = await findAnkiNoteId(originalQ, frontField);
                         } else if (card.type === 'Cloze') {
-                            ankiNoteId = await findAnkiClozeNoteId(originalQ, plugin.settings.clozeText);
+                            ankiNoteId = await findAnkiClozeNoteId(originalQ, clozeTextField);
                         }
 
                         if (!ankiNoteId) {
@@ -204,11 +217,9 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                         } else {
                             notice.setMessage(`ID ${ankiNoteId} für Duplikat gefunden. Update...`);
                             if (card.type === 'Basic') {
-                                const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
-                                const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
                                 await updateAnkiNoteFields(ankiNoteId, frontField, backField, ankiFieldQ, ankiFieldA);
                             } else if (card.type === 'Cloze') {
-                                await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeText, ankiClozeTextField);
+                                await updateAnkiClozeNoteFields(ankiNoteId, clozeTextField, ankiClozeTextField);
                             }
                         }
                     } else { throw e; }

@@ -79,26 +79,25 @@ Gib NUR die überarbeiteten Karten zurück.`;
 	}
 	feedbackPrompt = feedbackPrompt.replace('{{noteContent}}', noteContent);
 
-	console.log(`--- Starting Parallel Generation (${provider}) ---`);
+	console.log(`--- Starting Generation (${provider}) ---`);
 	console.log(`--- Card Prompt (Images: ${images.length}) ---\n${cardPrompt.substring(0, 200)}...\n--- End Card Prompt ---`);
 
 	try {
 		let cardsResponse = "";
 		let feedbackResponse = "";
 
+		// --- 3. Execute Generation (Sequential for Feedback) ---
+		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images);
+
 		if (settings.enableFeedback) {
+			// Append generated cards to feedback prompt
+			feedbackPrompt += `\n\nGenerierte Karten:\n"""\n${cardsResponse}\n"""`;
+
 			console.log(`--- Feedback Prompt ---\n${feedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);
-			// --- 3a. Execute Parallel Requests (Cards + Feedback) ---
-			const results = await Promise.all([
-				callAIProvider(app, provider, settings, cardPrompt, images),
-				callAIProvider(app, provider, settings, feedbackPrompt, [])
-			]);
-			cardsResponse = results[0];
-			feedbackResponse = results[1];
+
+			feedbackResponse = await callAIProvider(app, provider, settings, feedbackPrompt, []);
 		} else {
 			console.log("Feedback generation disabled in settings.");
-			// --- 3b. Execute Single Request (Cards only) ---
-			cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images);
 		}
 
 		console.log("Generation Complete.");

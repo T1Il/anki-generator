@@ -95,6 +95,18 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			}
 		});
 
+		this.addCommand({
+			id: 'reload-plugin',
+			name: 'Reload Plugin',
+			callback: async () => {
+				// @ts-ignore
+				await this.app.plugins.disablePlugin(this.manifest.id);
+				// @ts-ignore
+				await this.app.plugins.enablePlugin(this.manifest.id);
+				new Notice('Anki Generator Plugin reloaded');
+			}
+		});
+
 		// Status Bar Item
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.addClass('anki-generate-button');

@@ -283,13 +283,6 @@ export class CardPreviewModal extends Modal {
 			const aDiv = body.createDiv({ cls: 'anki-card-a' });
 			const highlightedA = this.highlightClozes(card.a);
 			MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
-
-			// ID Badge (bottom right)
-			if (card.id) {
-				const idBadge = cardEl.createDiv({ cls: 'anki-card-id-badge' });
-				idBadge.setText(`ID: ${card.id}`);
-				idBadge.title = "Anki Note ID";
-			}
 		});
 	}
 
