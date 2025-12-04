@@ -4,6 +4,7 @@ export interface Card {
 	a: string;
 	id: number | null;
 	typeIn?: boolean;
+	originalText?: string; // Stores the raw text of the card
 }
 
 

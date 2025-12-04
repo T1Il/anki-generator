@@ -91,7 +91,15 @@ export async function runGenerationProcess(
 	isRevision: boolean = false,
 	isBlockOnly: boolean = false
 ): Promise<string> {
+	
+	let abortController = new AbortController();
 	let notice = new Notice(isBlockOnly ? "Erstelle Anki-Block..." : t('notice.preparing', { provider }), 0);
+
+	// Register active generation
+	const activeFile = plugin.app.workspace.getActiveFile();
+	if (activeFile) {
+		plugin.addActiveGeneration(activeFile.path, abortController);
+	}
 
 	try {
 		const sub = subdeck || 'Standard';
@@ -145,13 +153,15 @@ export async function runGenerationProcess(
 			plugin.settings,
 			instructionsToUse, // Use determined instructions
 			images, // Bilder übergeben
-			isRevision // Revision Flag
+			isRevision, // Revision Flag
+			abortController.signal // Pass cancellation signal
 		);
 		// --- ENDE ÜBERGABE ---
 
 		console.log("runGenerationProcess received feedback:", feedback ? "YES (Length: " + feedback.length + ")" : "NO");
 
 		if (!generatedTextRaw) {
+			notice.hide();
 			new Notice(t('notice.noCardsGenerated'));
 			return "";
 		}
@@ -259,6 +269,10 @@ export async function runGenerationProcess(
 
 	} catch (error) {
 		notice.hide();
+		if ((error as Error).name === 'AbortError' || (error as Error).message === "Aborted by user") {
+			return "";
+		}
+
 		console.error(`Fehler bei der Kartengenerierung mit ${provider} (in runGenerationProcess):`, error);
 
 		// Check for Overload
@@ -275,11 +289,15 @@ export async function runGenerationProcess(
 			new Notice(`Fehler: ${error.message}`, 7000);
 		}
 		return "";
+	} finally {
+		if (activeFile) {
+			plugin.removeActiveGeneration(activeFile.path);
+		}
 	}
 }
 
 // Neue Funktion zum Extrahieren und Laden von Bildern UND Vorbereiten des Contents
-async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin, content: string, sourcePath: string): Promise<{ images: ImageInput[], preparedContent: string }> {
+export async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin, content: string, sourcePath: string): Promise<{ images: ImageInput[], preparedContent: string }> {
 	const images: ImageInput[] = [];
 	let preparedContent = content;
 
@@ -303,14 +321,7 @@ async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin, conte
 		// My new regex: /(!\[\[((?:[^|\]]+)(?:\|[^\]]+)?)\]\]|!\[[^\]]*\]\(([^)]+)\))/g
 		// Group 1: Full match
 		// Group 2: Wiki inner (potentially with pipe? No, the regex is tricky).
-
-		// Let's stick to the logic: extract name, load image, if success -> mark.
-
-		// Re-using the logic from before but careful with groups.
-		// match[0] is full match.
-		// match[1] is also full match because of outer parens in regex.
-		// match[2] is Wiki link content (inner).
-		// match[3] is Markdown link URL.
+		// Group 3: Markdown link URL.
 
 		let extractedName = match[2]?.trim();
 		if (!extractedName && match[3]) {
@@ -562,7 +573,7 @@ function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionP
 }
 
 // Bereinigt den KI-Output (Korrigierte Version mit Status-Tracking)
-function cleanAiGeneratedText(rawText: string): string {
+export function cleanAiGeneratedText(rawText: string): string {
 	let textToProcess = rawText.trim();
 
 	// Remove outer code blocks if present (e.g. ```anki-cards ... ``` or just ``` ... ```)
@@ -574,6 +585,8 @@ function cleanAiGeneratedText(rawText: string): string {
 			textToProcess = lines.slice(1, -1).join('\n').trim();
 		}
 	}
+
+	console.log("cleanAiGeneratedText: Processing text:", textToProcess);
 
 	const lines = textToProcess.split('\n');
 	const validCardLines: string[] = [];
@@ -648,5 +661,7 @@ function cleanAiGeneratedText(rawText: string): string {
 		validCardLines.pop();
 	}
 
-	return validCardLines.join('\n');
+	const result = validCardLines.join('\n');
+	console.log("cleanAiGeneratedText: Result:", result);
+	return result;
 }

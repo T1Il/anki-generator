@@ -4,10 +4,11 @@ import { Card, ChatMessage } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
 import { getCardCountForDeck, moveAnkiNotesToDeck, deleteAnkiDeck, getDeckNames } from './anki/AnkiConnect';
 import { parseCardsFromBlockSource } from './anki/ankiParser';
-import { runGenerationProcess } from './generationManager';
+import { runGenerationProcess, cleanAiGeneratedText, extractImagesAndPrepareContent } from './generationManager';
 import { syncAnkiBlock, saveAnkiBlockChanges } from './anki/syncManager';
-import { generateFeedbackOnly, generateChatResponse } from './aiGenerator';
+import { generateFeedbackOnly, generateChatResponse, constructPrompt } from './aiGenerator';
 import { t } from './lang/helpers';
+import { ManualGenerationModal } from './ui/ManualGenerationModal';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
@@ -276,6 +277,63 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 				if (ctx.sourcePath) plugin.feedbackCache.set(ctx.sourcePath, history);
 				renderFeedback(el, history, plugin, ctx.sourcePath);
 			}
+		};
+	}
+
+	// --- MANUAL MODE BUTTON (If enabled) ---
+	if (plugin.settings.enableManualMode) {
+		const manualBtn = genContainer.createEl('button', { text: '🛠️ Manueller Modus' });
+		manualBtn.style.flex = '1';
+		manualBtn.title = "Zeigt den Prompt an und erlaubt manuelle Eingabe";
+		manualBtn.onclick = async () => {
+			const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
+			if (!(file instanceof TFile)) {
+				new Notice("Konnte Datei nicht finden.");
+				return;
+			}
+
+			const content = await plugin.app.vault.read(file);
+			
+			// Extract Images and Prepare Content (using generationManager logic)
+			const { images, preparedContent } = await extractImagesAndPrepareContent(plugin, content, file.path);
+			
+			// Construct Prompt
+			const existingCardsText = cards.map(c => c.originalText).join('\n');
+			const prompt = constructPrompt(preparedContent, existingCardsText, plugin.settings, instruction || "", false);
+
+			// Open Manual Modal
+			new ManualGenerationModal(plugin.app, prompt, async (manualResponse) => {
+				if (!manualResponse) return;
+
+				// Process Response (similar to generationManager)
+				const cleanedResponse = cleanAiGeneratedText(manualResponse);
+				
+				// Re-read file to get latest content
+				const currentFileContent = await plugin.app.vault.read(file);
+				
+				// Find the block. We look for the block that contains the exact source text.
+				const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+				const matches = [...currentFileContent.matchAll(blockRegex)];
+				const match = matches.find(m => m[1].trim() === source.trim());
+
+				if (match) {
+					const fullBlock = match[0];
+					const blockContent = match[1];
+					
+					// Append new cards
+					const newBlockContent = `${blockContent.trim()}\n\n${cleanedResponse.trim()}\n`;
+					const newBlock = `\`\`\`anki-cards\n${newBlockContent}\`\`\``;
+					
+					const newFileContent = currentFileContent.replace(fullBlock, newBlock);
+					await plugin.app.vault.modify(file, newFileContent);
+					new Notice("Manuell generierte Karten hinzugefügt.");
+				} else {
+					new Notice("Konnte den Block nicht finden. Bitte manuell einfügen.");
+					// Fallback: Copy to clipboard?
+					navigator.clipboard.writeText(cleanedResponse);
+					new Notice("Antwort in die Zwischenablage kopiert.");
+				}
+			}).open();
 		};
 	}
 
@@ -798,15 +856,9 @@ class DeckSelectionModal extends Modal {
 					this.renderSuggestions(container, input, previewEl); // Re-render to highlight
 				};
 				// Recursively render children
-				if (child.children.size > 0) {
-					renderNode(child, parentEl);
-				}
+				renderNode(child, parentEl);
 			});
 		};
 		renderNode(root, container);
-	}
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
 	}
 }

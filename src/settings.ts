@@ -27,6 +27,8 @@ export interface AnkiGeneratorSettings {
 	typeInFront: string;
 	typeInBack: string;
 	fileDecorations: boolean;
+	enableManualMode: boolean;
+	maxRetries: number;
 }
 
 export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
@@ -99,7 +101,9 @@ Bestehende Karten (vermeide Duplikate):
 	typeInModel: 'Basic (Type in the answer)',
 	typeInFront: 'Front',
 	typeInBack: 'Back',
-	fileDecorations: false
+	fileDecorations: false,
+	enableManualMode: false,
+	maxRetries: 3
 };
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {
@@ -210,6 +214,29 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					this.plugin.settings.fileDecorations = value;
 					await this.plugin.saveSettings();
 					new Notice("Bitte Plugin neu laden, um Änderungen anzuwenden.");
+				}));
+
+		new Setting(containerEl)
+			.setName('Manueller Modus bei Fehler')
+			.setDesc('Wenn aktiviert, wird bei API-Fehlern (z.B. Überlastung) oder Timeouts ein Popup angezeigt, mit dem du den Prompt kopieren und die Antwort manuell einfügen kannst.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableManualMode)
+				.onChange(async (value) => {
+					this.plugin.settings.enableManualMode = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Maximale Wiederholungen bei Fehler')
+			.setDesc('Wie oft soll bei einem 503 Fehler (Überlastung) automatisch erneut versucht werden, bevor der manuelle Modus (falls aktiviert) greift?')
+			.addText(text => text
+				.setValue(String(this.plugin.settings.maxRetries))
+				.onChange(async (value) => {
+					const val = parseInt(value);
+					if (!isNaN(val) && val >= 0) {
+						this.plugin.settings.maxRetries = val;
+						await this.plugin.saveSettings();
+					}
 				}));
 
 		// --- Anki Settings ---

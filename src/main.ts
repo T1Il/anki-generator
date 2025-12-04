@@ -13,6 +13,7 @@ import { LegacyFileDecorator } from './ui/LegacyFileDecorator';
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
 	feedbackCache: Map<string, ChatMessage[]> = new Map(); // Stores feedback history by file path
+	activeGenerations: Map<string, AbortController> = new Map(); // Stores abort controllers for active generations
 	legacyFileDecorator: LegacyFileDecorator | null = null;
 	ankiFileDecorationProvider: AnkiFileDecorationProvider | null = null;
 
@@ -107,6 +108,34 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			}
 		});
 
+		this.addCommand({
+			id: 'cancel-anki-generation',
+			name: 'Cancel Anki Generation',
+			callback: () => {
+				const activeFile = this.app.workspace.getActiveFile();
+				if (activeFile) {
+					const controller = this.activeGenerations.get(activeFile.path);
+					if (controller) {
+						controller.abort();
+						this.activeGenerations.delete(activeFile.path);
+						new Notice(`Generation cancelled for ${activeFile.basename}`);
+					} else {
+						new Notice("No active generation found for this file.");
+					}
+				} else {
+					// Optional: Cancel all? Or just warn.
+					// Let's just warn for now as per "cancel one of them" (implied context-aware)
+					if (this.activeGenerations.size > 0) {
+						// If no file is focused but generations are running, maybe cancel the last one?
+						// Or just tell user to focus the file.
+						new Notice("Please open the file where generation is running to cancel it.");
+					} else {
+						new Notice("No active generations.");
+					}
+				}
+			}
+		});
+
 		// Status Bar Item
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.addClass('anki-generate-button');
@@ -169,5 +198,13 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		} catch (e) {
 			console.log("Update check failed:", e);
 		}
+	}
+
+	addActiveGeneration(filePath: string, controller: AbortController) {
+		this.activeGenerations.set(filePath, controller);
+	}
+
+	removeActiveGeneration(filePath: string) {
+		this.activeGenerations.delete(filePath);
 	}
 }

@@ -241,6 +241,9 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 			}
 
 			const card: Card = { type, q: q.trim(), a: a.trim(), id, typeIn };
+			// Reconstruct original text roughly for manual mode
+			const originalLines = formatSingleCard(card);
+			card.originalText = originalLines.join('\n');
 			cards.push(card);
 			i = currentLineIndex;
 		} else {
