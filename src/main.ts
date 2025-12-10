@@ -5,10 +5,12 @@ import { triggerCardGeneration } from './generationManager';
 import { parseAnkiSection as parseAnkiSectionType } from './anki/ankiParser'; // Nur für Typdeklaration
 import { SyncReviewModal } from './ui/SyncReviewModal';
 import { QuestionSearchModal } from './ui/QuestionSearchModal';
+import { BlockIdManagerModal } from './ui/BlockIdManagerModal';
 import { Card, ChatMessage } from './types';
 import { t } from './lang/helpers';
 import { AnkiFileDecorationProvider } from './ui/AnkiFileDecorationProvider';
 import { LegacyFileDecorator } from './ui/LegacyFileDecorator';
+import { ensureBlockIdsForCallouts } from './utils';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -116,6 +118,23 @@ export default class AnkiGeneratorPlugin extends Plugin {
 				// @ts-ignore
 				await this.app.plugins.enablePlugin(this.manifest.id);
 				new Notice('Anki Generator Plugin reloaded');
+			}
+		});
+
+		this.addCommand({
+			id: 'manage-block-ids',
+			name: 'Manage Block IDs',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				new BlockIdManagerModal(this.app, editor).open();
+			}
+		});
+
+		this.addCommand({
+			id: 'generate-block-ids',
+			name: 'Generate Callout Block IDs',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				ensureBlockIdsForCallouts(editor);
+				new Notice("Block IDs generated for callouts.");
 			}
 		});
 
