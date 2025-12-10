@@ -8,13 +8,23 @@ Transform your Obsidian notes into Anki flashcards automatically using the power
 
 ### 🤖 AI-Powered Generation
 - **Multi-Provider Support**: Use **Google Gemini**, **OpenAI (ChatGPT)**, or **Ollama** (Local LLMs).
-- **Context-Aware**: Generates Basic (Q&A) and Cloze (Fill-in-the-blank) cards based on your note content.
+- **Context-Aware**: Generates:
+    - **Basic Cards**: Simple Q&A and Lists.
+    - **Cloze Deletion**: Fill-in-the-blank for definitions.
+    - **Type-In Cards**: (New!) Forces active recall for precise facts (formulas, values).
 - **Smart Updates**: Detects existing cards to avoid duplicates.
 
-### 🔍 AI Feedback (New!)
+### 🧠 Deep Integration
+- **Smart Link Validation**: 
+    - Automatically checks if Obsidian links (`[[Link]]`) exist in your vault.
+    - If a link is broken, it's converted to plain text in Anki to avoid dead links.
+    - Resolves `block-id` references and aliases correctly.
+- **Visual Decorations**: (Optional) Adds "Anki" icons to files in the file explorer that contain cards (can be toggled).
+
+### 🔍 AI Feedback
 - Get instant, constructive feedback on your learning material directly within Obsidian.
-- The AI analyzes your notes and suggests improvements for clarity and structure.
-- **Configurable**: Customize the feedback prompt (default is German).
+- **Context-Specific**: Tuned for Preclinical/medical content (configurable).
+- **Chat Interface**: Ask follow-up questions or request revisions to your notes.
 
 ### 🔄 Seamless Anki Integration
 - **Direct Sync**: Pushes cards directly to Anki via AnkiConnect.
@@ -23,8 +33,11 @@ Transform your Obsidian notes into Anki flashcards automatically using the power
 
 ### 🛠️ Powerful Management
 - **Preview & Edit**: Review generated cards, edit them, or delete them before syncing.
-- **Search**: Quickly find all notes containing Anki cards.
-- **Deck Management**: Rename target decks directly from the plugin.
+- **Hierarchical Deck Selection**: 
+    - Visual tree view for selecting decks.
+    - Filter and search through your deck structure.
+- **Manual Mode**: Fallback to manual copy-paste if the API is overloaded or fails.
+- **Code Highlighting**: Preserves code blocks and formatting.
 
 ## ⚙️ Installation
 
