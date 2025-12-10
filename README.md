@@ -66,7 +66,10 @@ Transform your Obsidian notes into Anki flashcards automatically using the power
 ## 🔧 Configuration
 
 Go to **Settings > Anki Generator** to configure:
-- **AI Keys**: Enter your API keys for Gemini or OpenAI.
+- **AI Keys**: Enter your API keys:
+    - **Google Gemini**: [Get API Key](https://aistudio.google.com/app/apikey)
+    - **OpenAI**: [Get API Key](https://platform.openai.com/api-keys)
+    - **Ollama**: [Download & Setup](https://ollama.com)
 - **Prompts**: Customize the system prompts for card generation and feedback.
 - **Anki Models**: Map the plugin to your specific Anki Note Types.
 
