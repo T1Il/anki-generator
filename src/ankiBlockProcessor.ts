@@ -295,11 +295,11 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			const content = await plugin.app.vault.read(file);
 			
 			// Extract Images and Prepare Content (using generationManager logic)
-			const { images, preparedContent } = await extractImagesAndPrepareContent(plugin, content, file.path);
+			const { images, preparedContent, files } = await extractImagesAndPrepareContent(plugin, content, file.path);
 			
 			// Construct Prompt
 			const existingCardsText = cards.map(c => c.originalText).join('\n');
-			const prompt = constructPrompt(preparedContent, existingCardsText, plugin.settings, instruction || "", false);
+			const prompt = constructPrompt(preparedContent, existingCardsText, plugin.settings, instruction || "", false, file.basename);
 
 			// Open Manual Modal
 			new ManualGenerationModal(plugin.app, prompt, async (manualResponse) => {
@@ -327,13 +327,38 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 					const newFileContent = currentFileContent.replace(fullBlock, newBlock);
 					await plugin.app.vault.modify(file, newFileContent);
 					new Notice("Manuell generierte Karten hinzugefügt.");
+
+					// AUTO-OPEN PREVIEW MODAL
+					// Wait a moment for the cache/file to update, then just open the modal with the new content
+					// We can reuse the same logic as the Preview Button, but we need the NEW content.
+					// Since we just wrote 'newBlockContent', we can parse relevant cards directly from it.
+					// However, the best way is to parse the new block content properly.
+
+					try {
+						const newCards = parseCardsFromBlockSource(newBlockContent);
+						const currentDeckName = deckName || `${plugin.settings.mainDeck}::Standard`;
+
+						const onSave = async (updatedCards: Card[], deletedCardIds: number[], newDeckName: string) => {
+							// For 'source' we need the NEW source which matches newBlockContent. 
+							// But the `processAnkiCardsBlock` might be re-run by Obsidian when file changes.
+							// So passing 'newBlockContent' as source to saveAnkiBlockChanges should work 
+							// IF we are careful not to create race conditions with Obsidian's re-rendering.
+							// Ideally, we just update the file again.
+							await saveAnkiBlockChanges(plugin, newBlockContent, updatedCards, deletedCardIds, newDeckName);
+						};
+						
+						// Open Modal
+						new CardPreviewModal(plugin, newCards, currentDeckName, onSave, instruction || undefined).open();
+					} catch (e) {
+						console.error("Auto-open preview failed", e);
+					}
 				} else {
 					new Notice("Konnte den Block nicht finden. Bitte manuell einfügen.");
 					// Fallback: Copy to clipboard?
 					navigator.clipboard.writeText(cleanedResponse);
 					new Notice("Antwort in die Zwischenablage kopiert.");
 				}
-			}).open();
+			}, undefined, files).open();
 		};
 	}
 

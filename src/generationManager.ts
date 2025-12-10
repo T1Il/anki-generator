@@ -9,7 +9,7 @@ import { parseAnkiSection } from './anki/ankiParser';
 import { getDeckNames } from './anki/AnkiConnect';
 import { generateCardsWithAI } from './aiGenerator';
 import { ImageInput } from './types';
-import { arrayBufferToBase64, getMimeType } from './utils';
+import { arrayBufferToBase64, getMimeType, ensureBlockIdsForCallouts } from './utils';
 import { t } from './lang/helpers';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
@@ -117,6 +117,10 @@ export async function runGenerationProcess(
 			return "";
 		}
 
+		// Ensure Block IDs for Callouts exist (for Deep Linking)
+		// This modifies the editor content if needed.
+		ensureBlockIdsForCallouts(editor);
+
 		notice.setMessage(t('notice.readingCards'));
 		const currentAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
 		const existingCards = currentAnkiInfo?.existingCardsText || 'Keine.';
@@ -128,7 +132,7 @@ export async function runGenerationProcess(
 		// Bilder extrahieren und Content vorbereiten
 		const activeFile = plugin.app.workspace.getActiveFile();
 		const fileTitle = activeFile ? activeFile.basename : "Unbenannt";
-		const { images, preparedContent: preparedBody } = await extractImagesAndPrepareContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
+		const { images, preparedContent: preparedBody, files } = await extractImagesAndPrepareContent(plugin, currentContentForAI, activeFile ? activeFile.path : '');
 
 		// Add Title to Content
 		const preparedContent = `# ${fileTitle}\n\n${preparedBody}`;
@@ -153,6 +157,8 @@ export async function runGenerationProcess(
 			plugin.settings,
 			instructionsToUse, // Use determined instructions
 			images, // Bilder übergeben
+			files, // NEW: File Objects for Manual Mode
+			fileTitle, // Note Title
 			isRevision, // Revision Flag
 			abortController.signal // Pass cancellation signal
 		);
@@ -297,8 +303,9 @@ export async function runGenerationProcess(
 }
 
 // Neue Funktion zum Extrahieren und Laden von Bildern UND Vorbereiten des Contents
-export async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin, content: string, sourcePath: string): Promise<{ images: ImageInput[], preparedContent: string }> {
+export async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin, content: string, sourcePath: string): Promise<{ images: ImageInput[], preparedContent: string, files: TFile[] }> {
 	const images: ImageInput[] = [];
+	const files: TFile[] = [];
 	let preparedContent = content;
 
 	// Regex für ![[bild.png]] und ![alt](bild.png)
@@ -345,6 +352,7 @@ export async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin
 				let imgIndex = images.findIndex(img => img.filename === file.name);
 				if (imgIndex === -1) {
 					images.push({ base64, mimeType, filename: file.name });
+					files.push(file);
 					imgIndex = images.length - 1;
 				}
 
@@ -371,7 +379,7 @@ export async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin
 		preparedContent = preparedContent.substring(0, rep.index) + rep.replacement + preparedContent.substring(rep.index + rep.length);
 	}
 
-	return { images, preparedContent };
+	return { images, preparedContent, files };
 }
 
 // Stellt sicher, dass ein Anki-Block existiert und aktualisiert Header-Daten (Deck, Instruction, Status)

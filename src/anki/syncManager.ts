@@ -110,8 +110,8 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
             processedQ = convertObsidianLatexToAnki(processedQ);
             processedA = convertObsidianLatexToAnki(processedA);
 
-            processedQ = convertObsidianLinks(processedQ, vaultName);
-            processedA = convertObsidianLinks(processedA, vaultName);
+            processedQ = convertObsidianLinks(processedQ, vaultName, file.path, plugin.app);
+            processedA = convertObsidianLinks(processedA, vaultName, file.path, plugin.app);
 
             const htmlQ = basicMarkdownToHtml(processedQ);
             const htmlA = basicMarkdownToHtml(processedA);

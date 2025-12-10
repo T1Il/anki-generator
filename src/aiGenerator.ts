@@ -1,4 +1,4 @@
-import { requestUrl, Notice, App } from 'obsidian';
+import { requestUrl, Notice, App, TFile } from 'obsidian';
 import { AnkiGeneratorSettings, DEFAULT_SETTINGS } from './settings';
 import { DebugModal } from './ui/DebugModal';
 import { ManualGenerationModal } from './ui/ManualGenerationModal';
@@ -12,12 +12,14 @@ export async function generateCardsWithAI(
 	settings: AnkiGeneratorSettings,
 	additionalInstructions: string | null,
 	images: ImageInput[] = [],
+	files: TFile[] = [], // NEW
+	noteTitle: string,
 	isRevision: boolean = false,
 	abortSignal?: { aborted: boolean }
 ): Promise<{ cards: string, feedback: string }> {
 
 	// --- 1. Construct Card Prompt (User's Prompt) ---
-	const cardPrompt = constructPrompt(noteContent, existingCards, settings, additionalInstructions, isRevision);
+	const cardPrompt = constructPrompt(noteContent, existingCards, settings, additionalInstructions, isRevision, noteTitle);
 
 	// --- 2. Construct Feedback Prompt ---
 	let feedbackPrompt = settings.useCustomFeedbackPrompt ? settings.feedbackPrompt : DEFAULT_SETTINGS.feedbackPrompt;
@@ -34,8 +36,9 @@ export async function generateCardsWithAI(
 		let feedbackResponse = "";
 
 		// --- 3. Execute Generation (Sequential for Feedback) ---
+		// --- 3. Execute Generation (Sequential for Feedback) ---
 		// Allow manual mode for card generation
-		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, abortSignal, true);
+		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
 
 		if (settings.enableFeedback) {
 			if (abortSignal?.aborted) throw new Error("Aborted by user");
@@ -47,7 +50,8 @@ export async function generateCardsWithAI(
 			console.log(`--- Feedback Prompt ---\n${feedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);
 
 			// Disable manual mode for feedback generation
-			feedbackResponse = await callAIProvider(app, provider, settings, feedbackPrompt, [], abortSignal, false);
+			// Disable manual mode for feedback generation
+			feedbackResponse = await callAIProvider(app, provider, settings, feedbackPrompt, [], [], abortSignal, false);
 		} else {
 			console.log("Feedback generation disabled in settings.");
 		}
@@ -72,7 +76,8 @@ export function constructPrompt(
 	existingCards: string,
 	settings: AnkiGeneratorSettings,
 	additionalInstructions: string | null,
-	isRevision: boolean
+	isRevision: boolean,
+	noteTitle: string
 ): string {
 	let basePrompt = settings.useCustomPrompt ? settings.prompt : DEFAULT_SETTINGS.prompt;
 	if (typeof basePrompt !== 'string') {
@@ -121,9 +126,12 @@ Gib NUR die überarbeiteten Karten zurück.`;
 			.replace('{{existingCards}}', existingCards);
 	}
 
+	const noteURI = `obsidian://open?vault=${encodeURIComponent(settings.vaultName)}&file=${encodeURIComponent(noteTitle)}`;
+
 	return cardPrompt
-		.replace('{{noteContent}}', noteContent)
-		.replace('{{existingCards}}', existingCards);
+		.split('{{noteContent}}').join(noteContent)
+		.split('{{existingCards}}').join(existingCards)
+		.split('{{noteURI}}').join(noteURI);
 }
 
 export async function generateFeedbackOnly(
@@ -138,7 +146,7 @@ export async function generateFeedbackOnly(
 	}
 	feedbackPrompt = feedbackPrompt.replace('{{noteContent}}', noteContent);
 
-	return await callAIProvider(app, provider, settings, feedbackPrompt, []);
+	return await callAIProvider(app, provider, settings, feedbackPrompt, [], []);
 }
 
 export async function generateChatResponse(
@@ -160,7 +168,7 @@ export async function generateChatResponse(
 
 	fullPrompt += `User: ${newMessage}\nAI:`;
 
-	return await callAIProvider(app, provider, settings, fullPrompt, []);
+	return await callAIProvider(app, provider, settings, fullPrompt, [], []);
 }
 
 async function callAIProvider(
@@ -169,6 +177,7 @@ async function callAIProvider(
 	settings: AnkiGeneratorSettings,
 	prompt: string,
 	images: ImageInput[],
+	files: TFile[] = [],
 	abortSignal?: { aborted: boolean },
 	allowManualMode: boolean = true
 ): Promise<string> {
@@ -324,7 +333,7 @@ async function callAIProvider(
 							// On Cancel
 							console.log("Manual generation cancelled.");
 							resolve(""); // Resolve with empty string to stop loading but not throw error
-						}).open();
+						}, files).open();
 					});
 				}
 
@@ -349,7 +358,7 @@ async function callAIProvider(
 						}, () => {
 							console.log("Manual generation cancelled.");
 							resolve("");
-						}).open();
+						}, files).open();
 					});
 				}
 				throw error;

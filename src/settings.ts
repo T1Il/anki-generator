@@ -76,13 +76,31 @@ REGELN ZUR KARTENERSTELLUNG:
      Q: Normalwert Herzfrequenz Erwachsene?
      A (type): 60-100 bpm
 
-3. **Lückentexte (Cloze)**:
+3. **Lückentexte (Cloze)**:In 
    - Nutze Lückentexte NUR für einzelne Sätze im 'Q:'-Feld.
+   - ⛔️ **VERBOTEN**: Verstecke NIEMALS das Subjekt einer Definition ("Was ist die Aufgabe von {{c1::X}}?").
+     - FALSCH: "Was ist die Aufgabe von {{c1::T-Helferzellen}}?" (Fragt nach Unbekanntem)
+     - RICHTIG: "Welche Zelle ist für die Opsonierung zuständig? -> {{c1::T-Helferzelle}}"
    - Ein Satz = Eine Karte.
    - KEINE Lücken in der Antwort (A:).
 
 4. **Bilder**:
    - Kopiere Bild-Links (![[bild.png]]) exakt in das 'A:' Feld.
+
+5. **Verlinkungen**:
+   - ✅ **PLATZIERUNG**: Links MÜSSEN DIREKT hinter dem relevanten Fakt oder Begriff stehen (inline).
+   - ⛔️ **STRENG VERBOTEN**: Links NIEMALS gesammelt am Ende der Karte anhängen.
+     - ⛔️ FALSCH: "A: Körpereigenes Abwehrsystem. [[#^id|Link]]"
+     - ✅ RICHTIG: "A: Körpereigenes [Abwehrsystem](...) bestehend aus..."
+   - ✅ **Deep-Links**: Nutze Block-IDs für Callouts.
+   - VERLINKE so viele definierte Begriffe wie möglich, wenn sie im Text vorkommen.
+   - SUCHE das Stichwort in der Frage (Q) oder Antwort (A) und verlinke es dort.
+     - ⛔️ FALSCH: "... T-Helferzellen. [[#^123456|T-Helferzellen]]" (Redundanz am Ende)
+     - ⛔️ FALSCH: "... [T-Helferzellen](...^123456)." (Halluzination)
+     - ⛔️ FALSCH: "... [T-Helferzellen](^123456)." (Falsches Format)
+     - ✅ RICHTIG: "... [[#^123456|T-Helferzellen]]." (Inline Wikilink)
+   - Bei Callouts/Definitionen: Suche nach Block-IDs (z.B. \`^e0faa3\`) am Ende des Blocks.
+   - Falls keine Überschrift/Block-ID passt, verlinke auf die Notiz: \`[Schlagwort]({{noteURI}})\`.
 
 Hier ist der Lerninhalt:
 {{noteContent}}
@@ -119,6 +137,18 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		containerEl.createEl('h2', { text: t('settings.title') });
+		
+        // --- General Settings ---
+        new Setting(containerEl)
+            .setName('Vault Name')
+            .setDesc('Name of your Obsidian Vault (used for links). If empty, auto-detection is attempted.')
+            .addText(text => text
+                .setPlaceholder('My Vault')
+                .setValue(this.plugin.settings.vaultName)
+                .onChange(async (value) => {
+                    this.plugin.settings.vaultName = value;
+                    await this.plugin.saveSettings();
+                }));
 
 		// --- AI Provider Settings ---
 		containerEl.createEl('h3', { text: 'AI Provider Settings' });
