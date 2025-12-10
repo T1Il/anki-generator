@@ -12,6 +12,7 @@ export class CardPreviewModal extends Modal {
 	deletedCardIds: number[] = [];
 	currentSort: string = 'default';
 	currentFilter: 'all' | 'synced' | 'unsynced' = 'all';
+	searchQuery: string = ''; // NEW property
 
 	constructor(plugin: AnkiGeneratorPlugin, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
 		super(plugin.app);
@@ -117,7 +118,28 @@ export class CardPreviewModal extends Modal {
 			this.render();
 		});
 
-		sortContainer.createSpan({ text: 'Sortieren nach:' });
+		// --- Search Bar --- (NEW)
+		const searchInput = sortContainer.createEl('input', { type: 'text', placeholder: '🔍 Suche...' });
+		searchInput.style.padding = '5px';
+		searchInput.style.borderRadius = '4px';
+		searchInput.style.border = '1px solid var(--background-modifier-border)';
+		searchInput.style.marginRight = '10px';
+		// Restore search value if re-rendering (we might need to store it in class property)
+		// Assuming we render full modal list, but input might lose focus? 
+		// If render clears contentEl, we lose focus. Ideally we only re-render the card list.
+		// For now, let's just make it simple. If we type, we filter immediately? 
+		// Better: store searchQuery in class.
+		
+		// Note: searchInput.value = this.searchQuery;
+		
+		searchInput.addEventListener('input', () => {
+			this.searchQuery = searchInput.value.toLowerCase();
+			// We only want to re-render the card container, not the whole header to avoid losing focus.
+			// Implementing separate renderCards() properly.
+			this.renderCardsContainer(container, sourcePath); 
+		});
+
+		sortContainer.createSpan({ text: 'Sortieren:' });
 		const sortDropdown = sortContainer.createEl('select');
 		sortDropdown.style.padding = '5px';
 		sortDropdown.style.borderRadius = '4px';
@@ -137,8 +159,11 @@ export class CardPreviewModal extends Modal {
 		sortDropdown.addEventListener('change', () => {
 			this.currentSort = sortDropdown.value;
 			this.sortCards();
-			this.render();
+			this.render(); // This re-renders everything
 		});
+		
+		// --- Save Search Query reference to restore value if full render ---
+		searchInput.value = this.searchQuery;
 
 		// --- CSS Styles for Compact Design ---
 		contentEl.createEl('style', {
@@ -230,18 +255,46 @@ export class CardPreviewModal extends Modal {
 		});
 
 		const container = contentEl.createDiv({ cls: 'anki-preview-container' });
-		if (this.cards.length === 0) {
-			container.setText('Keine Karten in diesem Block gefunden.');
-		}
-
+		
 		// Pfad der aktuellen Datei holen für Bilder-Auflösung
 		const activeFile = this.app.workspace.getActiveFile();
 		const sourcePath = activeFile ? activeFile.path : '';
+
+		// Initial render of cards
+		this.renderCardsContainer(container, sourcePath);
+
+		// Event listener for search now has access to container and sourcePath
+		searchInput.addEventListener('input', () => {
+			this.searchQuery = searchInput.value.toLowerCase();
+			this.renderCardsContainer(container, sourcePath); 
+		});
+		
+		if (scrollTop) {
+			setTimeout(() => {
+				contentEl.scrollTop = scrollTop;
+			}, 0);
+		}
+	}
+
+	renderCardsContainer(container: HTMLElement, sourcePath: string) {
+		container.empty();
+		
+		if (this.cards.length === 0) {
+			container.setText('Keine Karten in diesem Block gefunden.');
+			return;
+		}
 
 		this.cards.forEach((card, index) => {
 			// Apply Filter
 			if (this.currentFilter === 'synced' && !card.id) return;
 			if (this.currentFilter === 'unsynced' && card.id) return;
+
+			// Apply Search
+			if (this.searchQuery) {
+				const query = this.searchQuery;
+				if (!card.q.toLowerCase().includes(query) && !card.a.toLowerCase().includes(query)) return;
+			}
+
 			const cardEl = container.createDiv({ cls: 'anki-compact-card' });
 
 			// --- Card Styling based on Type ---
@@ -329,12 +382,6 @@ export class CardPreviewModal extends Modal {
 			const highlightedA = this.highlightClozes(card.a);
 			MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
 		});
-
-		if (scrollTop) {
-			setTimeout(() => {
-				contentEl.scrollTop = scrollTop;
-			}, 0);
-		}
 	}
 
 	sortCards() {

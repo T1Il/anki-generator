@@ -19,6 +19,17 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+
+		// AUTO-DETECT VAULT NAME
+		if (!this.settings.vaultName || this.settings.vaultName === 'My Vault') {
+			const detectedName = this.app.vault.getName();
+			if (detectedName) {
+				console.log(`Anki Generator: Auto-detected vault name: ${detectedName}`);
+				this.settings.vaultName = detectedName;
+				await this.saveSettings();
+			}
+		}
+
 		this.addSettingTab(new AnkiGeneratorSettingTab(this.app, this));
 
 		// Initialize File Decorations
@@ -132,6 +143,29 @@ export default class AnkiGeneratorPlugin extends Plugin {
 					} else {
 						new Notice("No active generations.");
 					}
+				}
+			}
+		});
+
+		this.addCommand({
+			id: 'toggle-dev-tools',
+			name: 'Toggle Developer Tools',
+			hotkeys: [
+				{
+					modifiers: ['Mod', 'Shift'],
+					key: 'I',
+				},
+			],
+			callback: () => {
+				try {
+					// @ts-ignore
+					const electron = require('electron');
+					// @ts-ignore
+					const win = electron.remote.getCurrentWindow();
+					win.toggleDevTools();
+				} catch (e) {
+					new Notice("Could not open DevTools: " + e.message);
+					console.error("DevTools error:", e);
 				}
 			}
 		});
