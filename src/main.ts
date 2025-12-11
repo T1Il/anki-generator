@@ -10,7 +10,7 @@ import { Card, ChatMessage } from './types';
 import { t } from './lang/helpers';
 import { AnkiFileDecorationProvider } from './ui/AnkiFileDecorationProvider';
 import { LegacyFileDecorator } from './ui/LegacyFileDecorator';
-import { ensureBlockIdsForCallouts } from './utils';
+import { ensureBlockIdsForCallouts, removeAllBlockIds } from './utils';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -137,6 +137,15 @@ export default class AnkiGeneratorPlugin extends Plugin {
 				new Notice("Block IDs generated for callouts.");
 			}
 		});
+
+        this.addCommand({
+            id: 'remove-all-block-ids',
+            name: 'Remove All Block IDs',
+            editorCallback: (editor: Editor, view: MarkdownView) => {
+                removeAllBlockIds(editor);
+                new Notice("All block IDs removed.");
+            }
+        });
 
 		this.addCommand({
 			id: 'cancel-anki-generation',

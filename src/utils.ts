@@ -1,275 +1,257 @@
 import { App, Editor, TFile } from 'obsidian';
 
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
-	let binary = '';
-	const bytes = new Uint8Array(buffer);
-	const len = bytes.byteLength;
-	for (let i = 0; i < len; i++) {
-		binary += String.fromCharCode(bytes[i]);
-	}
-	return btoa(binary);
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
 }
 
 export function basicMarkdownToHtml(text: string): string {
-	if (!text) return "";
-	let html = text;
-	
-	// 1. Markdown Links [Text](URL) -> <a href="URL">Text</a>
-	// Regex improvement: Handle spaces by encoding, and be non-greedy but robust.
-	// OLD: /\[([^\]]+)\]\(([^)]+)\)/g
-	// NEW: Handle balanced parentheses for cases like vault names with (Parens).
-	// \(( [^()]* | \([^()]*\) )* \)
-	html = html.replace(/\[([^\]]+)\]\(([^)]+(?:\([^)]+\)[^)]*)*)\)/g, (match, text, url) => {
-		// Encode spaces in URL if they exist and are not already encoded
-		const safeUrl = url.trim().replace(/\s/g, '%20');
-		return `<a href="${safeUrl}">${text}</a>`;
-	});
+    if (!text) return "";
+    let html = text;
+    
+    // 1. Markdown Links [Text](URL) -> <a href="URL">Text</a>
+    html = html.replace(/\[([^\]]+)\]\(([^)]+(?:\([^)]+\)[^)]*)*)\)/g, (match, text, url) => {
+        const safeUrl = url.trim().replace(/\s/g, '%20');
+        return `<a href="${safeUrl}">${text}</a>`;
+    });
 
-	html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-	
-    // Optional: Kursiv *text* -> <i>text</i>
+    html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
     html = html.replace(/\*([^*]+)\*/g, '<i>$1</i>');
-
-	// Ersetzt Zeilenumbrüche, die NICHT direkt auf <br> folgen, durch <br>
-	// Dies verhindert doppelte <br>, wenn der Text bereits HTML-Zeilenumbrüche enthält
-	html = html.replace(/\n(?!<br>)/g, '<br>');
-	return html;
+    html = html.replace(/\n(?!<br>)/g, '<br>');
+    return html;
 }
 
-// Normalisiert Zeilenumbrüche für konsistente Vergleiche
 export function normalizeNewlines(str: string): string {
-	return str.replace(/\r\n/g, '\n');
+    return str.replace(/\r\n/g, '\n');
 }
 
 export function getMimeType(extension: string): string {
-	const ext = extension.toLowerCase();
-	switch (ext) {
-		case 'png': return 'image/png';
-		case 'jpg':
-		case 'jpeg': return 'image/jpeg';
-		case 'webp': return 'image/webp';
-		case 'heic': return 'image/heic';
-		case 'heif': return 'image/heif';
-		default: return 'image/png'; // Fallback
-	}
+    const ext = extension.toLowerCase();
+    switch (ext) {
+        case 'png': return 'image/png';
+        case 'jpg':
+        case 'jpeg': return 'image/jpeg';
+        case 'webp': return 'image/webp';
+        case 'heic': return 'image/heic';
+        case 'heif': return 'image/heif';
+        default: return 'image/png';
+    }
 }
 
-/**
- * Konvertiert Obsidian-Style LaTeX ($...$ und $$...$$) in Anki-kompatibles Format (\(..._) und \[...\]).
- * Wichtig: Muss aufgerufen werden, BEVOR basicMarkdownToHtml aufgerufen wird.
- */
 export function convertObsidianLatexToAnki(text: string): string {
-	if (!text) return text;
-
-	// 1. Block Math: $$...$$ zu \[...\]
-	let converted = text.replace(/\$\$([\s\S]*?)\$\$/g, '\\[$1\\]');
-
-	// 2. Inline Math: $...$ zu \(...\)
-	converted = converted.replace(/(?<!\\)\$(.+?)(?<!\\)\$/g, '\\($1\\)');
-
-	return converted;
+    if (!text) return text;
+    let converted = text.replace(/\$\$([\s\S]*?)\$\$/g, '\\[$1\\]');
+    converted = converted.replace(/(?<!\\)\$(.+?)(?<!\\)\$/g, '\\($1\\)');
+    return converted;
 }
 
-/**
- * Konvertiert Obsidian Wikilinks in klickbare obsidian:// URIs für Anki.
- * [[Link|Alias]] -> <a href="obsidian://open?vault=...&file=Link">Alias</a>
- * [[Link]] -> <a href="obsidian://open?vault=...&file=Link">Link</a>
- */
-/**
- * Konvertiert Obsidian Wikilinks in klickbare obsidian:// URIs für Anki.
- * [[Link|Alias]] -> <a href="obsidian://open?vault=...&file=Link">Alias</a>
- * [[Link]] -> <a href="obsidian://open?vault=...&file=Link">Link</a>
- * 
- * @param app Optional. If provided, checks if the target file exists.
- */
 export function convertObsidianLinks(text: string, vaultName: string, currentFile?: string, app?: App): string {
-	if (!text) return text;
+    if (!text) return text;
+    const encodedVault = encodeURIComponent(vaultName);
 
-	const encodedVault = encodeURIComponent(vaultName);
-
-	// 1. Wikilinks [[Link]] oder [[Link|Alias]]
-	// Fixed Regex: Capture Alias correctly in group 2.
-	text = text.replace(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g, (match, linkPath, alias) => {
-        // Validation: Check if file exists if app is present
+    text = text.replace(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g, (match, linkPath, alias) => {
         if (app && currentFile) {
-            // Split anchor if present
             const cleanPath = linkPath.split('#')[0];
             if (cleanPath) { 
-                // Not a local link (does not start with # or is empty)
                 const targetFile = app.metadataCache.getFirstLinkpathDest(cleanPath, currentFile);
                 if (!targetFile) {
-                    // File does not exist. Return plain text (Alias or Path).
                     return alias || linkPath;
                 }
             }
         }
 
-		let targetFile = linkPath;
-		if (linkPath.startsWith('#') && currentFile) {
-			targetFile = currentFile + linkPath;
-		}
-		const href = `obsidian://open?vault=${encodedVault}&file=${encodeURIComponent(targetFile)}`;
-		
-		return `<a href="${href}" style="text-decoration: underline; color: #007AFF;">${alias || linkPath}</a>`;
-	});
+        let targetFile = linkPath;
+        if (linkPath.startsWith('#') && currentFile) {
+            targetFile = currentFile + linkPath;
+        }
+        const href = `obsidian://open?vault=${encodedVault}&file=${encodeURIComponent(targetFile)}`;
+        return `<a href="${href}" style="text-decoration: underline; color: #007AFF;">${alias || linkPath}</a>`;
+    });
 
-	// 2. Standard Markdown Links [Text](#^id) or [Text](File.md)
-	// We only care about ensuring they open in Obsidian. 
-	// Specially handle LOCAL links: [Text](#...)
-	return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
-		if (url.startsWith('http')) return match; // Leave web links alone? Or convert to <a>?
-		
-        // Validation for Markdown links
+    return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+        if (url.startsWith('http')) return match;
+        
         if (app && currentFile && !url.startsWith('#') && !url.includes('obsidian://')) {
              const cleanPath = url.split('#')[0];
              if (cleanPath) {
                  const targetFile = app.metadataCache.getFirstLinkpathDest(cleanPath, currentFile);
                  if (!targetFile) {
-                     return linkText; // Return plain text
+                     return linkText;
                  }
              }
         }
 
-		// If it's a local link #...
-		let targetUrl = url;
-		if (url.startsWith('#') && currentFile) {
-			const targetFile = currentFile + url;
-			targetUrl = `obsidian://open?vault=${encodedVault}&file=${encodeURIComponent(targetFile)}`;
-		} else if (!url.includes('obsidian://') && !url.startsWith('http')) {
-             // Assume other relative links might need handling, but for now focus on #
+        let targetUrl = url;
+        if (url.startsWith('#') && currentFile) {
+            const targetFile = currentFile + url;
+            targetUrl = `obsidian://open?vault=${encodedVault}&file=${encodeURIComponent(targetFile)}`;
         }
-		
-		// If we converted it to obsidian://, format it as A tag
-		if (targetUrl.startsWith('obsidian://')) {
-			return `<a href="${targetUrl}" style="text-decoration: underline; color: #007AFF;">${linkText}</a>`;
-		}
-		return match; // Return unchanged if not handled
-	}).replace(/\[([^\]]+)\]\(([^)]*?)\^([a-zA-Z0-9]+)\)/g, (match, linkText, prefix, blockId) => {
-		// 3. Fallback for AI Hallucinations like [Text](...^id) or [Text](^id)
-		// Treat as local block reference [[#^id|Text]]
-		if (currentFile) {
-			const targetFile = currentFile + '#^' + blockId;
-			const href = `obsidian://open?vault=${encodedVault}&file=${encodeURIComponent(targetFile)}`;
-			return `<a href="${href}" style="text-decoration: underline; color: #007AFF;">${linkText}</a>`;
-		}
-		return match;
-	});
+        
+        if (targetUrl.startsWith('obsidian://')) {
+            return `<a href="${targetUrl}" style="text-decoration: underline; color: #007AFF;">${linkText}</a>`;
+        }
+        return match;
+    }).replace(/\[([^\]]+)\]\(([^)]*?)\^([a-zA-Z0-9]+)\)/g, (match, linkText, prefix, blockId) => {
+        if (currentFile) {
+            const targetFile = currentFile + '#^' + blockId;
+            const href = `obsidian://open?vault=${encodedVault}&file=${encodeURIComponent(targetFile)}`;
+            return `<a href="${href}" style="text-decoration: underline; color: #007AFF;">${linkText}</a>`;
+        }
+        return match;
+    });
 }
 
-/**
- * Checks for callouts (> [!name] ...) without a block ID.
- * Generates a logical block ID (^6chars) and appends it to the callout block.
- * Updates the editor content.
- */
-/**
- * Checks for callouts (> [!name] ...) without a block ID.
- * Generates a logical block ID based on the callout title and appends it to the callout block.
- * Updates the editor content.
- */
 export function ensureBlockIdsForCallouts(editor: Editor): void {
-	const content = editor.getValue();
-	const lines = content.split('\n');
-	let changesMade = false;
+    const content = editor.getValue();
+    const lines = content.split('\n');
+    let changesMade = false;
 
-	// Regex to identify callout start: > [!type] or > [!type] Title
-	// Allows multiple > characters for nesting.
-	// Groups: 1=indent/quote, 2=type, 3=Title (optional)
-	const calloutStartRegex = /^(>+\s*)\[!([^\]]+)\](.*)$/;
-	
-	// Regex to check if a line is part of a block quote/callout (starts with >)
-	const isBlockQuoteLine = (line: string) => line.trim().startsWith('>');
-	
-	// Regex to find ANY block ID at end of line: ^abcde123
-	// Allow semantic IDs: alphanumeric and dashes
-	const blockIdRegex = /\^[a-zA-Z0-9-]+\s*$/;
+    const calloutStartRegex = /^(>+\s*)\[!([^\]]+)\](.*)$/;
+    const blockIdRegex = /\^[a-zA-Z0-9-]+\s*$/;
 
-	// 1. Collect ALL existing block IDs in the file to ensure uniqueness
-	const existingIds = new Set<string>();
-	for (const line of lines) {
-		const match = line.match(blockIdRegex);
-		if (match) {
-			existingIds.add(match[0].trim().substring(1)); // remove ^
-		}
-	}
+    const existingIds = new Set<string>();
+    for (const line of lines) {
+        const match = line.match(blockIdRegex);
+        if (match) {
+            existingIds.add(match[0].trim().substring(1));
+        }
+    }
 
+    	// Loop through lines. 
+    // Simplified: Top-Level Only. No collision complexity needed for bottom IDs if we ignore nested.
 	for (let i = 0; i < lines.length; i++) {
-		const match = lines[i].match(calloutStartRegex);
+        const match = lines[i].match(calloutStartRegex);
 		if (match) {
-			// Found start of callout.
-			const type = match[2]; // e.g. "info"
-			const titleRaw = match[3]; // e.g. " My Title"
+            // match[1] = indentation ("> " or ">>")
+            const nestingLevel = (match[1].match(/>/g) || []).length;
+            
+            // SKIP NESTED CALLOUTS
+            if (nestingLevel > 1) {
+                continue;
+            }
 
-			// Determine the end of this callout block.
-			let j = i;
-			while (j < lines.length && isBlockQuoteLine(lines[j])) {
+			const type = match[2]; 
+			const titleRaw = match[3]; 
+
+			// Determine the end of THIS callout block.
+			let j = i + 1;
+			while (j < lines.length) {
+                const line = lines[j].trim();
+                // Check if line breaks the block
+                // If we hit an empty line that is NOT a quote line, block ends.
+                if (line === '' && !lines[j].trim().startsWith('>')) break;
+                
+                // If we hit a line that is NOT a quote, block ends.
+                const quoteMatch = lines[j].match(/^(\s*>)+/);
+                if (!quoteMatch) break;
+                
+                // If indentation drops below our level, block ends.
+                const currentArrows = (quoteMatch[0].match(/>/g) || []).length;
+                if (currentArrows < nestingLevel) break;
+                
 				j++;
 			}
-			// j is now the index of the first line AFTER the callout.
-			// The last line of the callout is j-1.
 
 			let lastLineIndex = j - 1;
+            if (lastLineIndex < i) lastLineIndex = i;
+
 			let lastLine = lines[lastLineIndex];
 
-			// Check if we already have a block ID at the end of the last line
+			// Check if we already have a block ID
 			if (!blockIdRegex.test(lastLine)) {
-				// No block ID found. Generate one semantically.
 				const title = titleRaw ? titleRaw.trim() : type;
 				const newId = generateSemanticBlockId(title, existingIds);
-				
-				// Append to the last line.
 				const trimmedRight = lastLine.trimEnd();
 				lines[lastLineIndex] = `${trimmedRight} ^${newId}`;
-				
-				existingIds.add(newId); // Add to set so next callout doesn't duplicate this one
+				existingIds.add(newId);
 				changesMade = true;
 			}
-			
-			// Continue loop from j
-			i = j - 1; 
+            // If ID exists, we do nothing. No collision handling for top-level needed usually.
 		}
 	}
 
-	if (changesMade) {
-		const newContent = lines.join('\n');
-		const cursor = editor.getCursor();
-		editor.setValue(newContent);
-		editor.setCursor(cursor);
-	}
+    if (changesMade) {
+        const newContent = lines.join('\n');
+        const cursor = editor.getCursor();
+        editor.setValue(newContent);
+        editor.setCursor(cursor);
+    }
 }
 
-/**
- * Generates a sanitized, unique block ID based on a string (e.g. callout title).
- */
+function sanitizeTitleToId(text: string): string {
+    let id = text.toLowerCase();
+    id = id.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+    id = id.replace(/[^a-z0-9]+/g, '-');
+    id = id.replace(/^-+|-+$/g, '');
+    if (!id) id = 'block';
+    if (id.length > 30) id = id.substring(0, 30);
+    return id;
+}
+
 function generateSemanticBlockId(text: string, existingIds: Set<string>): string {
-	// 1. Sanitize
-	// Lowercase
-	let id = text.toLowerCase();
-	
-	// Replace Umlauts
-	id = id.replace(/ä/g, 'ae')
-		   .replace(/ö/g, 'oe')
-		   .replace(/ü/g, 'ue')
-		   .replace(/ß/g, 'ss');
+    const id = sanitizeTitleToId(text);
+    let uniqueId = id;
+    let counter = 1;
+    while (existingIds.has(uniqueId)) {
+        uniqueId = `${id}-${counter}`;
+        counter++;
+    }
+    return uniqueId;
+}
 
-	// Replace non-alphanumeric with dashes
-	id = id.replace(/[^a-z0-9]+/g, '-');
+export function removeAllBlockIds(editor: Editor): void {
+    const content = editor.getValue();
+    const lines = content.split('\n');
+    const newLines: string[] = [];
 
-	// Trim dashes from start/end
-	id = id.replace(/^-+|-+$/g, '');
+    // Regex to match a line that is PURELY a block ID (inside a callout or not).
+    // Matches:
+    // - Optional whitespace
+    // - One or more '>' (callout)
+    // - Optional whitespace
+    // - Optional artifacts: <!-- --> or \u200b (Zero Width Space)
+    // - The Block ID: ^id
+    // - Optional whitespace
+    // - End of string
+    const fullLineIdRegex = /^\s*(>*\s*)?(?:<!-- -->\s*)?(?:\u200b\s*)?\^[a-zA-Z0-9-]+\s*$/;
 
-	// Fallback if empty
-	if (!id) id = 'block';
+    // Regex to match inline block ID at the end of a line (to be stripped)
+    const inlineIdRegex = /[ \t]+\^[a-zA-Z0-9-]+\s*$/;
 
-	// Limit length
-	if (id.length > 30) id = id.substring(0, 30);
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
 
-	// 2. Ensure Uniqueness
-	let uniqueId = id;
-	let counter = 1;
-	while (existingIds.has(uniqueId)) {
-		uniqueId = `${id}-${counter}`;
-		counter++;
-	}
+        // 1. check if the WHOLE line is just a block ID (and callout markers)
+        // If so, we SKIP it (effectively deleting the line).
+        // Exception: what if it is > ^id but inside a text block?
+        // If we delete " > ^id", we join the previous and next lines.
+        // In a callout "> Text \n > ^id \n > Text", removing the middle line joins them?
+        // No, it just removes that line. 
+        // > Text
+        // > Text
+        // This is exactly what we want.
+        
+        if (fullLineIdRegex.test(line)) {
+            // It is a dedicated ID line. Skip it.
+            continue;
+        }
 
-	return uniqueId;
+        // 2. If it's a content line with an ID at the end, strip the ID.
+        // e.g. "Text ^id" -> "Text"
+        const cleanLine = line.replace(inlineIdRegex, '');
+        newLines.push(cleanLine);
+    }
+
+    const newContent = newLines.join('\n');
+
+    if (content !== newContent) {
+        const cursor = editor.getCursor();
+        editor.setValue(newContent);
+        editor.setCursor(cursor);
+    }
 }
