@@ -1,14 +1,17 @@
 import { App, TFile, WorkspaceLeaf, debounce, EventRef } from 'obsidian';
+import AnkiGeneratorPlugin from '../main';
 
 export class LegacyFileDecorator {
     app: App;
-    filesWithAnki = new Set<string>();
+    plugin: AnkiGeneratorPlugin;
+    filesWithAnki = new Map<string, { synced: number, unsynced: number }>();
     observers: Map<string, MutationObserver> = new Map();
     debouncedUpdateAll: () => void;
     private eventRefs: EventRef[] = [];
 
-    constructor(app: App) {
+    constructor(app: App, plugin: AnkiGeneratorPlugin) {
         this.app = app;
+        this.plugin = plugin;
         this.debouncedUpdateAll = debounce(this.updateAllDecorations.bind(this), 500, true);
     }
 
@@ -31,7 +34,7 @@ export class LegacyFileDecorator {
                 const hasAnki = this.filesWithAnki.has(file.path);
 
                 // Only update if state changed
-                if (hadAnki !== hasAnki) {
+                if (hadAnki !== hasAnki || (hadAnki && hasAnki)) { 
                     this.updateFileDecoration(file);
                 }
             })
@@ -47,8 +50,9 @@ export class LegacyFileDecorator {
             this.app.vault.on('rename', (file, oldPath) => {
                 if (file instanceof TFile) {
                     if (this.filesWithAnki.has(oldPath)) {
+                        const data = this.filesWithAnki.get(oldPath);
                         this.filesWithAnki.delete(oldPath);
-                        this.filesWithAnki.add(file.path);
+                        if (data) this.filesWithAnki.set(file.path, data);
                         this.updateFileDecoration(file);
                     }
                 }
@@ -74,6 +78,7 @@ export class LegacyFileDecorator {
         // Remove all decorations
         const leaves = this.app.workspace.getLeavesOfType('file-explorer');
         const makeMdLeaves = this.app.workspace.getLeavesOfType('mk-path-view');
+        // @ts-ignore
         const allLeaves = [...leaves, ...makeMdLeaves];
 
         for (const leaf of allLeaves) {
@@ -96,8 +101,45 @@ export class LegacyFileDecorator {
         if (file.extension !== 'md') return;
         try {
             const content = await this.app.vault.read(file);
-            if (content.match(/^```anki-cards/m)) {
-                this.filesWithAnki.add(file.path);
+            if (!content.includes('```anki-cards')) {
+                this.filesWithAnki.delete(file.path);
+                return;
+            }
+
+            // Robust regex handling Windows \r\n and varying whitespace
+            const blockMatches = content.matchAll(/^```anki-cards[ \t]*\r?\n([\s\S]*?)\r?\n^```$/gm);
+            
+            let syncedCount = 0;
+            let unsyncedCount = 0;
+            let foundBlock = false;
+
+            for (const match of blockMatches) {
+                foundBlock = true;
+                const blockContent = match[1];
+                const lines = blockContent.split('\n');
+                
+                let cardCount = 0;
+                let idCount = 0;
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (line.startsWith('Q:')) {
+                        cardCount++;
+                    } else if (!line.startsWith('Q:') && (line.includes('{{c') || line.includes('____')) && !line.startsWith('A:') && !line.startsWith('ID:')) {
+                        cardCount++;
+                    }
+                    
+                    if (line.startsWith('ID:')) {
+                        idCount++;
+                    }
+                }
+                
+                syncedCount += idCount;
+                unsyncedCount += Math.max(0, cardCount - idCount);
+            }
+
+            if (foundBlock) {
+                this.filesWithAnki.set(file.path, { synced: syncedCount, unsynced: unsyncedCount });
             } else {
                 this.filesWithAnki.delete(file.path);
             }
@@ -109,14 +151,15 @@ export class LegacyFileDecorator {
     registerObservers() {
         const leaves = this.app.workspace.getLeavesOfType('file-explorer');
         const makeMdLeaves = this.app.workspace.getLeavesOfType('mk-path-view');
+        // @ts-ignore
         const allLeaves = [...leaves, ...makeMdLeaves];
 
         // Cleanup old observers for closed leaves
         const currentLeafIds = new Set(allLeaves.map(l => (l as any).id));
         for (const [id, observer] of this.observers) {
-            if (!currentLeafIds.has(id)) {
+            if (!currentLeafIds.has(id as string)) {
                 observer.disconnect();
-                this.observers.delete(id);
+                this.observers.delete(id as string);
             }
         }
 
@@ -163,7 +206,6 @@ export class LegacyFileDecorator {
         // Try to find the path
         let path = element.getAttribute('data-path');
 
-        // If no data-path on element, try to find it in parent or specific classes
         if (!path) {
             // Sometimes the data-path is on a parent or child depending on the view
             const parentWithPath = element.closest('[data-path]');
@@ -173,43 +215,34 @@ export class LegacyFileDecorator {
         }
 
         if (path && this.filesWithAnki.has(path)) {
-            // We found an element corresponding to an Anki file. Decorate it.
-            // We need to find the specific element to attach the icon to.
-            // If 'element' is the container, we might need to look inside.
-
-            // For standard Obsidian: .nav-file-title[data-path="..."]
-            // For MAKE.MD: .mk-file-item[data-path="..."]
-
-            // If the element ITSELF matches the path, decorate it
+            // Check if we found the correct element
             if (element.getAttribute('data-path') === path) {
-                this.applyDecoration(element, true);
+                this.applyDecoration(element, path);
             } else {
-                // If we found the path via closest(), we should decorate that parent
                 const parent = element.closest(`[data-path="${CSS.escape(path)}"]`);
                 if (parent instanceof HTMLElement) {
-                    this.applyDecoration(parent, true);
+                    this.applyDecoration(parent, path);
                 }
             }
         }
     }
 
     updateAllDecorations() {
-        // This is a fallback/initial pass. 
-        // We iterate visible leaves and try to find elements for our known files.
         const leaves = this.app.workspace.getLeavesOfType('file-explorer');
         const makeMdLeaves = this.app.workspace.getLeavesOfType('mk-path-view');
+        // @ts-ignore
         const allLeaves = [...leaves, ...makeMdLeaves];
 
         for (const leaf of allLeaves) {
             const view = leaf.view as any;
             if (!view.containerEl) continue;
 
-            this.filesWithAnki.forEach(path => {
+            this.filesWithAnki.forEach((_, path) => {
                 try {
                     const escapedPath = CSS.escape(path);
                     const selector = `[data-path="${escapedPath}"]`;
                     const elements = view.containerEl.querySelectorAll(selector);
-                    elements.forEach((el: HTMLElement) => this.applyDecoration(el, true));
+                    elements.forEach((el: HTMLElement) => this.applyDecoration(el, path));
                 } catch (e) {
                     // Ignore
                 }
@@ -218,9 +251,9 @@ export class LegacyFileDecorator {
     }
 
     updateFileDecoration(file: TFile) {
-        // Just trigger a targeted update for this file across all views
         const leaves = this.app.workspace.getLeavesOfType('file-explorer');
         const makeMdLeaves = this.app.workspace.getLeavesOfType('mk-path-view');
+        // @ts-ignore
         const allLeaves = [...leaves, ...makeMdLeaves];
 
         for (const leaf of allLeaves) {
@@ -232,22 +265,21 @@ export class LegacyFileDecorator {
                 const selector = `[data-path="${escapedPath}"]`;
                 const elements = view.containerEl.querySelectorAll(selector);
                 const hasAnki = this.filesWithAnki.has(file.path);
-                elements.forEach((el: HTMLElement) => this.applyDecoration(el, hasAnki));
+                
+                if (hasAnki) {
+                    elements.forEach((el: HTMLElement) => this.applyDecoration(el, file.path));
+                } else {
+                    // Remove decoration
+                    elements.forEach((el: HTMLElement) => this.applyDecoration(el, null));
+                }
             } catch (e) {
                 // Ignore
             }
         }
     }
 
-    applyDecoration(element: HTMLElement, hasAnki: boolean) {
+    applyDecoration(element: HTMLElement, path: string | null) {
         if (!element) return;
-
-        // Prevent duplicate search if we are already inside a recursion or something, 
-        // but here we just want to find the target.
-
-        // We need to find where to put the icon. 
-        // Standard Obsidian: .nav-file-title-content
-        // MAKE.MD: .mk-file-name or direct append?
 
         let targetContainer: HTMLElement | null = null;
 
@@ -255,21 +287,15 @@ export class LegacyFileDecorator {
         if (element.classList.contains('nav-file-title')) {
             targetContainer = element.querySelector('.nav-file-title-content');
         }
-        // 2. MAKE.MD (often has .mk-file-item class on the container)
+        // 2. MAKE.MD
         else if (element.classList.contains('mk-file-item') || element.hasAttribute('data-path')) {
             targetContainer = element.querySelector('.mk-file-name');
             if (!targetContainer) {
-                // Maybe it's a different structure in MAKE.MD, let's try to find any text container
-                // or just append to the element itself if it looks right.
-                // Let's try finding .nav-file-title-content again just in case
                 targetContainer = element.querySelector('.nav-file-title-content');
             }
         }
 
-        // Fallback: if we can't find a specific container, but we know this element represents the file,
-        // we might append to it directly, but we must be careful not to break layout.
         if (!targetContainer) {
-            // If the element itself is the title content or name
             if (element.classList.contains('nav-file-title-content') || element.classList.contains('mk-file-name')) {
                 targetContainer = element;
             }
@@ -278,20 +304,54 @@ export class LegacyFileDecorator {
         if (!targetContainer) return;
 
         let decoration = targetContainer.querySelector('.anki-legacy-decoration');
+        const data = path ? this.filesWithAnki.get(path) : null;
 
-        if (hasAnki) {
+        if (data) {
+             const { synced, unsynced } = data;
+             const total = synced + unsynced;
+             let text = '';
+             let title = '';
+             let color = '';
+             let icon = '';
+             
+             if (total === 0) {
+                 icon = this.plugin.settings.iconEmpty;
+                 title = 'Anki-Block vorhanden (leer)';
+                 color = '#f1c40f'; // Yellow
+             } else if (unsynced > 0) {
+                 icon = this.plugin.settings.iconUnsynced;
+                 title = `${unsynced} nicht synchronisierte Karten`;
+                 color = '#ff5555'; // Red
+             } else {
+                 icon = this.plugin.settings.iconSynced;
+                 title = `${synced} Karten (alle synchronisiert)`;
+                 color = '#50fa7b'; // Green
+             }
+             
+             text = icon;
+             
+             if (this.plugin.settings.decorationTemplate) {
+                 const label = this.plugin.settings.decorationTemplate
+                    .replace('{count}', String(total))
+                    .replace('{synced}', String(synced))
+                    .replace('{unsynced}', String(unsynced));
+                 text += label;
+             }
+
             if (!decoration) {
-                decoration = createSpan({ cls: 'anki-legacy-decoration', text: ' 🗃️' });
-                decoration.setAttribute('title', 'Enthält Anki-Karten');
-                decoration.setAttribute('style', 'font-size: 0.8em; opacity: 0.8; margin-left: 5px;');
-
+                decoration = createSpan({ cls: 'anki-legacy-decoration', text: text });
                 if (targetContainer === element) {
-                    // If we are appending to the text container itself, just append
                     element.appendChild(decoration);
                 } else {
                     targetContainer.appendChild(decoration);
                 }
+            } else {
+                decoration.setText(text);
             }
+            
+            decoration.setAttribute('title', title);
+            decoration.setAttribute('style', `font-size: 0.8em; opacity: 1; margin-left: 5px; color: ${color};`);
+
         } else {
             if (decoration) {
                 decoration.remove();

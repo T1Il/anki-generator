@@ -1,4 +1,5 @@
 import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp, Setting, TextComponent, setIcon } from 'obsidian';
+import { renderFeedback } from './ui/FeedbackRenderer';
 import AnkiGeneratorPlugin from './main';
 import { Card, ChatMessage } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
@@ -405,7 +406,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		new DeckSelectionModal(plugin.app, deckName || plugin.settings.mainDeck, deckNames, async (newDeckName: string) => {
 			if (!newDeckName || newDeckName === deckName) return;
 			try {
-				// Move cards
+				// Move cards (if any)
 				const noteIds = cards.map(c => c.id).filter(Boolean) as number[];
 				if (noteIds.length > 0) {
 					await moveAnkiNotesToDeck(noteIds, newDeckName);
@@ -418,17 +419,41 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 							new Notice(`Leeres Deck "${deckName}" gelöscht.`);
 						}
 					}
-					// Update markdown block
-					const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-					if (view) {
-						const editor = view.editor;
-						const content = editor.getValue();
-						const updatedContent = content.replace(
-							/TARGET DECK: .*$/m,
-							`TARGET DECK: ${newDeckName}`
-						);
+				}
+
+				// Update markdown block
+				const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view) {
+					const editor = view.editor;
+					const content = editor.getValue();
+					
+                    // Find the Correct Block
+					const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+					const matches = [...content.matchAll(blockRegex)];
+					const match = matches.find(m => m[1].trim() === source.trim());
+
+					if (match) {
+						const fullBlock = match[0];
+                        let blockContent = match[1];
+                        
+                        // Check if TARGET DECK line exists
+                        if (blockContent.includes('TARGET DECK:')) {
+                            blockContent = blockContent.replace(/TARGET DECK: .*$/m, `TARGET DECK: ${newDeckName}`);
+                        } else {
+                            // Insert at top
+                            blockContent = `TARGET DECK: ${newDeckName}\n` + blockContent;
+                        }
+
+                        // Reconstruct Block
+                        const newBlock = `\`\`\`anki-cards\n${blockContent}\n\`\`\``;
+                        
+                        // Replace in file
+                        const updatedContent = content.replace(fullBlock, newBlock);
 						editor.setValue(updatedContent);
-					}
+                        new Notice(`Deck geändert zu: ${newDeckName}`);
+					} else {
+                        new Notice("Konnte den Block nicht finden.");
+                    }
 				}
 			} catch (e: any) {
 				new Notice("Fehler beim Verschieben: " + e.message);
@@ -469,6 +494,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	};
 
 	// --- CHAT BUTTON ---
+
 	const chatButton = actionContainer.createEl('button', { text: '💬 Chat öffnen' });
 	chatButton.style.flex = '1';
 	chatButton.title = "Öffnet den KI-Chat";
@@ -478,210 +504,21 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			const cached = plugin.feedbackCache.get(ctx.sourcePath);
 			if (cached) history.push(...cached);
 		}
-		renderFeedback(el, history, plugin, ctx.sourcePath);
+		renderFeedback(el, history, plugin, ctx.sourcePath, () => {
+             plugin.activateFeedbackView(history, ctx.sourcePath || "");
+        });
 	};
 
 	const cachedHistory = plugin.feedbackCache.get(ctx.sourcePath);
 	if (cachedHistory) {
 		console.log("Found cached feedback history for", ctx.sourcePath, "rendering it.");
-		renderFeedback(el, cachedHistory, plugin, ctx.sourcePath);
+		renderFeedback(el, cachedHistory, plugin, ctx.sourcePath, () => {
+             plugin.activateFeedbackView(cachedHistory, ctx.sourcePath || "");
+        });
 	}
 }
 
-function renderFeedback(container: HTMLElement, history: ChatMessage[], plugin: AnkiGeneratorPlugin, sourcePath?: string) {
-	const existingBox = container.querySelector('.anki-feedback-box');
-	if (existingBox) existingBox.remove();
 
-	const feedbackBox = container.createDiv({ cls: 'anki-feedback-box' });
-
-	// Styling for persistence and visibility
-	feedbackBox.style.border = '1px solid #4a90e2';
-	feedbackBox.style.borderRadius = '5px';
-	feedbackBox.style.padding = '10px';
-	feedbackBox.style.marginTop = '10px';
-	feedbackBox.style.backgroundColor = 'rgba(74, 144, 226, 0.1)';
-
-	const header = feedbackBox.createDiv({ cls: 'anki-feedback-header' });
-	header.style.display = 'flex';
-	header.style.justifyContent = 'space-between';
-	header.style.alignItems = 'center';
-	header.style.marginBottom = '10px';
-	header.style.marginBottom = '10px';
-
-	header.createSpan({ text: '🤖 KI Chat & Feedback', cls: 'anki-feedback-title' }).style.fontWeight = 'bold';
-
-	const controlsDiv = header.createDiv({ cls: 'anki-feedback-controls' });
-	controlsDiv.style.display = 'flex';
-	controlsDiv.style.gap = '5px';
-
-	const clearBtn = controlsDiv.createEl('button', { cls: 'anki-feedback-close' });
-	clearBtn.title = "Chat leeren";
-	setIcon(clearBtn, 'trash');
-	clearBtn.onclick = () => {
-		history.length = 0; // Clear array
-		if (sourcePath) plugin.feedbackCache.delete(sourcePath);
-		renderFeedback(container, history, plugin, sourcePath);
-	};
-
-	const closeBtn = controlsDiv.createEl('button', { cls: 'anki-feedback-close' });
-	closeBtn.title = "Schließen";
-	setIcon(closeBtn, 'x');
-	closeBtn.onclick = () => {
-		feedbackBox.remove();
-	};
-
-	const contentArea = feedbackBox.createDiv({ cls: 'anki-feedback-content' });
-	contentArea.style.maxHeight = '300px';
-	contentArea.style.overflowY = 'auto';
-	contentArea.style.marginBottom = '10px';
-
-	// Scrollbar Styling (Webkit)
-	const styleEl = feedbackBox.createEl('style');
-	styleEl.textContent = `
-		.anki-feedback-content::-webkit-scrollbar {
-			width: 12px;
-			background-color: rgba(0, 0, 0, 0.05);
-		}
-		.anki-feedback-content::-webkit-scrollbar-track {
-			background: rgba(0, 0, 0, 0.1);
-			border-radius: 6px;
-		}
-		.anki-feedback-content::-webkit-scrollbar-thumb {
-			background-color: #2e6da4; /* High contrast blue (darker) */
-			border-radius: 6px;
-			border: 2px solid #ffffff; /* White border for contrast against track */
-		}
-		.anki-feedback-content::-webkit-scrollbar-thumb:hover {
-			background-color: #1d4e7a;
-		}
-	`;
-
-	// Render History
-	if (history.length === 0) {
-		const emptyMsg = contentArea.createDiv({ cls: 'anki-chat-empty' });
-		emptyMsg.setText("Noch keine Nachrichten. Starte eine Unterhaltung oder hole Feedback ein.");
-		emptyMsg.style.fontStyle = 'italic';
-		emptyMsg.style.color = '#888';
-		emptyMsg.style.textAlign = 'center';
-		emptyMsg.style.padding = '20px';
-	} else {
-		history.forEach(msg => {
-			const msgDiv = contentArea.createDiv({ cls: `anki-chat-message ${msg.role}` });
-			msgDiv.style.marginBottom = '8px';
-			msgDiv.style.padding = '8px';
-			msgDiv.style.borderRadius = '5px';
-			msgDiv.style.backgroundColor = msg.role === 'ai' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(74, 144, 226, 0.2)';
-			msgDiv.style.alignSelf = msg.role === 'ai' ? 'flex-start' : 'flex-end';
-
-			const roleLabel = msgDiv.createDiv({ cls: 'anki-chat-role' });
-			roleLabel.setText(msg.role === 'ai' ? '🤖 AI:' : '👤 Du:');
-			roleLabel.style.fontWeight = 'bold';
-			roleLabel.style.fontSize = '0.8em';
-			roleLabel.style.marginBottom = '4px';
-
-			const textDiv = msgDiv.createDiv({ cls: 'anki-chat-text' });
-			MarkdownRenderer.render(plugin.app, msg.content, textDiv, container.getAttribute('src') || '', plugin);
-		});
-	}
-
-	// Auto-scroll to bottom
-	setTimeout(() => {
-		contentArea.scrollTop = contentArea.scrollHeight;
-	}, 0);
-
-	// Input Area
-	const inputArea = feedbackBox.createDiv({ cls: 'anki-feedback-input' });
-	inputArea.style.display = 'flex';
-	inputArea.style.flexDirection = 'column'; // Stack input and buttons
-	inputArea.style.gap = '5px';
-
-	const textInputContainer = inputArea.createDiv();
-	textInputContainer.style.display = 'flex';
-	textInputContainer.style.gap = '5px';
-
-	const input = new TextAreaComponent(textInputContainer);
-	input.setPlaceholder("Stelle eine Rückfrage...");
-	input.inputEl.style.flex = '1';
-	input.inputEl.rows = 2;
-
-	const sendBtn = new ButtonComponent(textInputContainer);
-	sendBtn.setButtonText("Senden");
-	sendBtn.setCta();
-	sendBtn.onClick(async () => {
-		const userText = input.getValue().trim();
-		if (!userText) return;
-
-		// Add user message to history
-		history.push({ role: 'user', content: userText });
-		input.setValue("");
-
-		// Re-render immediately to show user message
-		renderFeedback(container, history, plugin, sourcePath);
-
-		// Call AI
-		try {
-			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-			const noteContent = view ? view.editor.getValue() : "";
-
-			let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
-			if (plugin.settings.geminiApiKey) provider = 'gemini';
-			else if (plugin.settings.openAiApiKey) provider = 'openai';
-			else if (plugin.settings.ollamaEnabled) provider = 'ollama';
-
-			const aiResponse = await generateChatResponse(plugin.app, history, userText, noteContent, provider, plugin.settings);
-
-			history.push({ role: 'ai', content: aiResponse });
-			if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
-
-			renderFeedback(container, history, plugin, sourcePath);
-
-		} catch (e: any) {
-			new Notice("Fehler bei der Antwort: " + e.message);
-			history.push({ role: 'ai', content: "Fehler: " + e.message });
-			renderFeedback(container, history, plugin, sourcePath);
-		}
-	});
-
-	// --- FEEDBACK BUTTON INSIDE CHAT ---
-	const feedbackBtnContainer = inputArea.createDiv();
-	feedbackBtnContainer.style.display = 'flex';
-	feedbackBtnContainer.style.justifyContent = 'flex-start';
-
-	const getFeedbackBtn = new ButtonComponent(feedbackBtnContainer);
-	getFeedbackBtn.setButtonText("🔍 Feedback einholen");
-	getFeedbackBtn.setTooltip("Analysiert die Notiz und gibt Feedback");
-	getFeedbackBtn.onClick(async () => {
-		getFeedbackBtn.setDisabled(true);
-		getFeedbackBtn.setButtonText("⏳ Lade...");
-
-		try {
-			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
-			const noteContent = view.editor.getValue();
-
-			let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
-			if (plugin.settings.geminiApiKey) provider = 'gemini';
-			else if (plugin.settings.openAiApiKey) provider = 'openai';
-			else if (plugin.settings.ollamaEnabled) provider = 'ollama';
-
-			const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings);
-
-			if (feedback) {
-				history.push({ role: 'ai', content: feedback });
-				if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
-				renderFeedback(container, history, plugin, sourcePath);
-			} else {
-				new Notice("Kein Feedback erhalten.");
-			}
-		} catch (e: any) {
-			new Notice("Fehler beim Abrufen des Feedbacks: " + e.message);
-			console.error(e);
-		} finally {
-			getFeedbackBtn.setDisabled(false);
-			getFeedbackBtn.setButtonText("🔍 Feedback einholen");
-		}
-	});
-}
 
 class RevisionInputModal extends Modal {
 	onSubmit: (result: string) => void;

@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Notice, Plugin, requestUrl } from 'obsidian';
+import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf } from 'obsidian';
 import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings } from './settings';
 import { processAnkiCardsBlock } from './ankiBlockProcessor';
 import { triggerCardGeneration } from './generationManager';
@@ -11,6 +11,8 @@ import { t } from './lang/helpers';
 import { AnkiFileDecorationProvider } from './ui/AnkiFileDecorationProvider';
 import { LegacyFileDecorator } from './ui/LegacyFileDecorator';
 import { ensureBlockIdsForCallouts, removeAllBlockIds } from './utils';
+import { FeedbackView, FEEDBACK_VIEW_TYPE } from './ui/FeedbackView';
+import { InsertCalloutLinkModal } from './ui/InsertCalloutLinkModal';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -21,6 +23,12 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+
+		// REGISTER FEEDBACK VIEW
+		this.registerView(
+			FEEDBACK_VIEW_TYPE,
+			(leaf) => new FeedbackView(leaf, this)
+		);
 
 		// AUTO-DETECT VAULT NAME
 		if (!this.settings.vaultName || this.settings.vaultName === 'My Vault') {
@@ -109,6 +117,21 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			}
 		});
 
+        this.addCommand({
+            id: 'force-reload-decorations',
+            name: 'Force Reload Decorations',
+            callback: async () => {
+                if (this.ankiFileDecorationProvider) {
+                    await this.ankiFileDecorationProvider.load();
+                    this.ankiFileDecorationProvider.triggerUpdate();
+                } else if (this.legacyFileDecorator) {
+                    this.legacyFileDecorator.destroy();
+                    this.legacyFileDecorator.load();
+                }
+                new Notice("Decorations reloaded.");
+            }
+        });
+
 		this.addCommand({
 			id: 'reload-plugin',
 			name: 'Reload Plugin',
@@ -144,6 +167,14 @@ export default class AnkiGeneratorPlugin extends Plugin {
             editorCallback: (editor: Editor, view: MarkdownView) => {
                 removeAllBlockIds(editor);
                 new Notice("All block IDs removed.");
+            }
+        });
+
+        this.addCommand({
+            id: 'insert-callout-link',
+            name: 'Insert Callout Link',
+            editorCallback: (editor: Editor, view: MarkdownView) => {
+                new InsertCalloutLinkModal(this.app, editor).open();
             }
         });
 
@@ -216,7 +247,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		if (this.settings.fileDecorations) {
 			if (!this.legacyFileDecorator) {
 				console.log("AnkiGenerator: Enabling legacy file decorator.");
-				this.legacyFileDecorator = new LegacyFileDecorator(this.app);
+				this.legacyFileDecorator = new LegacyFileDecorator(this.app, this);
 				this.legacyFileDecorator.load();
 			}
 		} else {
@@ -269,4 +300,28 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	removeActiveGeneration(filePath: string) {
 		this.activeGenerations.delete(filePath);
 	}
+
+    // ACTIVATE VIEW HELPER
+    async activateFeedbackView(history: ChatMessage[], sourcePath: string) {
+        const { workspace } = this.app;
+
+        let leaf: WorkspaceLeaf | null = null;
+        const leaves = workspace.getLeavesOfType(FEEDBACK_VIEW_TYPE);
+
+        if (leaves.length > 0) {
+            // Use existing leaf
+            leaf = leaves[0];
+        } else {
+            // Open in right sidebar
+            leaf = workspace.getRightLeaf(false);
+            if(leaf) await leaf.setViewState({ type: FEEDBACK_VIEW_TYPE, active: true });
+        }
+        
+        if (leaf) {
+            workspace.revealLeaf(leaf);
+            if (leaf.view instanceof FeedbackView) {
+                leaf.view.setFeedbackContext(history, sourcePath);
+            }
+        }
+    }
 }
