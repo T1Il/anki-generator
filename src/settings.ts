@@ -28,6 +28,7 @@ export interface AnkiGeneratorSettings {
 	typeInFront: string;
 	typeInBack: string;
 	fileDecorations: boolean;
+	folderDecorations: boolean;
 	enableManualMode: boolean;
 	iconSynced: string;
     iconUnsynced: string;
@@ -137,6 +138,7 @@ Hier ist der Lerninhalt:
 	typeInFront: 'Front',
 	typeInBack: 'Back',
 	fileDecorations: false,
+	folderDecorations: true,
 	enableManualMode: false,
     iconSynced: '✅',
     iconUnsynced: '🔴',
@@ -268,7 +270,20 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
                     this.display(); // Refresh to show/hide sub-settings
 				}));
 
-        if (this.plugin.settings.fileDecorations) {
+		if (this.plugin.settings.fileDecorations) {
+            new Setting(containerEl)
+                .setName(t('settings.folderDecorations'))
+                .setDesc(t('settings.folderDecorationsDesc'))
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.folderDecorations)
+                    .onChange(async (value) => {
+                        this.plugin.settings.folderDecorations = value;
+                        await this.plugin.saveSettings();
+                        if (this.plugin.ankiFileDecorationProvider) {
+                             this.plugin.ankiFileDecorationProvider.triggerUpdate();
+                        }
+                    }));
+            
             this.addDecorationSettings(containerEl);
         }
 

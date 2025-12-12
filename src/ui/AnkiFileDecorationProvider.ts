@@ -1,4 +1,4 @@
-import { App, TAbstractFile, TFile } from 'obsidian';
+import { App, TAbstractFile, TFile, TFolder } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 
 // Polyfill types for older obsidian-typings
@@ -24,7 +24,85 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
     }
 
     provideFileDecoration(file: TAbstractFile): FileDecoration | null {
+        // console.log("provideFileDecoration called for:", file.path, file.constructor.name);
+        
         if (!this.plugin.settings.fileDecorations) return null;
+
+        // Handle Folders
+        if (file instanceof TFolder) {
+            // console.log("Checking folder:", file.path);
+            if (!this.plugin.settings.folderDecorations) {
+                 // console.log("Folder decorations disabled in settings");
+                 return null;
+            }
+            if (!this.plugin.settings.folderDecorations) return null;
+            
+            // Strict Logic: All files must have Anki cards and be synced. 
+            // Exception: File name matches folder name.
+            
+            // Helper function for recursive strict check
+            const checkFolderRecursive = (folder: TFolder): { complete: boolean, hasUnsynced: boolean, validFiles: number } => {
+                let allComplete = true;
+                let anyUnsynced = false;
+                let totalFiles = 0;
+
+                for (const child of folder.children) {
+                    if (child instanceof TFolder) {
+                        if (child.name === 'space' || child.name === '.space') continue; // Ignore 'space' and hidden '.space' folder
+                        
+                        const result = checkFolderRecursive(child);
+                        if (!result.complete) {
+                            allComplete = false;
+                        }
+                        if (result.hasUnsynced) anyUnsynced = true;
+                        totalFiles += result.validFiles;
+                    } else if (child instanceof TFile && child.extension === 'md') {
+                        // We DO NOT ignore folder notes anymore. If they have unsynced cards, the folder is unsynced.
+
+                        const stats = this.filesWithAnki.get(child.path);
+                        if (stats) {
+                             if (stats.unsynced > 0) {
+                                 anyUnsynced = true;
+                                 allComplete = false;
+                             }
+                             if (stats.synced > 0 || stats.unsynced > 0) {
+                                  totalFiles++;
+                             } else if (stats.synced === 0 && stats.unsynced === 0) {
+                                  // Empty file with no cards -> Neutral.
+                             }
+                        }
+                        // If no stats, ignore.
+                    }
+                }
+                return { complete: allComplete, hasUnsynced: anyUnsynced, validFiles: totalFiles };
+            };
+            
+
+            const { complete, hasUnsynced, validFiles } = checkFolderRecursive(file);
+            const allFilesHaveCardsAndSynced = complete;
+            const validFileCount = validFiles;
+            const hasAnyUnsynced = hasUnsynced;
+
+            if (validFileCount > 0 && allFilesHaveCardsAndSynced) {
+                 return {
+                    badge: this.plugin.settings.iconSynced,
+                    tooltip: "Alle Dateien in diesem Ordner sind vollständig synchronisiert",
+                    color: "#50fa7b" // Green
+                 };
+            } else if (hasAnyUnsynced) {
+                return {
+                     badge: this.plugin.settings.iconUnsynced,
+                     tooltip: `Nicht synchronisierte Karten in diesem Ordner`,
+                     color: "#ff5555" // Red
+                };
+            }
+
+            return null;
+
+            return null;
+        }
+
+        // Handle Files
         if (!(file instanceof TFile)) return null;
         if (file.extension !== 'md') return null;
 

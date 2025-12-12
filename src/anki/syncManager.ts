@@ -210,9 +210,13 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                     if (e.message?.includes("cannot create note because it is a duplicate")) {
                         notice.setMessage(`Duplikat gefunden. Suche ID...`);
                         if (card.type === 'Basic') {
-                            ankiNoteId = await findAnkiNoteId(originalQ, frontField);
+                            // Use HTML content (ankiFieldQ) to search, as that's what is in Anki
+                            ankiNoteId = await findAnkiNoteId(ankiFieldQ, frontField, deckName);
                         } else if (card.type === 'Cloze') {
-                            ankiNoteId = await findAnkiClozeNoteId(originalQ, clozeTextField);
+                            // Use HTML content with actual clozes to search
+                           // Note: findAnkiClozeNoteId replaces ____ with *, but ankiClozeTextField already has {{c1::..}}
+                           // So it will search for the exact text, which is good.
+                            ankiNoteId = await findAnkiClozeNoteId(ankiClozeTextField, clozeTextField, deckName);
                         }
 
                         if (!ankiNoteId) {

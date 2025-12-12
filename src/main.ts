@@ -44,10 +44,12 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		// Initialize File Decorations
 		if ((this as any).registerFileDecorationProvider) {
+            console.log("AnkiGenerator: Using Native File Decoration Provider");
 			this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
 			(this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
 		} else {
 			// Legacy handling initialized based on settings
+            console.log("AnkiGenerator: Using LEGACY File Decorator");
 			this.updateLegacyFileDecoration();
 		}
 
@@ -121,14 +123,27 @@ export default class AnkiGeneratorPlugin extends Plugin {
             id: 'force-reload-decorations',
             name: 'Force Reload Decorations',
             callback: async () => {
+                console.log("Force Reload Decorations triggered.");
                 if (this.ankiFileDecorationProvider) {
+                    console.log("Reloading Native Provider...");
                     await this.ankiFileDecorationProvider.load();
                     this.ankiFileDecorationProvider.triggerUpdate();
                 } else if (this.legacyFileDecorator) {
-                    this.legacyFileDecorator.destroy();
+                    console.log("Reloading Legacy Decorator...");
+                    this.legacyFileDecorator.destroy(); // Ensure old one is gone
                     this.legacyFileDecorator.load();
+                } else {
+                     console.log("No active decorator found. Attempting to re-init.");
+                     if ((this as any).registerFileDecorationProvider) {
+                        console.log("Init Native Provider");
+                        this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
+                        (this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
+                    } else {
+                        console.log("Init Legacy Decorator");
+                        this.updateLegacyFileDecoration();
+                    }
                 }
-                new Notice("Decorations reloaded.");
+                new Notice("Decorations reloaded. Check console for details.");
             }
         });
 

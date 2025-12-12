@@ -40,6 +40,8 @@ export default {
     "settings.feedbackPromptDesc": "Der Prompt für das AI Feedback. Platzhalter: {{noteContent}}",
     "settings.fileDecorations": "Dateidekorationen anzeigen",
     "settings.fileDecorationsDesc": "Zeigt ein Icon im Dateiexplorer für Dateien mit Anki-Karten.",
+    "settings.folderDecorations": "Ordnerdekorationen anzeigen",
+    "settings.folderDecorationsDesc": "Zeigt ein Icon im Dateiexplorer für Ordner, wenn alle enthaltenen Notizen synchronisiert sind.",
 
     // Anki Block
     "anki.check": "⏳ Prüfe Anki...",
