@@ -24,8 +24,6 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
     }
 
     provideFileDecoration(file: TAbstractFile): FileDecoration | null {
-        // console.log("provideFileDecoration called for:", file.path, file.constructor.name);
-        
         if (!this.plugin.settings.fileDecorations) return null;
 
         // Handle Folders
@@ -41,55 +39,56 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
             // Exception: File name matches folder name.
             
             // Helper function for recursive strict check
-            const checkFolderRecursive = (folder: TFolder): { complete: boolean, hasUnsynced: boolean, validFiles: number } => {
-                let allComplete = true;
+            const checkFolderRecursive = (folder: TFolder): { 
+                hasUnsynced: boolean; 
+                filesWithCards: number; 
+                totalMdFiles: number; 
+            } => {
                 let anyUnsynced = false;
-                let totalFiles = 0;
+                let ankiFileCount = 0;
+                let mdFileCount = 0;
 
                 for (const child of folder.children) {
                     if (child instanceof TFolder) {
-                        if (child.name === 'space' || child.name === '.space') continue; // Ignore 'space' and hidden '.space' folder
+                        if (child.name === 'space' || child.name === '.space') continue; 
                         
                         const result = checkFolderRecursive(child);
-                        if (!result.complete) {
-                            allComplete = false;
-                        }
                         if (result.hasUnsynced) anyUnsynced = true;
-                        totalFiles += result.validFiles;
-                    } else if (child instanceof TFile && child.extension === 'md') {
-                        // We DO NOT ignore folder notes anymore. If they have unsynced cards, the folder is unsynced.
+                        ankiFileCount += result.filesWithCards;
+                        mdFileCount += result.totalMdFiles;
 
+                    } else if (child instanceof TFile && child.extension === 'md') {
+                        mdFileCount++;
+                        
                         const stats = this.filesWithAnki.get(child.path);
+                        if (folder.name === 'Anatomie' || folder.name === 'Pathophysiologie') {
+                             console.log(`[AnkiDebug] Check File: ${child.name} | Path: ${child.path} | Stats found: ${stats ? JSON.stringify(stats) : 'NULL'}`);
+                        }
+
                         if (stats) {
                              if (stats.unsynced > 0) {
                                  anyUnsynced = true;
-                                 allComplete = false;
                              }
+                             // ONLY count as "Anki File" if it actually has cards (synced or unsynced).
+                             // Empty blocks (0/0) should be treated as "Normal Files" (ignored).
                              if (stats.synced > 0 || stats.unsynced > 0) {
-                                  totalFiles++;
-                             } else if (stats.synced === 0 && stats.unsynced === 0) {
-                                  // Empty file with no cards -> Neutral.
+                                 ankiFileCount++;
                              }
                         }
-                        // If no stats, ignore.
                     }
                 }
-                return { complete: allComplete, hasUnsynced: anyUnsynced, validFiles: totalFiles };
+                
+                if (folder.name === 'Pathophysiologie') {
+                     // console.log(`[AnkiDebug] Pathophysiologie: MD=${mdFileCount}, Anki=${ankiFileCount}`);
+                }
+
+                return { hasUnsynced: anyUnsynced, filesWithCards: ankiFileCount, totalMdFiles: mdFileCount };
             };
             
 
-            const { complete, hasUnsynced, validFiles } = checkFolderRecursive(file);
-            const allFilesHaveCardsAndSynced = complete;
-            const validFileCount = validFiles;
-            const hasAnyUnsynced = hasUnsynced;
+            const { hasUnsynced, filesWithCards, totalMdFiles } = checkFolderRecursive(file);
 
-            if (validFileCount > 0 && allFilesHaveCardsAndSynced) {
-                 return {
-                    badge: this.plugin.settings.iconSynced,
-                    tooltip: "Alle Dateien in diesem Ordner sind vollständig synchronisiert",
-                    color: "#50fa7b" // Green
-                 };
-            } else if (hasAnyUnsynced) {
+            if (hasUnsynced) {
                 return {
                      badge: this.plugin.settings.iconUnsynced,
                      tooltip: `Nicht synchronisierte Karten in diesem Ordner`,
@@ -97,9 +96,30 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
                 };
             }
 
-            return null;
-
-            return null;
+            // Green ONLY if EVERY md file has cards (and thus is synced, since hasUnsynced is false)
+            if (totalMdFiles > 0 && filesWithCards === totalMdFiles) {
+                  return {
+                    badge: this.plugin.settings.iconSynced,
+                    tooltip: `Alles synchronisiert (${filesWithCards}/${totalMdFiles} relevante Dateien)`,
+                    color: "#50fa7b" // Green
+                 };
+            }
+            
+            // Debugging Fallback: If we have ANY Anki files but not all match:
+            if (filesWithCards > 0 && filesWithCards < totalMdFiles) {
+                 return {
+                    badge: "?", 
+                    tooltip: `DEBUG: Anki-Dateien=${filesWithCards} / Gesamt=${totalMdFiles}`,
+                    color: "#aaaaaa"
+                 };
+            } else if (file.name === 'Anatomie') {
+                 // Debug if it falls through (Case A: 0 files detected)
+                 return {
+                    badge: "0", 
+                    tooltip: `DEBUG: Anki=${filesWithCards} | MD=${totalMdFiles} (Keine Anki-Files erkannt)`,
+                    color: "#ff00ff"
+                 };
+            }
         }
 
         // Handle Files

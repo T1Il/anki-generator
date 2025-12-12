@@ -113,11 +113,16 @@ export class LegacyFileDecorator {
                 
                 let noteCount = 0;
                 let idCount = 0;
+                let inQBlock = false;
 
                 // Improved Note Counting matching ankiParser logic
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i].trim();
-                    if (!line) continue;
+                    
+                    if (!line) {
+                        inQBlock = false;
+                        continue;
+                    }
 
                     // Skip metadata lines
                     if (line.startsWith('TARGET DECK:') || 
@@ -134,16 +139,19 @@ export class LegacyFileDecorator {
                     }
 
                     // Check for Note Start
-                    const isQ = line.startsWith('Q:');
-                    // Legacy Cloze: contains {{c or ____, but check it's not a Q line (rare edge case)
-                    // and also not an ID line (handled above) or metadata.
-                    // Also ensure we don't double count if a single line has multiple clozes (it's still 1 note).
-                    // Logic: If line has clozes, it's a note start (unless it's part of previous headerless note? 
-                    // ankiParser breaks on new cloze line, so treating as new note is safest).
-                    const isLeacyCloze = !isQ && (line.includes('{{c') || line.includes('____'));
-
-                    if (isQ || isLeacyCloze) {
+                    if (line.startsWith('Q:')) {
                         noteCount++;
+                        inQBlock = true;
+                        continue;
+                    }
+
+                    // Legacy Cloze: contains {{c or ____, but ONLY count if NOT inside a Q-block
+                    // This prevents double counting clozes that are part of a Q-card answer list
+                    const isLeacyCloze = !inQBlock && (line.includes('{{c') || line.includes('____'));
+
+                    if (isLeacyCloze) {
+                        noteCount++;
+                        inQBlock = true; // Assume we are now in a block for this cloze
                     }
                 }
                 
@@ -346,120 +354,106 @@ export class LegacyFileDecorator {
 
         let data: { synced: number, unsynced: number } | null = null;
         let isFolder = false;
-        
-        // 1. Try to get existing file data
-        if (this.filesWithAnki.has(path)) {
-            data = this.filesWithAnki.get(path)!;
+
+        // Determine if it is a folder
+        const abstractFile = this.app.vault.getAbstractFileByPath(path);
+        if (abstractFile instanceof TFolder) {
+            isFolder = true;
+            // STRICT FOLDER CHECK LOGIC
+            if (this.plugin.settings.folderDecorations) {
+                const folderResult = this.checkFolderRecursive(abstractFile);
+                if (folderResult.filesWithCards > 0 && folderResult.filesWithCards === folderResult.totalMdFiles) {
+                     // All relevant files are synced
+                     data = { synced: folderResult.filesWithCards, unsynced: 0 };
+                } else if (folderResult.hasUnsynced) {
+                     // At least one unsynced
+                     data = { synced: 0, unsynced: 1 }; // Fake unsynced count to trigger red
+                } else {
+                     // Not all synced, but no explicitly unsynced files -> Treat as "Empty/Incomplete" -> No decoration (null)
+                     data = null;
+                }
+            }
         } else {
-            // 2. If not a known file, check if it's a folder in standard Obsidian or Make.MD
-            // We verify with vault to be sure.
-            const abstractFile = this.app.vault.getAbstractFileByPath(path);
-            if (abstractFile instanceof TFolder) {
-                 isFolder = true;
-                 const folder = abstractFile;
-                 
-                 const checkFolderRecursive = (dir: TFolder): { complete: boolean, hasUnsynced: boolean, validFiles: number, folderUnsyncedSum: number } => {
-                     let allComplete = true;
-                     let anyUnsynced = false;
-                     let totalFiles = 0;
-                     let unsyncedSum = 0;
-
-                     for (const child of dir.children) {
-                         if (child instanceof TFolder) {
-                             if (child.name === 'space' || child.name === '.space') continue; 
-                             
-                             const result = checkFolderRecursive(child);
-                             if (!result.complete) {
-                                  allComplete = false;
-                             }
-                             if (result.hasUnsynced) anyUnsynced = true;
-                             totalFiles += result.validFiles;
-                             unsyncedSum += result.folderUnsyncedSum;
-                         } else if (child instanceof TFile && child.extension === 'md') {
-                             // We DO NOT ignore folder notes anymore. If they have unsynced cards, the folder is unsynced.
-                             // if (child.basename === dir.name) { continue; }
-
-                             const stats = this.filesWithAnki.get(child.path);
-                             if (stats) {
-                                 unsyncedSum += stats.unsynced;
-                                 if (stats.unsynced > 0) {
-                                      anyUnsynced = true;
-                                      allComplete = false;
-                                 } 
-                                 // If file has cards, count it. If 0/0, it's neutral.
-                                 if (stats.synced > 0 || stats.unsynced > 0) {
-                                      totalFiles++;
-                                 }
-                             }
-                             // If no stats, ignore the file completely (don't break 'allComplete')
-                         }
-                     }
-                     return { complete: allComplete, hasUnsynced: anyUnsynced, validFiles: totalFiles, folderUnsyncedSum: unsyncedSum };
-                 };
-
-                 const { complete, hasUnsynced, validFiles, folderUnsyncedSum } = checkFolderRecursive(folder);
-
-                 // Determine Folder Status
-                 if (validFiles > 0 && complete) {
-                     // All valid files are synced -> Green
-                     data = { synced: 1, unsynced: 0 }; 
-                 } else if (hasUnsynced) {
-                     // At least one unsynced -> Red
-                     data = { synced: 0, unsynced: folderUnsyncedSum || 1 }; 
-                 } else {
-                     // Incomplete or empty -> No decoration (null)
-                     data = null; 
-                 }
+            // File logic
+            if (this.filesWithAnki.has(path)) {
+                data = this.filesWithAnki.get(path)!;
             }
         }
         
+        // Remove existing decoration if we aborted
         let decoration = targetContainer.querySelector('.anki-legacy-decoration');
+
+        if (!data) {
+            if (decoration) decoration.remove();
+            return;
+        }
 
         // 3. Render
         if (data) {
              const { synced, unsynced } = data;
-             const total = synced + unsynced; // For folders this is fake '1' or '0' but logic holds.
+             const total = synced + unsynced;
              let text = '';
              let title = '';
              let color = '';
              let icon = '';
 
-             if (total === 0) {
-                 // Empty Logic (Yellow) - Mostly for files
+             if (total === 0 && !isFolder) { // Only yellow for files
+                 // Empty Logic (Yellow)
                  icon = this.plugin.settings.iconEmpty;
                  title = 'Anki-Block vorhanden (leer)';
                  color = '#f1c40f'; 
              } else if (unsynced > 0) {
                  // Unsynced Logic (Red)
                  icon = this.plugin.settings.iconUnsynced;
-                 title = isFolder ? 'Nicht synchronisierte Änderungen im Ordner' : `${unsynced} nicht synchronisierte Änderungen`;
+                 title = isFolder ? `${unsynced} nicht synchronisierte Dateien` : `${unsynced} nicht synchronisierte Änderungen`;
                  color = '#e74c3c'; 
              } else {
                  // Synced Logic (Green)
                  icon = this.plugin.settings.iconSynced;
-                 title = isFolder ? 'Ordner vollständig synchronisiert' : 'Synchronisiert';
+                 title = isFolder ? `Alles synchronisiert (${synced} Dateien)` : 'Synchronisiert';
                  color = '#2ecc71'; 
              }
-             
-             // Custom Text Template (Only for files usually, but we can support folders if we want)
-             // For now, keep icon only for folders unless user wants counts.
+
              text = icon;
-             
+              
              if (!isFolder && this.plugin.settings.decorationTemplate) {
-                 const label = this.plugin.settings.decorationTemplate
-                    .replace('{count}', String(total))
-                    .replace('{synced}', String(synced))
-                    .replace('{unsynced}', String(unsynced));
-                 text += label;
+                  const label = this.plugin.settings.decorationTemplate
+                     .replace('{count}', String(total))
+                     .replace('{synced}', String(synced))
+                     .replace('{unsynced}', String(unsynced));
+                  text += label;
              }
 
              this.renderDecoration(decoration as HTMLElement, targetContainer, text, color, title);
-
-        } else {
-             if (decoration) {
-                 decoration.remove();
-             }
         }
+    }
+
+    checkFolderRecursive(folder: TFolder): { hasUnsynced: boolean; filesWithCards: number; totalMdFiles: number; } {
+        let anyUnsynced = false;
+        let ankiFileCount = 0;
+        let mdFileCount = 0;
+
+        for (const child of folder.children) {
+            if (child instanceof TFolder) {
+                if (child.name === 'space' || child.name === '.space') continue; 
+                
+                const result = this.checkFolderRecursive(child);
+                if (result.hasUnsynced) anyUnsynced = true;
+                ankiFileCount += result.filesWithCards;
+                mdFileCount += result.totalMdFiles;
+            } else if (child instanceof TFile && child.extension === 'md') {
+                // Ignore Folder Notes (file with same name as folder)
+                if (child.name === folder.name + '.md') continue;
+
+                mdFileCount++;
+                const stats = this.filesWithAnki.get(child.path);
+                if (stats) {
+                     if (stats.unsynced > 0) anyUnsynced = true;
+                     if (stats.synced > 0 || stats.unsynced > 0) ankiFileCount++;
+                }
+            }
+        }
+        return { hasUnsynced: anyUnsynced, filesWithCards: ankiFileCount, totalMdFiles: mdFileCount };
     }
 
     renderDecoration(existingDecoration: HTMLElement | null | undefined, container: HTMLElement, text: string, color: string, title: string) {

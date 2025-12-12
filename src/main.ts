@@ -25,6 +25,11 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
+        // console.log("!!! ANKI PLUGIN LOADED !!!");
+
+		// Register ViewPlugin for Legacy Auto-Hide
+		this.registerEditorExtension(legacyAnkiStateField);
+
 		// REGISTER FEEDBACK VIEW
 		this.registerView(
 			FEEDBACK_VIEW_TYPE,
@@ -45,9 +50,10 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		// Initialize File Decorations
 		if ((this as any).registerFileDecorationProvider) {
-            console.log("AnkiGenerator: Using Native File Decoration Provider");
+            console.log("AnkiGenerator: Registering Native File Decoration Provider..."); // TRACE
 			this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
 			(this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
+            console.log("AnkiGenerator: Provider Registered."); // TRACE
 		} else {
 			// Legacy handling initialized based on settings
             console.log("AnkiGenerator: Using LEGACY File Decorator");

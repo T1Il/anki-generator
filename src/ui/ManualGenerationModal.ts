@@ -86,17 +86,21 @@ export class ManualGenerationModal extends Modal {
 				copyBtn.setIcon("copy");
 				copyBtn.onClick(async () => {
 					try {
+                        console.log("Copying image:", file.name, "Extension:", file.extension);
 						const arrayBuffer = await this.app.vault.readBinary(file);
-						const blob = new Blob([arrayBuffer], { type: 'image/png' }); // Basic assumption, acceptable for clipboard?
-						// Clipboard Item Type must match actual mime type usually
-						// Let's try generic approach or detect mime
-						let mimeType = 'image/png';
-						if (file.extension === 'jpg' || file.extension === 'jpeg') mimeType = 'image/jpeg';
-						else if (file.extension === 'webp') mimeType = 'image/webp';
-										
-						const item = new ClipboardItem({ [mimeType]: blob });
+                        let blob = new Blob([arrayBuffer]);
+                        
+                        // Clipboard often forces PNG. Convert if not PNG.
+                        if (file.extension && file.extension.toLowerCase() !== 'png') {
+                             console.log("Converting to PNG...");
+                             blob = await this.convertToPng(blob);
+                        } else {
+                             blob = new Blob([arrayBuffer], { type: 'image/png' });
+                        }
+
+						const item = new ClipboardItem({ 'image/png': blob });
 						await navigator.clipboard.write([item]);
-						new Notice("Bild in Zwischenablage kopiert!");
+						new Notice("Bild (konvertiert) in Zwischenablage kopiert!");
 					} catch (err) {
 						console.error("Copy image failed", err);
 						new Notice("Fehler beim Kopieren des Bildes: " + err);
@@ -170,6 +174,31 @@ export class ManualGenerationModal extends Modal {
 					this.close();
 				}));
 	}
+
+
+    
+    async convertToPng(blob: Blob): Promise<Blob> {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    reject(new Error("Could not get canvas context"));
+                    return;
+                }
+                ctx.drawImage(img, 0, 0);
+                canvas.toBlob((pngBlob) => {
+                    if (pngBlob) resolve(pngBlob);
+                    else reject(new Error("Canvas toBlob failed"));
+                }, 'image/png');
+            };
+            img.onerror = (e) => reject(e);
+            img.src = URL.createObjectURL(blob);
+        });
+    }
 
 	onClose() {
 		this.contentEl.empty();
