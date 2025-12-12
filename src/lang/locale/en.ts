@@ -69,6 +69,8 @@ export default {
     "notice.saveSuccess": "Changes saved!",
     "notice.saveError": "Error saving: {error}",
     "notice.updateAvailable": "Update available: {version}",
+    "notice.legacyArchived": "Legacy Anki blocks archived.",
+    "notice.legacyUnarchived": "Anki blocks unarchived.",
 
     // Modals
     "modal.subdeck.title": "Select Subdeck",

@@ -75,6 +75,8 @@ export default {
     "notice.saveSuccess": "Änderungen gespeichert!",
     "notice.saveError": "Fehler beim Speichern: {error}",
     "notice.updateAvailable": "Update verfügbar: {version}",
+    "notice.legacyArchived": "Alte Anki-Blöcke archiviert.",
+    "notice.legacyUnarchived": "Anki-Blöcke wiederhergestellt.",
 
     // Modals
     "modal.subdeck.title": "Subdeck wählen",

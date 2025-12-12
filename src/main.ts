@@ -13,6 +13,7 @@ import { LegacyFileDecorator } from './ui/LegacyFileDecorator';
 import { ensureBlockIdsForCallouts, removeAllBlockIds } from './utils';
 import { FeedbackView, FEEDBACK_VIEW_TYPE } from './ui/FeedbackView';
 import { InsertCalloutLinkModal } from './ui/InsertCalloutLinkModal';
+import { legacyAnkiStateField } from './ui/LegacyAnkiDecorator';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -76,7 +77,19 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			await processAnkiCardsBlock(this, source, el, ctx);
 		});
 
+        // Register Editor Extension (CM6)
+        this.registerEditorExtension(legacyAnkiStateField);
+
 		// Command Registrierung
+ 
+		this.addCommand({
+			id: 'force-reload-anki-data',
+			name: 'Generate Anki Cards from Note',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				triggerCardGeneration(this, editor);
+			}
+		});
+
 		this.addCommand({
 			id: 'generate-anki-cards',
 			name: 'Generate Anki Cards from Note',
