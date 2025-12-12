@@ -1,10 +1,10 @@
 {
-  "id": "t1il-anki-creator",
-  "name": "Anki Cards Generator",
-  "version": "1.7.0",
-  "minAppVersion": "1.4.0",
-  "description": "Creates anki cards using Google Gemini",
-  "author": "T1Il",
-  "authorUrl": "https://github.com/T1Il/",
-  "isDesktopOnly": false
+	"id": "t1il-anki-creator",
+	"name": "Anki Cards Generator",
+	"version": "1.7.1",
+	"minAppVersion": "1.4.0",
+	"description": "Creates anki cards using Google Gemini",
+	"author": "T1Il",
+	"authorUrl": "https://github.com/T1Il/",
+	"isDesktopOnly": false
 }
