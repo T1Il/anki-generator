@@ -112,10 +112,6 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
 
             const { hasUnsynced, filesWithCards, totalMdFiles, ignoredCount } = checkFolderRecursive(file);
 
-            if (file.name === 'Atemwegsmanagement') {
-                console.log(`[AnkiDebug] Atemwegsmanagement: MD=${totalMdFiles}, Ignored=${ignoredCount}, HasUnsynced=${hasUnsynced}`);
-            }
-
             if (hasUnsynced) {
                 return {
                      badge: this.plugin.settings.iconUnsynced,
