@@ -33,8 +33,10 @@ export interface AnkiGeneratorSettings {
 	iconSynced: string;
     iconUnsynced: string;
     iconEmpty: string;
+    iconIgnored: string;
     decorationTemplate: string;
 	maxRetries: number;
+    ignoredFiles: string[];
 }
 
 export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
@@ -143,8 +145,10 @@ Hier ist der Lerninhalt:
     iconSynced: '✅',
     iconUnsynced: '🔴',
     iconEmpty: '🗃️',
+    iconIgnored: '👁️‍🗨️',
     decorationTemplate: ' {count}',
-	maxRetries: 3
+	maxRetries: 3,
+    ignoredFiles: []
 };
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {
@@ -502,7 +506,7 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
     addDecorationSettings(containerEl: HTMLElement) {
         containerEl.createEl('h4', { text: 'Decoration Icons' });
 
-        const addIconSetting = (name: string, desc: string, key: 'iconSynced' | 'iconUnsynced' | 'iconEmpty') => {
+        const addIconSetting = (name: string, desc: string, key: 'iconSynced' | 'iconUnsynced' | 'iconEmpty' | 'iconIgnored') => {
             new Setting(containerEl)
                 .setName(name)
                 .setDesc(desc)
@@ -526,6 +530,7 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
         addIconSetting('Synced Icon', 'Icon shown when all cards are synced', 'iconSynced');
         addIconSetting('Unsynced Icon', 'Icon shown when there are unsynced cards', 'iconUnsynced');
         addIconSetting('Empty Icon', 'Icon shown when block exists but has no recognized cards', 'iconEmpty');
+        addIconSetting('Ignored Icon', 'Icon shown when file is explicitly ignored from folder stats', 'iconIgnored');
 
         containerEl.createEl('h4', { text: 'Label Format' });
         new Setting(containerEl)

@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf } from 'obsidian';
+import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf, TFile, TFolder } from 'obsidian';
 import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings } from './settings';
 import { processAnkiCardsBlock } from './ankiBlockProcessor';
 import { triggerCardGeneration } from './generationManager';
@@ -62,6 +62,40 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		// Check for updates
 		this.checkForUpdates();
+
+        // Register File Menu Event (Context Menu)
+        this.registerEvent(
+            this.app.workspace.on("file-menu", (menu, file) => {
+                if ((file instanceof TFile && file.extension === 'md') || file instanceof TFolder) {
+                    const isIgnored = this.settings.ignoredFiles.includes(file.path);
+                    
+                    menu.addItem((item) => {
+                        item
+                            .setTitle(isIgnored ? "Anki: Ignorieren aufheben" : "Anki: Datei/Ordner ignorieren")
+                            .setIcon(isIgnored ? "check-circle" : "eye-off")
+                            .onClick(async () => {
+                                if (isIgnored) {
+                                    this.settings.ignoredFiles = this.settings.ignoredFiles.filter(p => p !== file.path);
+                                    new Notice(`Anki: ${file.name} wird nicht mehr ignoriert.`);
+                                } else {
+                                    if (!this.settings.ignoredFiles.includes(file.path)) {
+                                        this.settings.ignoredFiles.push(file.path);
+                                    }
+                                    new Notice(`Anki: ${file.name} wird jetzt ignoriert.`);
+                                }
+                                await this.saveSettings();
+
+                                // Trigger Decoration Update
+                                if (this.ankiFileDecorationProvider) {
+                                    this.ankiFileDecorationProvider.triggerUpdate();
+                                } else if (this.legacyFileDecorator) {
+                                    this.legacyFileDecorator.updateAllDecorations();
+                                }
+                            });
+                    });
+                }
+            })
+        );
 
 		// Ribbon Icon - Generate Cards
 		this.addRibbonIcon('brain-circuit', t('anki.generateGemini'), (evt: MouseEvent) => {

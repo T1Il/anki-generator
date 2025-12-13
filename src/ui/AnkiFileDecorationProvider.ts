@@ -26,6 +26,15 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
     provideFileDecoration(file: TAbstractFile): FileDecoration | null {
         if (!this.plugin.settings.fileDecorations) return null;
 
+        // Check for Explicit Ignore (Files AND Folders)
+        if (this.plugin.settings.ignoredFiles && this.plugin.settings.ignoredFiles.includes(file.path)) {
+            return {
+                badge: this.plugin.settings.iconIgnored,
+                tooltip: "Wird für Anki-Sync ignoriert",
+                color: "#7f8c8d" // Grey
+            };
+        }
+
         // Handle Folders
         if (file instanceof TFolder) {
             // console.log("Checking folder:", file.path);
@@ -43,21 +52,36 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
                 hasUnsynced: boolean; 
                 filesWithCards: number; 
                 totalMdFiles: number; 
+                ignoredCount: number;
             } => {
                 let anyUnsynced = false;
                 let ankiFileCount = 0;
                 let mdFileCount = 0;
+                let ignoredCount = 0;
 
                 for (const child of folder.children) {
                     if (child instanceof TFolder) {
                         if (child.name === 'space' || child.name === '.space') continue; 
                         
+                        // Check if folder is ignored
+                        if (this.plugin.settings.ignoredFiles && this.plugin.settings.ignoredFiles.includes(child.path)) {
+                            ignoredCount++;
+                            continue;
+                        }
+
                         const result = checkFolderRecursive(child);
                         if (result.hasUnsynced) anyUnsynced = true;
                         ankiFileCount += result.filesWithCards;
                         mdFileCount += result.totalMdFiles;
+                        ignoredCount += result.ignoredCount;
 
                     } else if (child instanceof TFile && child.extension === 'md') {
+                        // Check for explicit ignore setting
+                        if (this.plugin.settings.ignoredFiles && this.plugin.settings.ignoredFiles.includes(child.path)) {
+                            ignoredCount++;
+                            continue;
+                        }
+
                         mdFileCount++;
                         
                         const stats = this.filesWithAnki.get(child.path);
@@ -82,11 +106,15 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
                      // console.log(`[AnkiDebug] Pathophysiologie: MD=${mdFileCount}, Anki=${ankiFileCount}`);
                 }
 
-                return { hasUnsynced: anyUnsynced, filesWithCards: ankiFileCount, totalMdFiles: mdFileCount };
+                return { hasUnsynced: anyUnsynced, filesWithCards: ankiFileCount, totalMdFiles: mdFileCount, ignoredCount };
             };
             
 
-            const { hasUnsynced, filesWithCards, totalMdFiles } = checkFolderRecursive(file);
+            const { hasUnsynced, filesWithCards, totalMdFiles, ignoredCount } = checkFolderRecursive(file);
+
+            if (file.name === 'Atemwegsmanagement') {
+                console.log(`[AnkiDebug] Atemwegsmanagement: MD=${totalMdFiles}, Ignored=${ignoredCount}, HasUnsynced=${hasUnsynced}`);
+            }
 
             if (hasUnsynced) {
                 return {
@@ -101,6 +129,13 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
                   return {
                     badge: this.plugin.settings.iconSynced,
                     tooltip: `Alles synchronisiert (${filesWithCards}/${totalMdFiles} relevante Dateien)`,
+                    color: "#50fa7b" // Green
+                 };
+            } else if (totalMdFiles === 0 && ignoredCount > 0) {
+                 // All files are ignored
+                  return {
+                    badge: this.plugin.settings.iconSynced,
+                    tooltip: `Bereit (Alle Dateien werden ignoriert)`,
                     color: "#50fa7b" // Green
                  };
             }

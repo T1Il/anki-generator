@@ -357,14 +357,25 @@ export class LegacyFileDecorator {
 
         // Determine if it is a folder
         const abstractFile = this.app.vault.getAbstractFileByPath(path);
+        
+        // CHECK FOR IGNORE FIRST
+        if (abstractFile instanceof TFile && abstractFile.extension === 'md') {
+             if (this.plugin.settings.ignoredFiles && this.plugin.settings.ignoredFiles.includes(path)) {
+                 data = { synced: -1, unsynced: -1 }; // Special marker for ignored
+             }
+        }
+
         if (abstractFile instanceof TFolder) {
             isFolder = true;
             // STRICT FOLDER CHECK LOGIC
             if (this.plugin.settings.folderDecorations) {
                 const folderResult = this.checkFolderRecursive(abstractFile);
-                if (folderResult.filesWithCards > 0 && folderResult.filesWithCards === folderResult.totalMdFiles) {
+                if (!folderResult.hasUnsynced && folderResult.totalMdFiles > 0 && folderResult.filesWithCards === folderResult.totalMdFiles) {
                      // All relevant files are synced
                      data = { synced: folderResult.filesWithCards, unsynced: 0 };
+                } else if (!folderResult.hasUnsynced && folderResult.totalMdFiles === 0 && folderResult.ignoredCount > 0) {
+                     // All files are ignored (or smart-ignored) -> Treat as synced (Green)
+                     data = { synced: 0, unsynced: 0 }; 
                 } else if (folderResult.hasUnsynced) {
                      // At least one unsynced
                      data = { synced: 0, unsynced: 1 }; // Fake unsynced count to trigger red
@@ -373,7 +384,7 @@ export class LegacyFileDecorator {
                      data = null;
                 }
             }
-        } else {
+        } else if (!data) { // Only check map if not already marked as ignored
             // File logic
             if (this.filesWithAnki.has(path)) {
                 data = this.filesWithAnki.get(path)!;
@@ -402,6 +413,11 @@ export class LegacyFileDecorator {
                  icon = this.plugin.settings.iconEmpty;
                  title = 'Anki-Block vorhanden (leer)';
                  color = '#f1c40f'; 
+             } else if (synced === -1 && unsynced === -1) {
+                 // Ignored Logic
+                 icon = this.plugin.settings.iconIgnored;
+                 title = 'Datei wird für Anki-Sync ignoriert';
+                 color = '#7f8c8d'; // Grey
              } else if (unsynced > 0) {
                  // Unsynced Logic (Red)
                  icon = this.plugin.settings.iconUnsynced;
@@ -416,7 +432,8 @@ export class LegacyFileDecorator {
 
              text = icon;
               
-             if (!isFolder && this.plugin.settings.decorationTemplate) {
+             // Only show count if NOT ignored (total >= 0) and not a folder (unless folders also need it, but generally files)
+             if (!isFolder && total >= 0 && this.plugin.settings.decorationTemplate) {
                   const label = this.plugin.settings.decorationTemplate
                      .replace('{count}', String(total))
                      .replace('{synced}', String(synced))
@@ -428,32 +445,59 @@ export class LegacyFileDecorator {
         }
     }
 
-    checkFolderRecursive(folder: TFolder): { hasUnsynced: boolean; filesWithCards: number; totalMdFiles: number; } {
+    checkFolderRecursive(folder: TFolder): { hasUnsynced: boolean; filesWithCards: number; totalMdFiles: number; ignoredCount: number } {
         let anyUnsynced = false;
         let ankiFileCount = 0;
         let mdFileCount = 0;
+        let ignoredCount = 0;
 
         for (const child of folder.children) {
             if (child instanceof TFolder) {
                 if (child.name === 'space' || child.name === '.space') continue; 
                 
+                // Check if folder is ignored
+                if (this.plugin.settings.ignoredFiles && this.plugin.settings.ignoredFiles.includes(child.path)) {
+                    ignoredCount++; // Count ignored folder as an ignored item
+                    continue;
+                }
+
                 const result = this.checkFolderRecursive(child);
                 if (result.hasUnsynced) anyUnsynced = true;
                 ankiFileCount += result.filesWithCards;
                 mdFileCount += result.totalMdFiles;
+                ignoredCount += result.ignoredCount;
+
             } else if (child instanceof TFile && child.extension === 'md') {
-                // Ignore Folder Notes (file with same name as folder)
-                if (child.name === folder.name + '.md') continue;
+                // Check for Explicit Ignore
+                if (this.plugin.settings.ignoredFiles && this.plugin.settings.ignoredFiles.includes(child.path)) {
+                    ignoredCount++;
+                    continue;
+                }
+
+                const hasCards = this.filesWithAnki.has(child.path);
+                
+                // Smart Ignore: Only ignore "Folder Name.md" if it has NO cards.
+                // If it has cards, we treat it as content that must be synced.
+                // Case-insensitive check to be robust.
+                const isFolderNote = child.name.toLowerCase() === (folder.name + '.md').toLowerCase();
+                
+                if (isFolderNote && !hasCards) {
+                    ignoredCount++;
+                    continue;
+                }
 
                 mdFileCount++;
-                const stats = this.filesWithAnki.get(child.path);
-                if (stats) {
-                     if (stats.unsynced > 0) anyUnsynced = true;
-                     if (stats.synced > 0 || stats.unsynced > 0) ankiFileCount++;
+                if (hasCards) {
+                     const stats = this.filesWithAnki.get(child.path);
+                     if (stats) {
+                         if (stats.unsynced > 0) anyUnsynced = true;
+                         // Count as "Anki File" if it has any Anki activity
+                         if (stats.synced > 0 || stats.unsynced > 0) ankiFileCount++;
+                     }
                 }
             }
         }
-        return { hasUnsynced: anyUnsynced, filesWithCards: ankiFileCount, totalMdFiles: mdFileCount };
+        return { hasUnsynced: anyUnsynced, filesWithCards: ankiFileCount, totalMdFiles: mdFileCount, ignoredCount };
     }
 
     renderDecoration(existingDecoration: HTMLElement | null | undefined, container: HTMLElement, text: string, color: string, title: string) {
