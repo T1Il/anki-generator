@@ -1,14 +1,18 @@
-import { MarkdownRenderer, ButtonComponent, TextAreaComponent, Notice, setIcon, MarkdownView, App } from 'obsidian';
+import { MarkdownRenderer, ButtonComponent, TextAreaComponent, Notice, setIcon, MarkdownView, App, TFile, Setting } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
-import { ChatMessage } from '../types';
+import { ChatMessage, CardPreviewState } from '../types';
 import { generateChatResponse, generateFeedbackOnly } from '../aiGenerator';
+import { parseCardsFromBlockSource, ANKI_BLOCK_REGEX } from '../anki/ankiParser';
+import { CardEditModal } from './CardEditModal';
+import { saveAnkiBlockChanges } from '../anki/syncManager';
 
 export async function renderFeedback(
     container: HTMLElement, 
     history: ChatMessage[], 
     plugin: AnkiGeneratorPlugin, 
     sourcePath: string | undefined, 
-    onOpenInAction?: () => void
+    onOpenInAction?: () => void,
+    state?: CardPreviewState
 ) {
 	const existingBox = container.querySelector('.anki-feedback-box');
 	if (existingBox) existingBox.remove();
@@ -394,4 +398,386 @@ export async function renderFeedback(
 			getFeedbackBtn.setButtonText("🔍 Feedback einholen");
 		}
 	});
+
+    // --- CARD PREVIEW SECTION ---
+    if (sourcePath && state) {
+        // Create a wrapper for the preview section to isolate re-renders if needed
+        const previewWrapper = container.createDiv({ cls: 'anki-preview-wrapper' });
+        await renderCardPreviewSection(previewWrapper, sourcePath, plugin, state);
+    }
+}
+
+async function renderCardPreviewSection(container: HTMLElement, sourcePath: string, plugin: AnkiGeneratorPlugin, state: CardPreviewState) {
+    const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+    if (!(file instanceof TFile)) return;
+
+    try {
+        const content = await plugin.app.vault.read(file);
+        
+        // Use imported regex (needs import) or just match locally for now to avoid circular deps if possible,
+        // but we should reuse parser.
+        
+        const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+        if (matches.length === 0) return;
+
+        const lastMatch = matches[matches.length - 1];
+        const blockContent = lastMatch[1];
+        const cards = parseCardsFromBlockSource(blockContent);
+
+        if (cards.length === 0) return;
+
+        container.empty();
+        const previewContainer = container.createDiv({ cls: 'anki-sidebar-preview' });
+        previewContainer.style.marginTop = '20px';
+        previewContainer.style.paddingTop = '10px';
+        previewContainer.style.borderTop = '1px solid var(--background-modifier-border)';
+
+        // --- STYLES (Scoped to sidebar preview) ---
+        // (Moved styles to CSS file ideally, but keeping inline for now as per request)
+        const styleEl = previewContainer.createEl('style');
+        styleEl.textContent = `
+            .anki-sidebar-controls {
+                margin-bottom: 10px;
+                background: var(--background-secondary);
+                padding: 8px;
+                border-radius: 5px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .anki-control-row {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            }
+            .anki-sidebar-card {
+                border: 1px solid var(--background-modifier-border);
+                border-radius: 8px;
+                margin-bottom: 12px; /* Increased margin */
+                background-color: var(--background-primary);
+                overflow: hidden;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Added shadow for separation */
+            }
+            .anki-sidebar-card-header {
+                padding: 10px 12px; /* Increased padding */
+                cursor: pointer;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background-color: var(--background-secondary);
+                transition: background-color 0.2s;
+            }
+            .anki-sidebar-card-header:hover {
+                background-color: var(--background-modifier-hover);
+            }
+            .anki-sidebar-card-body {
+                padding: 12px;
+                border-top: 1px solid var(--background-modifier-border);
+                background-color: var(--background-primary);
+            }
+            .anki-sidebar-q {
+                font-weight: 600;
+                color: var(--text-normal);
+                margin-bottom: 4px;
+                font-size: 0.95em;
+            }
+            .anki-sidebar-a {
+                color: var(--text-muted);
+                font-size: 0.95em;
+                margin-top: 8px;
+                padding-top: 8px;
+                border-top: 1px dashed var(--background-modifier-border);
+            }
+            .anki-sidebar-meta {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 0.8em;
+                flex-shrink: 0; /* Prevent checking/type from shrinking */
+            }
+            .anki-type-badge {
+                padding: 1px 5px;
+                border-radius: 3px;
+                font-weight: bold;
+                text-transform: uppercase;
+                font-size: 0.7em;
+            }
+            .anki-arrow {
+                transition: transform 0.2s;
+                opacity: 0.6;
+            }
+            .anki-collapsed .anki-arrow {
+                transform: rotate(-90deg);
+            }
+            .anki-card-actions {
+                display: flex;
+                gap: 5px;
+                margin-top: 8px;
+                justify-content: flex-end;
+            }
+            .anki-card-title-preview {
+                flex-grow: 1;
+                margin-left: 10px;
+                font-weight: 500;
+                font-size: 0.9em;
+                line-height: 1.3;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                color: var(--text-normal);
+            }
+            /* Highlight/Link stripping style if needed, but we rely on text stripping */
+        `;
+
+        // TITLE & COUNT
+        const headerRow = previewContainer.createDiv({ cls: 'anki-sidebar-header-row' });
+        headerRow.style.display = 'flex';
+        headerRow.style.justifyContent = 'space-between';
+        headerRow.style.alignItems = 'center';
+        
+        const h4 = headerRow.createEl('h4', { text: `📝 Fragen (${cards.length})` });
+        h4.style.margin = '0';
+        
+        // CONTROLS
+        const controlsDiv = previewContainer.createDiv({ cls: 'anki-sidebar-controls' });
+        
+        // Row 1: Search
+        const searchRow = controlsDiv.createDiv({ cls: 'anki-control-row' });
+        const searchEl = searchRow.createEl('input', { type: 'text', placeholder: '🔍 Suchen...' });
+        searchEl.value = state.searchQuery;
+        searchEl.style.width = '100%'; // Full width
+        searchEl.oninput = () => {
+             state.searchQuery = searchEl.value.toLowerCase();
+             // Re-render
+             renderCardPreviewSection(container, sourcePath, plugin, state);
+        };
+
+        // Row 2: Sort + Expand/Collapse
+        const actionRow = controlsDiv.createDiv({ cls: 'anki-control-row' });
+        actionRow.style.justifyContent = 'space-between'; // Spread them out
+
+        // Sort
+        const sortSelect = actionRow.createEl('select');
+        sortSelect.style.maxWidth = '120px'; // Slightly wider
+        const sortOpts = [
+            {val: 'default', text: 'Standard'}, // Renamed from Std.
+            {val: 'type', text: 'Nach Typ'},
+            {val: 'question', text: 'A-Z'}
+        ];
+        sortOpts.forEach(o => {
+            const opt = sortSelect.createEl('option', {text: o.text, value: o.val});
+            if (state.sortOrder === o.val) opt.selected = true;
+        });
+        sortSelect.onchange = () => {
+            state.sortOrder = sortSelect.value as any;
+             renderCardPreviewSection(container, sourcePath, plugin, state);
+        };
+
+        // Expand/Collapse
+        const toggleAllBtn = new ButtonComponent(actionRow);
+        toggleAllBtn.setButtonText(state.isAllExpanded ? "🔼 Alle einklappen" : "🔽 Alle ausklappen");
+        toggleAllBtn.buttonEl.style.flex = '1'; // Take remaining space or share?
+        toggleAllBtn.onClick(() => {
+            state.isAllExpanded = !state.isAllExpanded;
+            if (state.isAllExpanded) {
+                cards.forEach((_, i) => state.expandedIndices.add(i));
+            } else {
+                state.expandedIndices.clear();
+            }
+            renderCardPreviewSection(container, sourcePath, plugin, state);
+        });
+
+        const cardsDiv = previewContainer.createDiv({ cls: 'anki-sidebar-cards' });
+        cardsDiv.style.maxHeight = '500px';
+        cardsDiv.style.overflowY = 'auto';
+
+        // FILTER & SORT LOGIC
+        let displayCards = cards.map((c, i) => ({ card: c, originalIndex: i }));
+        
+        // Search Filter
+        if (state.searchQuery) {
+            const q = state.searchQuery;
+            displayCards = displayCards.filter(item => 
+                item.card.q.toLowerCase().includes(q) || item.card.a.toLowerCase().includes(q)
+            );
+        }
+
+        // Sort
+        if (state.sortOrder === 'question') {
+            displayCards.sort((a, b) => a.card.q.localeCompare(b.card.q));
+        } else if (state.sortOrder === 'type') {
+            displayCards.sort((a, b) => {
+                const tA = a.card.typeIn ? 'Type-In' : a.card.type;
+                const tB = b.card.typeIn ? 'Type-In' : b.card.type;
+                return tA.localeCompare(tB);
+            });
+        }
+
+        if (displayCards.length === 0) {
+            const msg = cardsDiv.createDiv({ text: "Keine Karten gefunden." });
+            msg.style.padding = "10px";
+            msg.style.color = "#888";
+        }
+
+        for (const item of displayCards) {
+            const { card, originalIndex } = item;
+            const isExpanded = state.expandedIndices.has(originalIndex);
+            
+            const cardEl = cardsDiv.createDiv({ cls: `anki-sidebar-card ${isExpanded ? '' : 'anki-collapsed'}` });
+
+            // HEADER
+            const header = cardEl.createDiv({ cls: 'anki-sidebar-card-header' });
+            
+            // Meta (Arrow + Type)
+            const metaDiv = header.createDiv({ cls: 'anki-sidebar-meta' });
+            const arrow = metaDiv.createSpan({ cls: 'anki-arrow', text: '🔽' }); 
+            if (!isExpanded) arrow.style.transform = 'rotate(-90deg)';
+             
+            // Type Badge Colors
+            let typeColor = '#3498db'; 
+            let typeBg = 'rgba(52, 152, 219, 0.15)';
+            let typeText = 'Basic';
+            if (card.type === 'Cloze') { 
+                typeColor = '#9b59b6'; typeBg = 'rgba(155, 89, 182, 0.15)'; typeText = 'Lücke';
+            } else if (card.typeIn) {
+                typeColor = '#d4af37'; typeBg = 'rgba(212, 175, 55, 0.15)'; typeText = 'Type';
+            }
+
+            const badge = metaDiv.createSpan({ cls: 'anki-type-badge', text: typeText });
+            badge.style.color = typeColor;
+            badge.style.backgroundColor = typeBg;
+
+            // Short Question Preview in Header
+            const titlePreview = header.createDiv({ cls: 'anki-card-title-preview' });
+            
+            // Link Stripping Logic:
+            // 1. Replace [[Target|Alias]] with Alias
+            // 2. Replace [[Target]] with Target
+            // 3. Replace [Text](Target) with Text
+            // 4. Remove Bold/Italic chars (*, _)
+            let rawQ = card.q;
+            
+            // [[Target|Alias]] -> Alias
+            rawQ = rawQ.replace(/\[\[[^\]|]+\|([^\]]+)\]\]/g, '$1');
+            // [[Target]] -> Target
+            rawQ = rawQ.replace(/\[\[([^\]]+)\]\]/g, '$1');
+            // [Text](Url) -> Text
+            rawQ = rawQ.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+            // Render Title with Markdown to support LaTeX
+            // We need to strip block-level styling from the rendered markdown
+            titlePreview.empty();
+            
+            // 1. Get first line of question
+            let previewText = card.q.split('\n')[0]; 
+
+            // 2. Strip standard Markdown links [text](url) -> text
+            previewText = previewText.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+
+            // 3. Strip Obsidian/Wiki links [[target|alias]] or [[target]] -> alias/target
+            // We do this so that LaTeX inside the alias is rendered as plain LaTeX, not inside an <a> tag
+            // which can break MathJax rendering in some contexts.
+            previewText = previewText.replace(/\[\[(?:[^|\]]+\|)?([^\]]+)\]\]/g, '$1');
+
+            // 4. Render (DO NOT TRUNCATE MANUALLY - Let CSS handle it)
+            await MarkdownRenderer.render(plugin.app, previewText, titlePreview, sourcePath, plugin);
+            
+            // Force inline styling for the rendered paragraph
+            const p = titlePreview.querySelector('p');
+            if (p) {
+                p.style.margin = '0';
+                p.style.display = 'inline-block';
+            }
+
+            // TOGGLE CLICK
+            header.onclick = (e) => {
+                // Ignore clicks on internal links within the header to prevent unwanted navigation/expansion conflict?
+                // Actually header toggle is fine, but if user clicks a link in header, maybe they want to navigate?
+                // For now, let's keep simple toggle.
+                
+                // Prevent toggle if clicking a link?
+                if ((e.target as HTMLElement).tagName === 'A' || (e.target as HTMLElement).hasClass('internal-link')) {
+                    return; 
+                }
+                
+                if (state.expandedIndices.has(originalIndex)) {
+            // ... (Rest of logic is same, implied by tool)
+                    state.expandedIndices.delete(originalIndex);
+                    arrow.style.transform = 'rotate(-90deg)';
+                    body.style.display = 'none';
+                    cardEl.addClass('anki-collapsed');
+                } else {
+                    state.expandedIndices.add(originalIndex);
+                    arrow.style.transform = 'rotate(0deg)';
+                    body.style.display = 'block';
+                    cardEl.removeClass('anki-collapsed');
+                }
+            };
+
+            // BODY
+            const body = cardEl.createDiv({ cls: 'anki-sidebar-card-body' });
+            if (!isExpanded) body.style.display = 'none';
+
+            // Full Q & A
+            const qDiv = body.createDiv({ cls: 'anki-sidebar-q' });
+             await MarkdownRenderer.render(plugin.app, card.q, qDiv, sourcePath, plugin);
+
+            const aDiv = body.createDiv({ cls: 'anki-sidebar-a' });
+            await MarkdownRenderer.render(plugin.app, card.a, aDiv, sourcePath, plugin);
+            
+            // ACTIONS
+            const actionsDiv = body.createDiv({ cls: 'anki-card-actions' });
+            
+            const editBtn = new ButtonComponent(actionsDiv);
+            editBtn.setIcon('pencil');
+            editBtn.setTooltip("Bearbeiten");
+            editBtn.onClick(async (e) => {
+                e.stopPropagation(); // Avoid Collapse? It's in body, so no collapse.
+                new CardEditModal(plugin.app, card, sourcePath, async (updatedCard) => {
+                     // Save Logic:
+                     // 1. Get current cards (re-parse to be safe or use local list?)
+                     // Better re-read file to avoid race conditions but for sidebar manual edit re-using list is OK if we update file immediately.
+                     // Helper: Replace card at originalIndex.
+                     const newCards = [...cards];
+                     newCards[originalIndex] = updatedCard;
+                     
+                     await saveAnkiBlockChanges(plugin, blockContent, newCards, [], undefined); // deckName undefined = keep exists
+                }).open();
+            });
+
+            const deleteBtn = new ButtonComponent(actionsDiv);
+            deleteBtn.setIcon('trash');
+            deleteBtn.setTooltip("Löschen");
+            deleteBtn.setClass('delete-btn'); // Style for red color?
+            deleteBtn.buttonEl.style.color = 'var(--text-error)';
+            deleteBtn.onClick(async (e) => {
+                e.stopPropagation();
+                if (confirm("Karte wirklich löschen?")) {
+                    const deletedId = card.id ? [card.id] : [];
+                    const newCards = [...cards];
+                    newCards.splice(originalIndex, 1);
+                    await saveAnkiBlockChanges(plugin, blockContent, newCards, deletedId, undefined);
+                }
+            });
+
+        } // End Card Loop
+
+        // --- NAVIGATION CLICK HANDLER ---
+        cardsDiv.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            const link = target.closest('.internal-link');
+            if (link) {
+                const href = (link as HTMLElement).dataset.href || (link as HTMLElement).getAttribute('href');
+                if (href) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log("AnkiSidebar: Navigating to", href);
+                    plugin.app.workspace.openLinkText(href, sourcePath, false);
+                }
+            }
+        });
+
+    } catch (e) {
+        console.error("Error rendering sidebar preview:", e);
+    }
 }

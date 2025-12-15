@@ -349,7 +349,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 						};
 						
 						// Open Modal
-						new CardPreviewModal(plugin, newCards, currentDeckName, onSave, instruction || undefined).open();
+						new CardPreviewModal(plugin, newCards, currentDeckName, ctx.sourcePath, onSave, instruction || undefined).open();
 					} catch (e) {
 						console.error("Auto-open preview failed", e);
 					}
@@ -374,7 +374,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			await saveAnkiBlockChanges(plugin, source, updatedCards, deletedCardIds, newDeckName);
 		};
 		// FIX: Hier übergeben wir 'plugin' statt 'plugin.app'
-		new CardPreviewModal(plugin, cardsForModal, currentDeckName, onSave, instruction || undefined).open();
+		new CardPreviewModal(plugin, cardsForModal, currentDeckName, ctx.sourcePath, onSave, instruction || undefined).open();
 	};
 
 	const syncButton = actionContainer.createEl('button', { text: '🔄 Sync mit Anki' });

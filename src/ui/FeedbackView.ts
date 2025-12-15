@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import AnkiGeneratorPlugin from "../main";
 import { renderFeedback } from "./FeedbackRenderer";
-import { ChatMessage } from "../types";
+import { ChatMessage, CardPreviewState } from "../types";
 
 export const FEEDBACK_VIEW_TYPE = "anki-generator-feedback-view";
 
@@ -9,11 +9,19 @@ export class FeedbackView extends ItemView {
     plugin: AnkiGeneratorPlugin;
     sourcePath: string | undefined;
     history: ChatMessage[];
+    cardPreviewState: CardPreviewState;
 
     constructor(leaf: WorkspaceLeaf, plugin: AnkiGeneratorPlugin) {
         super(leaf);
         this.plugin = plugin;
         this.history = [];
+        this.cardPreviewState = {
+            searchQuery: '',
+            sortOrder: 'default',
+            filter: 'all',
+            expandedIndices: new Set(),
+            isAllExpanded: false
+        };
     }
 
     getViewType() {
@@ -38,6 +46,15 @@ export class FeedbackView extends ItemView {
                     this.render();
                 }
             }) as any)
+        );
+
+        // Listen for file changes to update the card preview
+        this.registerEvent(
+            this.plugin.app.vault.on('modify', (file) => {
+                if (this.sourcePath && file.path === this.sourcePath) {
+                    this.render();
+                }
+            })
         );
     }
 
@@ -82,6 +99,6 @@ export class FeedbackView extends ItemView {
     render() {
         const container = this.contentEl;
         container.empty();
-        renderFeedback(container, this.history, this.plugin, this.sourcePath);
+        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState);
     }
 }
