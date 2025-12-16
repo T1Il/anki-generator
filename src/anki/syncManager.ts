@@ -51,6 +51,20 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
 
         console.log(`[SyncManager] Starting sync for ${cards.length} cards.`);
 
+        // Batch fetch Note Info to handle mixed Field Names (e.g. Front vs Vorderseite)
+        const idsToUpdate = cards.filter(c => c.id).map(c => c.id!);
+        const noteInfoMap = new Map<number, any>();
+        if (idsToUpdate.length > 0) {
+            try {
+                const infos = await import('./AnkiConnect').then(m => m.getNotesInfo(idsToUpdate));
+                infos.forEach((info: any) => {
+                    noteInfoMap.set(info.noteId, info);
+                });
+            } catch (e) {
+                console.error("Failed to batch fetch note info:", e);
+            }
+        }
+
         for (const card of cards) {
             console.log(`[SyncManager] Processing card: "${card.q.substring(0, 50)}..." (ID: ${card.id})`);
             if (!card.q || card.q.trim().length === 0) {
@@ -148,17 +162,40 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
 
             if (ankiNoteId) {
                 try {
-                    notice.setMessage(`Aktualisiere Karte ${ankiNoteId}...`);
-                    if (card.type === 'Basic') {
-                        const frontField = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
-                        const backField = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
-                        await updateAnkiNoteFields(ankiNoteId, frontField, backField, ankiFieldQ, ankiFieldA);
-                    } else if (card.type === 'Cloze') {
-                        await updateAnkiClozeNoteFields(ankiNoteId, plugin.settings.clozeText, ankiClozeTextField);
+                notice.setMessage(`Aktualisiere Karte ${ankiNoteId}...`);
+                
+                // --- Dynamic Field Detection ---
+                const noteInfo = noteInfoMap.get(ankiNoteId);
+                const availableFields = noteInfo?.fields ? Object.keys(noteInfo.fields) : [];
+                
+                const resolveField = (confField: string, alternates: string[]) => {
+                    if (availableFields.includes(confField)) return confField;
+                    for (const alt of alternates) {
+                        if (availableFields.includes(alt)) return alt;
                     }
+                    return confField; // Fallback to config
+                };
+
+                if (card.type === 'Basic') {
+                    const confFront = card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                    const confBack = card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+
+                    const frontField = resolveField(confFront, ['Vorderseite', 'Question', 'Frage', 'Front']);
+                    const backField = resolveField(confBack, ['Rückseite', 'Answer', 'Antwort', 'Back']);
+
+                    await updateAnkiNoteFields(ankiNoteId, frontField, backField, ankiFieldQ, ankiFieldA);
+                    
+                } else if (card.type === 'Cloze') {
+                    const confText = plugin.settings.clozeText;
+                    const textField = resolveField(confText, ['Text', 'Inhalt', 'Cloze']);
+                    await updateAnkiClozeNoteFields(ankiNoteId, textField, ankiClozeTextField);
+                }
                 } catch (e) {
+                    console.error(`[SyncManager] Update FAILED for Note ${ankiNoteId}:`, e);
                     if (e.message?.includes("Note was not found")) {
                         notice.setMessage(`Karte ${ankiNoteId} nicht gefunden. Erstelle neu.`);
+                        // Remove from map so we treat as new
+                        noteInfoMap.delete(ankiNoteId);
                         ankiNoteId = null;
                     } else { throw e; }
                 }

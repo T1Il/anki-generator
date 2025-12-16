@@ -26,4 +26,5 @@ export interface CardPreviewState {
     filter: 'all' | 'synced' | 'unsynced';
     expandedIndices: Set<number>;
     isAllExpanded: boolean;
+    isChatOpen: boolean;
 }

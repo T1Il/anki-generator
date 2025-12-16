@@ -1,7 +1,8 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, MarkdownView } from "obsidian";
 import AnkiGeneratorPlugin from "../main";
 import { renderFeedback } from "./FeedbackRenderer";
-import { ChatMessage, CardPreviewState } from "../types";
+import { ChatMessage, CardPreviewState, Card } from "../types";
+import { getAllCardsForFile } from "../ankiBlockProcessor";
 
 export const FEEDBACK_VIEW_TYPE = "anki-generator-feedback-view";
 
@@ -10,6 +11,8 @@ export class FeedbackView extends ItemView {
     sourcePath: string | undefined;
     history: ChatMessage[];
     cardPreviewState: CardPreviewState;
+    cards: Card[] = [];
+    deckName: string | null = null;
 
     constructor(leaf: WorkspaceLeaf, plugin: AnkiGeneratorPlugin) {
         super(leaf);
@@ -20,7 +23,8 @@ export class FeedbackView extends ItemView {
             sortOrder: 'default',
             filter: 'all',
             expandedIndices: new Set(),
-            isAllExpanded: false
+            isAllExpanded: false,
+            isChatOpen: true
         };
     }
 
@@ -48,18 +52,42 @@ export class FeedbackView extends ItemView {
             }) as any)
         );
 
+        // Listen for active leaf changes
+        this.registerEvent(
+            this.plugin.app.workspace.on('active-leaf-change', async (leaf) => {
+                if (leaf && leaf.view instanceof MarkdownView) {
+                    const file = leaf.view.file;
+                    if (file) {
+                        this.sourcePath = file.path;
+                        // Reload history from cache if available
+                        const cached = this.plugin.feedbackCache.get(this.sourcePath);
+                        this.history = cached || [];
+                        await this.updateCards(file);
+                    }
+                }
+            })
+        );
+
         // Listen for file changes to update the card preview
         this.registerEvent(
-            this.plugin.app.vault.on('modify', (file) => {
-                if (this.sourcePath && file.path === this.sourcePath) {
-                    this.render();
+            this.plugin.app.vault.on('modify', async (file) => {
+                if (this.sourcePath && file.path === this.sourcePath && file instanceof TFile) {
+                    await this.updateCards(file);
                 }
             })
         );
     }
 
     async onOpen() {
-        this.render();
+        const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+        if (view && view.file) {
+             this.sourcePath = view.file.path;
+             const cached = this.plugin.feedbackCache.get(this.sourcePath);
+             this.history = cached || [];
+             await this.updateCards(view.file);
+        } else {
+             this.render();
+        }
     }
 
     async onClose() {
@@ -99,6 +127,13 @@ export class FeedbackView extends ItemView {
     render() {
         const container = this.contentEl;
         container.empty();
-        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState);
+        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState, this.cards, this.deckName);
+    }
+    
+    async updateCards(file: TFile) {
+        const { cards, deckName } = await getAllCardsForFile(this.plugin.app, file);
+        this.cards = cards;
+        this.deckName = deckName;
+        this.render();
     }
 }

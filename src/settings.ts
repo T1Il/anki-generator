@@ -58,6 +58,11 @@ FORMATIERUNG - STRIKT EINHALTEN:
 2. Trennung durch Leerzeile.
 3. NIEMALS Lückentext-Syntax in 'A:' verwenden.
 4. NIEMALS Listen in mehrere 'Q:' Zeilen aufsplitten.
+5. **KONTEXT PFLICHT**: Jede Frage (Q:) muss so formuliert sein, dass sie auch OHNE den Kontext der Notiz verständlich ist. 
+   - Nenne IMMER das Thema/Titel der Notiz in der Frage.
+   - ⛔️ Falsch: "Wie lautet die Dosierung?"
+   - ✅ Richtig: "Wie lautet die Dosierung von [Titel]?" (oder dynamisch eingebaut).
+
 
 ⛔️ FALSCH (Antwort wird zerrissen):
 Q: Welche Medikamente?

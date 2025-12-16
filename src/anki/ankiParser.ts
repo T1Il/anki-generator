@@ -2,7 +2,7 @@ import { Editor } from 'obsidian';
 import { Card } from '../types';
 import { normalizeNewlines } from '../utils';
 
-export const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+export const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)^```$/gm;
 
 export interface AnkiParsedInfo {
 	subdeck: string;

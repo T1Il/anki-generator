@@ -12,7 +12,7 @@ import { ImageInput } from './types';
 import { arrayBufferToBase64, getMimeType, ensureBlockIdsForCallouts } from './utils';
 import { t } from './lang/helpers';
 
-const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)^```$/gm;
 
 export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor: Editor) {
 	const initialAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
