@@ -19,3 +19,12 @@ export interface ImageInput {
 	mimeType: string;
 	filename: string;
 }
+
+export interface CardPreviewState {
+    searchQuery: string;
+    sortOrder: 'default' | 'type' | 'question';
+    filter: 'all' | 'synced' | 'unsynced';
+    expandedIndices: Set<number>;
+    isAllExpanded: boolean;
+    isChatOpen: boolean;
+}

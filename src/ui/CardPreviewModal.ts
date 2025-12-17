@@ -12,13 +12,15 @@ export class CardPreviewModal extends Modal {
 	deletedCardIds: number[] = [];
 	currentSort: string = 'default';
 	currentFilter: 'all' | 'synced' | 'unsynced' = 'all';
-	searchQuery: string = ''; // NEW property
+	searchQuery: string = ''; 
+    sourcePath: string;
 
-	constructor(plugin: AnkiGeneratorPlugin, cards: Card[], deckName: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
+	constructor(plugin: AnkiGeneratorPlugin, cards: Card[], deckName: string, sourcePath: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.cards = [...cards];
 		this.deckName = deckName || "";
+        this.sourcePath = sourcePath;
 		this.instruction = instruction;
 		this.onSave = onSave;
 		this.modalEl.addClass('anki-preview-modal-wide');
@@ -65,11 +67,13 @@ export class CardPreviewModal extends Modal {
 		buttonContainer.style.marginTop = '20px';
 
 		buttonContainer.createEl('button', { text: '➕ Neue Karte hinzufügen' }).addEventListener('click', () => {
-			new CardEditModal(this.app, {}, (newCard) => {
+			new CardEditModal(this.plugin.app, {}, this.sourcePath, (newCard) => {
 				this.cards.push(newCard);
 				this.render();
 			}).open();
 		});
+
+
 
 		// --- Delete All Button ---
 		const deleteAllBtn = buttonContainer.createEl('button', { text: '🗑️ Alle löschen', cls: 'anki-delete-button' });
@@ -405,7 +409,7 @@ export class CardPreviewModal extends Modal {
 	}
 
 	openEditModal(card: Card, index: number) {
-		new CardEditModal(this.app, card, (updatedCard) => {
+		new CardEditModal(this.plugin.app, card, this.sourcePath, (updatedCard) => {
 			this.cards[index] = updatedCard;
 			this.render();
 		}).open();

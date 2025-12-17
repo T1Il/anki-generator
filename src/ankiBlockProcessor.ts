@@ -1,4 +1,4 @@
-import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp, Setting, TextComponent, setIcon } from 'obsidian';
+import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp, Setting, TextComponent, setIcon, Editor } from 'obsidian';
 import { renderFeedback } from './ui/FeedbackRenderer';
 import AnkiGeneratorPlugin from './main';
 import { Card, ChatMessage } from './types';
@@ -8,8 +8,12 @@ import { parseCardsFromBlockSource } from './anki/ankiParser';
 import { runGenerationProcess, cleanAiGeneratedText, extractImagesAndPrepareContent } from './generationManager';
 import { syncAnkiBlock, saveAnkiBlockChanges } from './anki/syncManager';
 import { generateFeedbackOnly, generateChatResponse, constructPrompt } from './aiGenerator';
+
 import { t } from './lang/helpers';
 import { ManualGenerationModal } from './ui/ManualGenerationModal';
+import { RevisionInputModal } from './ui/RevisionInputModal';
+
+import { DeckSelectionModal } from './ui/DeckSelectionModal';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
 
@@ -349,7 +353,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 						};
 						
 						// Open Modal
-						new CardPreviewModal(plugin, newCards, currentDeckName, onSave, instruction || undefined).open();
+						new CardPreviewModal(plugin, newCards, currentDeckName, ctx.sourcePath, onSave, instruction || undefined).open();
 					} catch (e) {
 						console.error("Auto-open preview failed", e);
 					}
@@ -374,7 +378,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			await saveAnkiBlockChanges(plugin, source, updatedCards, deletedCardIds, newDeckName);
 		};
 		// FIX: Hier übergeben wir 'plugin' statt 'plugin.app'
-		new CardPreviewModal(plugin, cardsForModal, currentDeckName, onSave, instruction || undefined).open();
+		new CardPreviewModal(plugin, cardsForModal, currentDeckName, ctx.sourcePath, onSave, instruction || undefined).open();
 	};
 
 	const syncButton = actionContainer.createEl('button', { text: '🔄 Sync mit Anki' });
@@ -520,207 +524,93 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 
 
-class RevisionInputModal extends Modal {
-	onSubmit: (result: string) => void;
-	instruction: string;
-	initialValue: string;
 
-	constructor(app: ObsidianApp, onSubmit: (result: string) => void, initialValue: string = "") {
-		super(app);
-		this.onSubmit = onSubmit;
-		this.instruction = initialValue;
-		this.initialValue = initialValue;
-	}
 
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.createEl("h2", { text: this.initialValue ? "Anweisung bearbeiten" : "Karten überarbeiten" });
+export async function getAllCardsForFile(app: ObsidianApp, file: TFile): Promise<{ cards: Card[], deckName: string | null }> {
+    try {
+        const content = await app.vault.read(file);
+        const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+        const matches = [...content.matchAll(blockRegex)];
+        
+        let allCards: Card[] = [];
+        let firstDeckName: string | null = null;
 
-		new TextAreaComponent(contentEl)
-			.setPlaceholder("Anweisung...")
-			.setValue(this.initialValue)
-			.onChange((value) => {
-				this.instruction = value;
-			})
-			.inputEl.style.width = '100%';
-
-		const btnContainer = contentEl.createDiv();
-		btnContainer.style.marginTop = '10px';
-		btnContainer.style.display = 'flex';
-		btnContainer.style.justifyContent = 'flex-end';
-
-		new ButtonComponent(btnContainer)
-			.setButtonText(this.initialValue ? "Speichern" : "Überarbeiten")
-			.setCta()
-			.onClick(() => {
-				this.close();
-				this.onSubmit(this.instruction);
-			});
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
+        for (const match of matches) {
+            const blockContent = match[1];
+             // Extract deck name from first block if not yet found
+             if (!firstDeckName) {
+                const lines = blockContent.split('\n');
+                const deckLine = lines.find(l => l.trim().startsWith('TARGET DECK:'));
+                if (deckLine) firstDeckName = deckLine.replace('TARGET DECK:', '').trim();
+            }
+            const cards = parseCardsFromBlockSource(blockContent);
+            allCards = allCards.concat(cards);
+        }
+        return { cards: allCards, deckName: firstDeckName };
+    } catch (e) {
+        console.error("Error extracting cards from file:", e);
+        return { cards: [], deckName: null };
+    }
 }
 
-class DeckSelectionModal extends Modal {
-	onSubmit: (result: string) => void;
-	deckName: string;
-	deckNames: string[];
-	mainDeck: string;
-	constructor(app: ObsidianApp, currentDeck: string, deckNames: string[], onSubmit: (result: string) => void) {
-		super(app);
-		this.onSubmit = onSubmit;
-		this.deckName = currentDeck;
-		this.deckNames = deckNames;
-		// Extract mainDeck from currentDeck or use first part of any deck
-		this.mainDeck = currentDeck.split('::')[0] || 'Default';
-	}
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-		contentEl.createEl("h2", { text: "Deck ändern" });
-		contentEl.createEl("p", { text: "Wähle ein existierendes Deck oder gib einen neuen Namen ein." });
-		const container = contentEl.createDiv();
-		container.style.display = 'flex';
-		container.style.flexDirection = 'column';
-		container.style.gap = '10px';
-		// Preview Area
-		const previewEl = container.createDiv({ cls: 'anki-deck-preview' });
-		previewEl.style.padding = '10px';
-		previewEl.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
-		previewEl.style.borderRadius = '5px';
-		previewEl.style.fontFamily = 'monospace';
-		previewEl.style.marginBottom = '10px';
-		this.updatePreview(previewEl, this.deckName);
-		// Input field using Setting
-		const deckSetting = new Setting(container)
-			.setName("Deck Name")
-			.setDesc("Gib den Namen des Decks ein oder wähle aus der Liste.");
-		let deckInput: TextComponent;
-		deckSetting.addText((text) => {
-			deckInput = text;
-			text.setValue(this.deckName)
-				.setPlaceholder("Deck Name")
-				.onChange((value) => {
-					this.deckName = value;
-					this.updatePreview(previewEl, value);
-					this.renderSuggestions(suggestionsEl, deckInput, previewEl);
-				});
-			text.inputEl.style.width = '100%';
-		});
-		// Suggestions List
-		const suggestionsEl = container.createDiv({ cls: 'anki-deck-suggestions' });
-		suggestionsEl.style.maxHeight = '400px';
-		suggestionsEl.style.overflowY = 'auto';
-		suggestionsEl.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-		suggestionsEl.style.borderRadius = '5px';
-		suggestionsEl.style.padding = '5px';
-		suggestionsEl.style.marginTop = '-10px';
-		suggestionsEl.style.marginBottom = '10px';
-		suggestionsEl.style.display = 'block'; // Always visible
-		this.renderSuggestions(suggestionsEl, deckInput!, previewEl);
-		// Focus input
-		setTimeout(() => deckInput.inputEl.focus(), 50);
-		const btnContainer = contentEl.createDiv();
-		btnContainer.style.marginTop = '10px';
-		btnContainer.style.display = 'flex';
-		btnContainer.style.justifyContent = 'flex-end';
-		new ButtonComponent(btnContainer)
-			.setButtonText("Ändern & Verschieben")
-			.setCta()
-			.onClick(() => {
-				this.close();
-				this.onSubmit(this.deckName);
-			});
-	}
-	updatePreview(el: HTMLElement, name: string) {
-		el.empty();
-		if (!name) {
-			el.setText("Vorschau: (Kein Name)");
-			return;
-		}
-		const parts = name.split("::");
-		const hierarchy = parts.join(" ➤ ");
-		el.setText("Vorschau: " + hierarchy);
-	}
-	renderSuggestions(container: HTMLElement, input: TextComponent, previewEl: HTMLElement) {
-		container.empty();
-		container.style.display = 'block'; // Always show
-		// Build a tree structure from filtered deck names
-		interface TreeNode {
-			name: string;
-			fullPath: string;
-			children: Map<string, TreeNode>;
-			level: number;
-		}
-		const root: TreeNode = { name: '', fullPath: '', children: new Map(), level: -1 };
-		// Parse all decks into tree - ONLY decks within mainDeck
-		this.deckNames.forEach(deckPath => {
-			// Skip if not a subdeck of mainDeck
-			if (!deckPath.startsWith(this.mainDeck + "::")) return;
-			// Extract subdeck part (remove mainDeck prefix)
-			const relevantPath = deckPath.substring(this.mainDeck.length + 2);
-			const parts = relevantPath.split('::');
-			let currentNode = root;
-			parts.forEach((part, index) => {
-				if (!currentNode.children.has(part)) {
-					const pathSoFar = parts.slice(0, index + 1).join('::');
-					currentNode.children.set(part, {
-						name: part,
-						fullPath: pathSoFar,
-						children: new Map(),
-						level: index
-					});
-				}
-				currentNode = currentNode.children.get(part)!;
-			});
-		});
-		// Render tree recursively
-		const renderNode = (node: TreeNode, parentEl: HTMLElement) => {
-			node.children.forEach(child => {
-				const item = parentEl.createDiv({ cls: 'anki-deck-suggestion-item' });
-				item.style.padding = '5px';
-				item.style.paddingLeft = `${child.level * 20 + 5}px`;
-				item.style.cursor = 'pointer';
-				item.style.borderRadius = '3px';
-				item.style.transition = 'background-color 0.2s';
-				const emoji = child.level === 0 ? '🗂️' : '📂';
-				item.setText(`${emoji} ${child.name}`);
-				item.style.fontSize = '0.9em';
-				// Check if this deck is in the path of the input
-				// Normalize both to compare relative paths
-				const normalizedInput = this.deckName.replace(this.mainDeck + '::', '').toLowerCase();
-				const isMatch = child.fullPath.toLowerCase() === normalizedInput;
-				const isInPath = normalizedInput.startsWith(child.fullPath.toLowerCase() + '::') || isMatch;
-				if (isInPath) {
-					item.style.backgroundColor = isMatch ? 'rgba(74, 144, 226, 0.4)' : 'rgba(74, 144, 226, 0.2)';
-					item.style.fontWeight = isMatch ? 'bold' : '600';
-				}
-				item.onmouseover = () => {
-					if (!isInPath) {
-						item.style.backgroundColor = 'rgba(74, 144, 226, 0.15)';
-					}
-				};
-				item.onmouseout = () => {
-					if (!isInPath) {
-						item.style.backgroundColor = 'transparent';
-					} else {
-						item.style.backgroundColor = isMatch ? 'rgba(74, 144, 226, 0.4)' : 'rgba(74, 144, 226, 0.2)';
-					}
-				};
-				item.onclick = () => {
-					// Set full path including mainDeck
-					this.deckName = this.mainDeck + '::' + child.fullPath;
-					input.setValue(this.deckName);
-					this.updatePreview(previewEl, this.deckName);
-					this.renderSuggestions(container, input, previewEl); // Re-render to highlight
-				};
-				// Recursively render children
-				renderNode(child, parentEl);
-			});
-		};
-		renderNode(root, container);
-	}
+// function to start revision
+export async function startRevisionProcess(plugin: AnkiGeneratorPlugin, editor: Editor, deckName: string | null, sourcePath: string | undefined, onFeedback: (history: ChatMessage[]) => void) {
+    new RevisionInputModal(plugin.app, async (instruction) => {
+        let subdeck = "";
+        if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
+            subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
+        }
+
+        const provider = plugin.settings.geminiApiKey ? 'gemini' :
+            (plugin.settings.openAiApiKey ? 'openai' :
+                (plugin.settings.ollamaEnabled ? 'ollama' : null));
+
+        if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
+
+        // Construct a revision-specific instruction
+        const revisionInstruction = instruction; // Instruction from modal
+
+        const feedback = await runGenerationProcess(plugin, editor, provider, subdeck, revisionInstruction, true); // isRevision = true
+        if (feedback) {
+            const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
+            if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
+            onFeedback(history);
+        }
+    }).open();
 }
+
+// Fügt den generierten Text korrekt in den Block ein
+function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionPoint: CodeMirror.Position, generatedText: string) {
+    editor.replaceRange(generatedText, insertionPoint);
+}
+
+export async function updateFirstBlockDeck(app: ObsidianApp, file: TFile, newDeckName: string) {
+    const content = await app.vault.read(file);
+    const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+    const match = content.match(blockRegex);
+
+    if (match) {
+        const fullBlock = match[0];
+        let blockContent = match[1];
+        
+        // Check if TARGET DECK line exists
+        if (blockContent.includes('TARGET DECK:')) {
+            blockContent = blockContent.replace(/TARGET DECK: .*$/m, `TARGET DECK: ${newDeckName}`);
+        } else {
+            // Insert at top
+            blockContent = `TARGET DECK: ${newDeckName}\n` + blockContent;
+        }
+
+        // Reconstruct Block
+        const newBlock = `\`\`\`anki-cards\n${blockContent}\n\`\`\``;
+        
+        // Replace in file
+        const updatedContent = content.replace(fullBlock, newBlock);
+        await app.vault.modify(file, updatedContent);
+        new Notice(`Deck geändert zu: ${newDeckName}`);
+    } else {
+        new Notice("Konnte keinen Anki-Block finden.");
+    }
+}
+
+

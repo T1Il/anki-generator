@@ -58,6 +58,11 @@ FORMATIERUNG - STRIKT EINHALTEN:
 2. Trennung durch Leerzeile.
 3. NIEMALS Lückentext-Syntax in 'A:' verwenden.
 4. NIEMALS Listen in mehrere 'Q:' Zeilen aufsplitten.
+5. **KONTEXT PFLICHT**: Jede Frage (Q:) muss so formuliert sein, dass sie auch OHNE den Kontext der Notiz verständlich ist. 
+   - Nenne IMMER das Thema/Titel der Notiz in der Frage.
+   - ⛔️ Falsch: "Wie lautet die Dosierung?"
+   - ✅ Richtig: "Wie lautet die Dosierung von [Titel]?" (oder dynamisch eingebaut).
+
 
 ⛔️ FALSCH (Antwort wird zerrissen):
 Q: Welche Medikamente?
@@ -95,19 +100,19 @@ REGELN ZUR KARTENERSTELLUNG:
 4. **Bilder**:
    - Kopiere Bild-Links (![[bild.png]]) exakt in das 'A:' Feld.
 
-5. **Verlinkungen**:
-   - ✅ **PLATZIERUNG**: Links MÜSSEN DIREKT hinter dem relevanten Fakt oder Begriff stehen (inline).
-   - ⛔️ **STRENG VERBOTEN**: Links NIEMALS gesammelt am Ende der Karte anhängen.
-     - ⛔️ FALSCH: "A: Körpereigenes Abwehrsystem. [[#^id|Link]]"
-     - ✅ RICHTIG: "A: Körpereigenes [Abwehrsystem](...) bestehend aus..."
-   - ✅ **Deep-Links**: Nutze Block-IDs für Callouts.
-   - VERLINKE so viele definierte Begriffe wie möglich, wenn sie im Text vorkommen.
-   - SUCHE das Stichwort in der Frage (Q) oder Antwort (A) und verlinke es dort.
-     - ⛔️ FALSCH: "... T-Helferzellen. [[#^123456|T-Helferzellen]]" (Redundanz am Ende)
-     - ⛔️ FALSCH: "... [T-Helferzellen](...^123456)." (Halluzination)
-     - ⛔️ FALSCH: "... [T-Helferzellen](^123456)." (Falsches Format)
-     - ✅ RICHTIG: "... [[#^123456|T-Helferzellen]]." (Inline Wikilink)
-   - Bei Callouts/Definitionen: Suche nach Block-IDs (z.B. \`^e0faa3\`) am Ende des Blocks.
+5. **Verlinkungen (ESSENTIELL)**:
+   - Deine Aufgabe ist es, Schlüsselbegriffe im Text mit vorhandenen Block-IDs zu verknüpfen.
+   - **VORGEHEN**:
+     1. Finde einen Begriff in der Frage (Q) oder Antwort (A), für den eine Block-ID (z.B. \`^12345\`) existiert.
+     2. **ERSETZE** diesen Begriff im Text durch den Wikilink: \`[[#^id|Begriff]]\`.
+     3. Der Link muss **INLINE** sein, also direkt im Satzfluss stehen.
+   - **REGELN**:
+     - ⛔️ **NIEMALS** Links isoliert ans Ende der Karte hängen.
+     - ⛔️ **NIEMALS** die Block-ID ohne Alias verwenden (\`[[#^id]]\` ist FALSCH).
+   - **BEISPIELE**:
+     - *Text*: "Der Thalamus ist wichtig." + *ID*: \`^thal1\`
+     - ⛔️ Falsch: "Der Thalamus ist wichtig. [[#^thal1]]"
+     - ✅ Richtig: "Der [[#^thal1|Thalamus]] ist wichtig."
    - Falls keine Überschrift/Block-ID passt, verlinke auf die Notiz: \`[Schlagwort]({{noteURI}})\`.
 
 Hier ist der Lerninhalt:
