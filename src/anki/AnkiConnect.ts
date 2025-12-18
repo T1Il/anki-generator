@@ -36,7 +36,7 @@ export async function getNotesInfo(noteIds: number[]): Promise<any[]> {
 
 export async function findAnkiNoteId(front: string, frontFieldName: string, deckName?: string): Promise<number | null> {
     // 1. First attempt: Strict exact match (fastest)
-    const escapedFront = front.replace(/"/g, '\\"');
+    const escapedFront = front.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const exactQuery = `${frontFieldName}:"${escapedFront}"`;
     let noteIds = await ankiConnectRequest('findNotes', { query: exactQuery });
     
@@ -106,7 +106,7 @@ export async function findAnkiNoteId(front: string, frontFieldName: string, deck
 
 export async function findAnkiClozeNoteId(questionText: string, textFieldName: string, deckName?: string): Promise<number | null> {
     // 1. First attempt: Standard strict search
-    const searchQuery = questionText.replace(/____/g, '*').replace(/"/g, '\\"');
+    const searchQuery = questionText.replace(/\\/g, '\\\\').replace(/____/g, '*').replace(/"/g, '\\"');
     const query = `${textFieldName}:"${searchQuery}"`;
     let noteIds = await ankiConnectRequest('findNotes', { query });
     
