@@ -11,6 +11,9 @@ import { generateCardsWithAI } from './aiGenerator';
 import { ImageInput } from './types';
 import { arrayBufferToBase64, getMimeType, ensureBlockIdsForCallouts } from './utils';
 import { t } from './lang/helpers';
+import { RevisionDiffModal } from './ui/RevisionDiffModal';
+import { parseCardsFromBlockSource, formatCardsToString, findSpecificAnkiBlock } from './anki/ankiParser';
+import { Card } from './types';
 
 const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)^```$/gm;
 
@@ -149,7 +152,7 @@ export async function runGenerationProcess(
 			: (currentAnkiInfo?.instruction || "");
 
 		// --- ÜBERGABE der images an generateCardsWithAI ---
-		const { cards: generatedTextRaw, feedback } = await generateCardsWithAI(
+		const { cards: generatedTextRaw, feedbackPromise } = await generateCardsWithAI(
 			plugin.app,
 			preparedContent, // Nutze den vorbereiteten Content mit Bild-Markern
 			existingCards,
@@ -164,22 +167,14 @@ export async function runGenerationProcess(
 		);
 		// --- ENDE ÜBERGABE ---
 
-		console.log("runGenerationProcess received feedback:", feedback ? "YES (Length: " + feedback.length + ")" : "NO");
+        // We now have the cards text directly. We proceed with insertion.
+        // Feedback is loading in background.
+		console.log("runGenerationProcess received cards. Processing insertion...");
 
 		if (!generatedTextRaw) {
 			notice.hide();
 			new Notice(t('notice.noCardsGenerated'));
 			return "";
-		}
-
-		// Store feedback in cache BEFORE modifying the file (which triggers re-render)
-		if (feedback) {
-			const activeFile = plugin.app.workspace.getActiveFile();
-			if (activeFile) {
-				console.log("Caching feedback for:", activeFile.path);
-				// Update feedback cache with ChatMessage[]
-				plugin.feedbackCache.set(activeFile.path, [{ role: 'ai', content: feedback }]);
-			}
 		}
 
 		// --- NEU: LOGGING DES ROHEN AI-OUTPUTS ---
@@ -193,66 +188,51 @@ export async function runGenerationProcess(
 
 		if (generatedText) {
 			if (isRevision) {
-				// REVISION MODE: Replace existing cards
-				console.log("Replacing existing cards with revised content.");
-				// We need to find the range of the existing cards within the block.
-				// ensureAnkiBlock gives us blockStartIndex and blockEndIndex.
-				// We can reconstruct the block with the NEW cards.
+				// REVISION MODE: Parse and Diff
+				console.log("Parsing cards for Revision Diff View...");
+				
+				// 1. Parse Existing Cards
+                // Extract inner content for parser (it expects block source)
+                const fullBlockContent = editor.getValue().substring(blockStartIndex, blockEndIndex);
+                const oldCardsObjects = parseCardsFromBlockSource(fullBlockContent);
 
-				// Re-read block content to be safe
-				const fileContent = editor.getValue();
-				const blockContent = fileContent.substring(blockStartIndex, blockEndIndex);
+				// 2. Parse New Cards
+				const newCardsObjects = parseCardsFromBlockSource(generatedText);
 
-				// We want to keep the header (Deck, Instruction, Status) but replace the body.
-				// The body starts after the header lines.
-				const lines = blockContent.split('\n');
-				const headerLines = [];
-				let bodyStartIndex = -1;
+				// 3. Open Modal
+                new RevisionDiffModal(plugin.app, oldCardsObjects, newCardsObjects, async (finalCards) => {
+                    // 4. On Submit: Reconstruct Block with Final Cards
+                    
+                    // Re-read header info
+                    const headerInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
+                    const deckToUse = headerInfo?.deckName || fullDeckPath;
+                    const instructionToUse = headerInfo?.instruction || instructionToUpdate;
+                    const statusToUse = undefined; // Clear status
 
-				for (let i = 0; i < lines.length; i++) {
-					const line = lines[i].trim();
-					if (line.startsWith('```anki-cards') ||
-						line.startsWith('TARGET DECK:') ||
-						line.startsWith('INSTRUCTION:') ||
-						line.startsWith('# INSTRUCTION:') ||
-						line.startsWith('STATUS:')) {
-						headerLines.push(lines[i]);
-					} else if (line === '') {
-						// Empty line after header?
-						if (bodyStartIndex === -1) headerLines.push(lines[i]);
-					} else {
-						// First non-header line (likely start of cards or empty lines before cards)
-						// Actually, let's just keep the header lines we know and discard the rest.
-						// But we need to be careful not to discard the closing ``` if it's there?
-						// No, blockContent includes the closing ```.
-						// Let's just reconstruct the block completely.
-					}
-				}
+                    // Format cards to string
+                    const newBlockBody = formatCardsToString(
+                        `TARGET DECK: ${deckToUse}`, 
+                        finalCards, 
+                        instructionToUse, 
+                        statusToUse
+                    );
 
-				// Simpler approach: Use the same logic as ensureAnkiBlock to reconstruct header, 
-				// then append the NEW generated text, then close block.
+                    const newBlockSource = `\`\`\`anki-cards\n${newBlockBody}\n\`\`\``;
 
-				// Let's parse the header info again or use what we have.
-				// We have fullDeckPath, instructionToUpdate (or currentAnkiInfo.instruction).
+                    // Apply to Editor
+                    const currentVal = editor.getValue();
+                    const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentVal, fullBlockContent);
+                    
+                    if (matchIndex !== -1) {
+                         const startPos = editor.offsetToPos(matchIndex);
+                         const endPos = editor.offsetToPos(matchIndex + originalFullBlockSource.length);
+                         editor.replaceRange(newBlockSource, startPos, endPos);
+                         new Notice("Überarbeitete Karten übernommen.");
+                    } else {
+                        new Notice("Fehler: Block nicht mehr gefunden. Änderungen konnten nicht angewendet werden.");
+                    }
 
-				let newBlockContent = `TARGET DECK: ${fullDeckPath}`;
-				if (instructionsToUse) {
-					newBlockContent += `\nINSTRUCTION: ${instructionsToUse}`;
-				}
-				// Preserve disabled instruction if exists
-				if (currentAnkiInfo?.disabledInstruction) {
-					newBlockContent += `\n# INSTRUCTION: ${currentAnkiInfo.disabledInstruction}`;
-				}
-				// Clear status on revision? Or keep? Usually clear or set to something?
-				// Let's clear it as we just generated new cards.
-
-				newBlockContent += `\n\n${generatedText}`;
-
-				const newBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
-
-				const startPos = editor.offsetToPos(blockStartIndex);
-				const endPos = editor.offsetToPos(blockEndIndex);
-				editor.replaceRange(newBlockSource, startPos, endPos);
+                }).open();
 
 			} else {
 				// NORMAL MODE: Append
@@ -264,9 +244,24 @@ export async function runGenerationProcess(
 				}
 			}
 
-			notice.hide();
+            notice.hide();
 			new Notice(t('notice.updated', { provider }));
+            
+            // NOW await feedback
+            notice.setMessage("Lade Feedback...");
+            const feedback = await feedbackPromise;
+
+            // Store feedback in cache
+            if (feedback) {
+                const activeFile = plugin.app.workspace.getActiveFile();
+                if (activeFile) {
+                    console.log("Caching feedback for:", activeFile.path);
+                    plugin.feedbackCache.set(activeFile.path, [{ role: 'ai', content: feedback }]);
+                }
+            }
+            notice.hide();
 			return feedback;
+
 		} else {
 			notice.hide();
 			new Notice(t('notice.noNewText', { provider }), 7000);

@@ -25,7 +25,8 @@ export async function renderFeedback(
     onOpenInAction?: () => void,
     state?: CardPreviewState,
     cards?: Card[],
-    deckName: string | null = null
+    deckName: string | null = null,
+    showControls: boolean = true
 ) {
 	const existingBox = container.querySelector('.anki-feedback-box');
 	if (existingBox) existingBox.remove();
@@ -37,7 +38,9 @@ export async function renderFeedback(
     if (existingActions) existingActions.remove();
 
 	// --- SIDEBAR ACTIONS ---
-    renderSidebarControls(container, plugin, sourcePath, onOpenInAction, deckName, cards);
+    if (showControls) {
+        renderSidebarControls(container, plugin, sourcePath, onOpenInAction, deckName, cards);
+    }
 
     // --- CHAT SECTION ---
 	const feedbackBox = container.createDiv({ cls: 'anki-feedback-box' });
@@ -80,7 +83,7 @@ export async function renderFeedback(
             // Force re-render of this specific part or just toggle visibility? 
             // Re-render is safer for layout but slower. Toggle visibility is fast.
             // Let's re-render to keep state consistent.
-             renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+             renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
         }
     };
    
@@ -115,7 +118,7 @@ export async function renderFeedback(
 	clearBtn.onclick = () => {
 		history.length = 0; // Clear array
 		if (sourcePath) plugin.feedbackCache.delete(sourcePath);
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 	};
 
 	// Renaming duplicate closeBtn for clarity (or just reuse logic if appropriate, but cleaner to rename)
@@ -370,7 +373,7 @@ export async function renderFeedback(
 		input.setValue("");
 
 		// Re-render immediately to show user message
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 
 		// Call AI
 		try {
@@ -396,7 +399,7 @@ export async function renderFeedback(
 		} catch (e: any) {
 			new Notice("Fehler bei der Antwort: " + e.message);
 			history.push({ role: 'ai', content: "Fehler: " + e.message });
-			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 		}
 	});
 
@@ -443,7 +446,7 @@ export async function renderFeedback(
 			if (feedback) {
 				history.push({ role: 'ai', content: feedback });
 				if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
-				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 			} else {
 				new Notice("Kein Feedback erhalten.");
 			}

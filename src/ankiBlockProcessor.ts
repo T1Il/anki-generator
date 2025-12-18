@@ -12,6 +12,7 @@ import { generateFeedbackOnly, generateChatResponse, constructPrompt } from './a
 import { t } from './lang/helpers';
 import { ManualGenerationModal } from './ui/ManualGenerationModal';
 import { RevisionInputModal } from './ui/RevisionInputModal';
+import { RevisionOptionsModal } from './ui/RevisionOptionsModal';
 
 import { DeckSelectionModal } from './ui/DeckSelectionModal';
 
@@ -24,11 +25,20 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	const deckLine = linesForDeck.find(l => l.trim().startsWith('TARGET DECK:'));
 	const deckName = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
 
-	const instructionLine = linesForDeck.find(l => l.trim().startsWith('INSTRUCTION:'));
-	const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : null;
+	// Parse ALL instruction lines (active and disabled)
+	const instructions = linesForDeck
+		.map(line => {
+			const trimmed = line.trim();
+			if (trimmed.startsWith('INSTRUCTION:')) {
+				return { text: trimmed.replace('INSTRUCTION:', '').trim(), isActive: true, originalLine: line };
+			} else if (trimmed.startsWith('# INSTRUCTION:')) {
+				return { text: trimmed.replace('# INSTRUCTION:', '').trim(), isActive: false, originalLine: line };
+			}
+			return null;
+		})
+		.filter(i => i !== null) as { text: string, isActive: boolean, originalLine: string }[];
 
-	const disabledInstructionLine = linesForDeck.find(l => l.trim().startsWith('# INSTRUCTION:'));
-	const disabledInstruction = disabledInstructionLine ? disabledInstructionLine.replace('# INSTRUCTION:', '').trim() : null;
+    const activeInstructions = instructions.filter(i => i.isActive).map(i => i.text).join('\n');
 
 	const statusLine = linesForDeck.find(l => l.trim().startsWith('STATUS:'));
 	const status = statusLine ? statusLine.replace('STATUS:', '').trim() : null;
@@ -76,91 +86,74 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		};
 	}
 
-	// --- INSTRUCTION DISPLAY ---
-	if (instruction || disabledInstruction) {
-		const instructionEl = el.createDiv({ cls: 'anki-instruction' });
-		const isEnabled = !!instruction;
-		const text = isEnabled ? instruction : disabledInstruction;
+	// --- INSTRUCTION DISPLAY (Multiple) ---
+	if (instructions.length > 0) {
+		const instructionContainer = el.createDiv({ cls: 'anki-instructions-container' });
+		instructionContainer.style.marginBottom = '10px';
 
-		instructionEl.style.color = isEnabled ? '#4a90e2' : '#888';
-		instructionEl.style.fontStyle = 'italic';
-		instructionEl.style.borderLeft = isEnabled ? '3px solid #4a90e2' : '3px solid #888';
-		instructionEl.style.paddingLeft = '10px';
-		instructionEl.style.marginBottom = '10px';
-		instructionEl.style.display = 'flex';
-		instructionEl.style.justifyContent = 'space-between';
-		instructionEl.style.alignItems = 'center';
+		instructions.forEach((instr, index) => {
+			const instructionEl = instructionContainer.createDiv({ cls: 'anki-instruction-row' });
+			instructionEl.style.display = 'flex';
+			instructionEl.style.justifyContent = 'space-between';
+			instructionEl.style.alignItems = 'center';
+			instructionEl.style.marginBottom = '4px';
+			instructionEl.style.paddingLeft = '10px';
+			instructionEl.style.borderLeft = instr.isActive ? '3px solid #4a90e2' : '3px solid #888';
+			instructionEl.style.color = instr.isActive ? 'var(--text-normal)' : 'var(--text-muted)';
 
-		const textSpan = instructionEl.createSpan({ text: `${t('anki.instruction')} "${text}"` });
-		if (!isEnabled) textSpan.style.textDecoration = 'line-through';
+			const textSpan = instructionEl.createSpan({ text: instr.text });
+            textSpan.style.flex = '1';
+			textSpan.style.marginRight = '10px';
+			if (!instr.isActive) textSpan.style.textDecoration = 'line-through';
 
-		const toggleBtn = instructionEl.createEl('button', { text: isEnabled ? 'Deaktivieren' : 'Aktivieren' });
-		toggleBtn.style.fontSize = '0.8em';
-		toggleBtn.style.padding = '2px 5px';
-		toggleBtn.style.marginLeft = '10px';
-		toggleBtn.onclick = async () => {
-			const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
-			if (file instanceof TFile) {
-				const content = await plugin.app.vault.read(file);
-				let newContent = content;
-				const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
-				const matches = [...content.matchAll(blockRegex)];
-				const match = matches.find(m => m[1].trim() === source.trim());
+            const btnGroup = instructionEl.createDiv({ cls: 'anki-instruction-btns' });
+            btnGroup.style.display = 'flex';
+            btnGroup.style.gap = '4px';
 
-				if (match) {
-					const fullBlock = match[0];
-					let newBlock = fullBlock;
-					if (isEnabled) {
-						newBlock = newBlock.replace(`INSTRUCTION: ${instruction}`, `# INSTRUCTION: ${instruction}`);
-					} else {
-						newBlock = newBlock.replace(`# INSTRUCTION: ${disabledInstruction}`, `INSTRUCTION: ${disabledInstruction}`);
-					}
-					newContent = content.replace(fullBlock, newBlock);
-					await plugin.app.vault.modify(file, newContent);
-				} else {
-					new Notice("Konnte den Block zum Aktualisieren nicht finden.");
-				}
-			}
-		};
+			// Toggle Button
+			const toggleBtn = btnGroup.createEl('button');
+            setIcon(toggleBtn, instr.isActive ? 'eye-off' : 'eye');
+            toggleBtn.title = instr.isActive ? 'Deaktivieren' : 'Aktivieren';
+			toggleBtn.onclick = async () => {
+				await updateInstructionInBlock(plugin, ctx.sourcePath, source, instr.originalLine, instr.isActive ? `# INSTRUCTION: ${instr.text}` : `INSTRUCTION: ${instr.text}`);
+			};
 
-		const editBtn = instructionEl.createEl('button', { text: 'Bearbeiten' });
-		editBtn.style.fontSize = '0.8em';
-		editBtn.style.padding = '2px 5px';
-		editBtn.style.marginLeft = '5px';
-		editBtn.onclick = () => {
-			new RevisionInputModal(plugin.app, async (newInstruction) => {
-				const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
-				if (file instanceof TFile) {
-					const content = await plugin.app.vault.read(file);
-					let newContent = content;
-					const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
-					const matches = [...content.matchAll(blockRegex)];
-					const match = matches.find(m => m[1].trim() === source.trim());
+			// Edit Button
+			const editBtn = btnGroup.createEl('button');
+            setIcon(editBtn, 'pencil');
+            editBtn.title = 'Bearbeiten';
+				new RevisionInputModal(plugin.app, async (newText) => {
+					const newLine = instr.isActive ? `INSTRUCTION: ${newText}` : `# INSTRUCTION: ${newText}`;
+					await updateInstructionInBlock(plugin, ctx.sourcePath, source, instr.originalLine, newLine);
+				}, instr.text, "Anweisung bearbeiten").open();
 
-					if (match) {
-						const fullBlock = match[0];
-						let newBlock = fullBlock;
-
-						// We need to replace the existing instruction line with the new one.
-						// It could be active (INSTRUCTION:) or disabled (# INSTRUCTION:).
-						// We will make the new one ACTIVE by default if edited? 
-						// Or preserve state? Let's make it active.
-
-						if (isEnabled) {
-							newBlock = newBlock.replace(`INSTRUCTION: ${instruction}`, `INSTRUCTION: ${newInstruction}`);
-						} else {
-							newBlock = newBlock.replace(`# INSTRUCTION: ${disabledInstruction}`, `INSTRUCTION: ${newInstruction}`);
-						}
-
-						newContent = content.replace(fullBlock, newBlock);
-						await plugin.app.vault.modify(file, newContent);
-					} else {
-						new Notice("Konnte den Block zum Aktualisieren nicht finden.");
-					}
-				}
-			}, text || "").open(); // Pass current text as default, ensure string
-		};
+            // Delete Button
+            const deleteBtn = btnGroup.createEl('button');
+            setIcon(deleteBtn, 'trash');
+            deleteBtn.title = 'Löschen';
+            deleteBtn.style.color = 'var(--text-error)';
+            deleteBtn.onclick = async () => {
+                if(confirm("Anweisung löschen?")) {
+                    await updateInstructionInBlock(plugin, ctx.sourcePath, source, instr.originalLine, null); // null means delete
+                }
+            };
+		});
 	}
+
+    // Add Instruction Button
+    const addInstructionBtn = el.createEl('button', { cls: 'anki-add-instruction-btn' });
+    addInstructionBtn.setText('+ Anweisung hinzufügen');
+    addInstructionBtn.style.fontSize = '0.8em';
+    addInstructionBtn.style.marginBottom = '10px';
+    addInstructionBtn.style.marginLeft = '0';
+    addInstructionBtn.onclick = () => {
+        new RevisionInputModal(plugin.app, async (newText) => {
+             // Append to block. We need to find the block start or end of instructions.
+             // Simplest is to prepend to the block content or append after TARGET DECK.
+             // Let's use a helper for this.
+             await addInstructionToBlock(plugin, ctx.sourcePath, source, `INSTRUCTION: ${newText}`);
+        }, "", "Anweisung hinzufügen").open();
+    };
 
 	if (deckName) {
 		const synchronizedCount = cards.filter(card => card.id !== null).length;
@@ -304,7 +297,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			
 			// Construct Prompt
 			const existingCardsText = cards.map(c => c.originalText).join('\n');
-			const prompt = constructPrompt(preparedContent, existingCardsText, plugin.settings, instruction || "", false, file.basename);
+			const prompt = constructPrompt(preparedContent, existingCardsText, plugin.settings, activeInstructions || "", false, file.basename);
 
 			// Open Manual Modal
 			new ManualGenerationModal(plugin.app, prompt, async (manualResponse) => {
@@ -353,7 +346,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 						};
 						
 						// Open Modal
-						new CardPreviewModal(plugin, newCards, currentDeckName, ctx.sourcePath, onSave, instruction || undefined).open();
+						new CardPreviewModal(plugin, newCards, currentDeckName, ctx.sourcePath, onSave, activeInstructions || undefined).open();
 					} catch (e) {
 						console.error("Auto-open preview failed", e);
 					}
@@ -378,7 +371,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			await saveAnkiBlockChanges(plugin, source, updatedCards, deletedCardIds, newDeckName);
 		};
 		// FIX: Hier übergeben wir 'plugin' statt 'plugin.app'
-		new CardPreviewModal(plugin, cardsForModal, currentDeckName, ctx.sourcePath, onSave, instruction || undefined).open();
+		new CardPreviewModal(plugin, cardsForModal, currentDeckName, ctx.sourcePath, onSave, activeInstructions || undefined).open();
 	};
 
 	const syncButton = actionContainer.createEl('button', { text: '🔄 Sync mit Anki' });
@@ -473,8 +466,13 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
 
-		new RevisionInputModal(plugin.app, async (instruction) => {
-			let subdeck = "";
+        let activeInstructionList: string[] = [];
+        if (activeInstructions && activeInstructions.trim()) {
+            activeInstructionList = activeInstructions.split('\n');
+        }
+
+        const runRevision = async (instruction: string) => {
+             let subdeck = "";
 			if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
 				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
 			}
@@ -485,16 +483,20 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 			if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
 
-			// Construct a revision-specific instruction
-			const revisionInstruction = instruction; // Instruction from modal
-
-			const feedback = await runGenerationProcess(plugin, view.editor, provider, subdeck, revisionInstruction, true); // isRevision = true
+            const feedback = await runGenerationProcess(plugin, view.editor, provider, subdeck, instruction, true); // isRevision = true
 			if (feedback) {
 				const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
 				if (ctx.sourcePath) plugin.feedbackCache.set(ctx.sourcePath, history);
-				renderFeedback(el, history, plugin, ctx.sourcePath);
+				renderFeedback(el, history, plugin, ctx.sourcePath, undefined, undefined, undefined, undefined, false);
 			}
-		}).open();
+        };
+
+        new RevisionOptionsModal(
+            plugin.app, 
+            activeInstructionList, 
+            () => runRevision(activeInstructions), // On Use Existing
+            (newInstr) => runRevision(newInstr)    // On Use New
+        ).open();
 	};
 
 	// --- CHAT BUTTON ---
@@ -508,9 +510,10 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			const cached = plugin.feedbackCache.get(ctx.sourcePath);
 			if (cached) history.push(...cached);
 		}
+
 		renderFeedback(el, history, plugin, ctx.sourcePath, () => {
              plugin.activateFeedbackView(history, ctx.sourcePath || "");
-        });
+        }, undefined, undefined, undefined, false);
 	};
 
 	const cachedHistory = plugin.feedbackCache.get(ctx.sourcePath);
@@ -518,7 +521,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		console.log("Found cached feedback history for", ctx.sourcePath, "rendering it.");
 		renderFeedback(el, cachedHistory, plugin, ctx.sourcePath, () => {
              plugin.activateFeedbackView(cachedHistory, ctx.sourcePath || "");
-        });
+        }, undefined, undefined, undefined, false);
 	}
 }
 
@@ -576,7 +579,7 @@ export async function startRevisionProcess(plugin: AnkiGeneratorPlugin, editor: 
             if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
             onFeedback(history);
         }
-    }).open();
+    }, "", "Karten überarbeiten").open();
 }
 
 // Fügt den generierten Text korrekt in den Block ein
@@ -610,6 +613,73 @@ export async function updateFirstBlockDeck(app: ObsidianApp, file: TFile, newDec
         new Notice(`Deck geändert zu: ${newDeckName}`);
     } else {
         new Notice("Konnte keinen Anki-Block finden.");
+    }
+}
+
+// Helper to update specific instruction line
+async function updateInstructionInBlock(plugin: AnkiGeneratorPlugin, sourcePath: string, blockSource: string, originalLine: string, newLine: string | null) {
+    const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+    if (!(file instanceof TFile)) return;
+
+    const content = await plugin.app.vault.read(file);
+    const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+    const matches = [...content.matchAll(blockRegex)];
+    const match = matches.find(m => m[1].trim() === blockSource.trim());
+
+    if (match) {
+        const fullBlock = match[0];
+        let newBlock = fullBlock;
+        
+        if (newLine === null) {
+            // Delete: Replace with empty string (and maybe cleanup newline)
+            newBlock = newBlock.replace(originalLine, '');
+            // Cleanup double newlines if left behind
+            newBlock = newBlock.replace(/\n\s*\n/g, '\n');
+        } else {
+            // Replace
+            newBlock = newBlock.replace(originalLine, newLine);
+        }
+
+        const newContent = content.replace(fullBlock, newBlock);
+        await plugin.app.vault.modify(file, newContent);
+    } else {
+        new Notice("Konnte den Block nicht finden.");
+    }
+}
+
+async function addInstructionToBlock(plugin: AnkiGeneratorPlugin, sourcePath: string, blockSource: string, instructionLine: string) {
+    const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+    if (!(file instanceof TFile)) return;
+
+    const content = await plugin.app.vault.read(file);
+    const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
+    const matches = [...content.matchAll(blockRegex)];
+    const match = matches.find(m => m[1].trim() === blockSource.trim());
+
+    if (match) {
+        const fullBlock = match[0];
+        let blockContent = match[1];
+
+        // Insert after TARGET DECK if exists, otherwise at top
+        if (blockContent.includes('TARGET DECK:')) {
+            // Find end of TARGET DECK line
+            const deckMatch = blockContent.match(/^TARGET DECK:.*$/m);
+            if (deckMatch) {
+                const insertPos = deckMatch.index! + deckMatch[0].length;
+                blockContent = blockContent.slice(0, insertPos) + '\n' + instructionLine + blockContent.slice(insertPos);
+            } else {
+                blockContent = instructionLine + '\n' + blockContent;
+            }
+        } else {
+            blockContent = instructionLine + '\n' + blockContent;
+        }
+
+        const newBlock = `\`\`\`anki-cards\n${blockContent}\n\`\`\``; 
+
+        const newContent = content.replace(fullBlock, newBlock);
+        await plugin.app.vault.modify(file, newContent);
+    } else {
+        new Notice("Konnte den Block nicht finden.");
     }
 }
 

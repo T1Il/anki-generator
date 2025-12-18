@@ -16,8 +16,7 @@ export async function generateCardsWithAI(
 	noteTitle: string,
 	isRevision: boolean = false,
 	abortSignal?: { aborted: boolean }
-): Promise<{ cards: string, feedback: string }> {
-
+): Promise<{ cards: string, feedbackPromise: Promise<string> }> {
 	// --- 1. Construct Card Prompt (User's Prompt) ---
 	const cardPrompt = constructPrompt(noteContent, existingCards, settings, additionalInstructions, isRevision, noteTitle);
 
@@ -32,41 +31,42 @@ export async function generateCardsWithAI(
 	console.log(`--- Card Prompt (Images: ${images.length}) ---\n${cardPrompt.substring(0, 200)}...\n--- End Card Prompt ---`);
 
 	try {
-		let cardsResponse = "";
-		let feedbackResponse = "";
-
-		// --- 3. Execute Generation (Sequential for Feedback) ---
-		// --- 3. Execute Generation (Sequential for Feedback) ---
+        // --- 3. Execute Card Generation ---
 		// Allow manual mode for card generation
-		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
+		const cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
+        
+        let feedbackPromise: Promise<string> = Promise.resolve("");
 
 		if (settings.enableFeedback) {
-			if (abortSignal?.aborted) throw new Error("Aborted by user");
+            // Start Feedback Generation (detached/parallel)
+            feedbackPromise = (async () => {
+                if (abortSignal?.aborted) return "";
+                
+                // Append note content and generated cards to feedback prompt
+                // create local copy of prompt to append
+                let currentFeedbackPrompt = feedbackPrompt + `\n\nOriginal Content:\n"""\n${noteContent}\n"""`;
+                currentFeedbackPrompt += `\n\nGenerierte Karten:\n"""\n${cardsResponse}\n"""`;
 
-			// Append note content and generated cards to feedback prompt
-			feedbackPrompt += `\n\nOriginal Content:\n"""\n${noteContent}\n"""`;
-			feedbackPrompt += `\n\nGenerierte Karten:\n"""\n${cardsResponse}\n"""`;
+                console.log(`--- Feedback Prompt ---\n${currentFeedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);
 
-			console.log(`--- Feedback Prompt ---\n${feedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);
-
-			// Disable manual mode for feedback generation
-			// Disable manual mode for feedback generation
-			feedbackResponse = await callAIProvider(app, provider, settings, feedbackPrompt, [], [], abortSignal, false);
+                // Disable manual mode for feedback generation
+                const fbResponse = await callAIProvider(app, provider, settings, currentFeedbackPrompt, [], [], abortSignal, false);
+                console.log("Feedback Generation Complete. Length:", fbResponse.length);
+                return fbResponse.trim();
+            })();
 		} else {
 			console.log("Feedback generation disabled in settings.");
 		}
 
-		console.log("Generation Complete.");
-		console.log("Cards Length:", cardsResponse.length);
-		console.log("Feedback Length:", feedbackResponse.length);
+		console.log("Card Generation Complete. Cards Length:", cardsResponse.length);
 
 		return {
 			cards: cardsResponse.trim(),
-			feedback: feedbackResponse.trim()
+			feedbackPromise: feedbackPromise
 		};
 
 	} catch (error) {
-		console.error("Error during parallel generation:", error);
+		console.error("Error during generation:", error);
 		throw error;
 	}
 }
@@ -146,7 +146,9 @@ export async function generateFeedbackOnly(
 	}
 	feedbackPrompt = feedbackPrompt.replace('{{noteContent}}', noteContent);
 
-	return await callAIProvider(app, provider, settings, feedbackPrompt, [], []);
+	// Disable manual mode for feedback generation
+    // abortSignal is not passed to generateFeedbackOnly signature, so we pass undefined.
+	return await callAIProvider(app, provider, settings, feedbackPrompt, [], [], undefined, false);
 }
 
 export async function generateChatResponse(
@@ -168,7 +170,8 @@ export async function generateChatResponse(
 
 	fullPrompt += `User: ${newMessage}\nAI:`;
 
-	return await callAIProvider(app, provider, settings, fullPrompt, [], []);
+	// Disable manual mode for chat
+	return await callAIProvider(app, provider, settings, fullPrompt, [], [], undefined, false);
 }
 
 async function callAIProvider(
