@@ -3,18 +3,20 @@ import { Modal, App as ObsidianApp, TextAreaComponent, ButtonComponent } from 'o
 export class RevisionInputModal extends Modal {
 	onSubmit: (result: string) => void;
 	instruction: string;
+	title: string;
 	initialValue: string;
 
-	constructor(app: ObsidianApp, onSubmit: (result: string) => void, initialValue: string = "") {
+	constructor(app: ObsidianApp, onSubmit: (result: string) => void, initialValue: string = "", title: string = "Karten überarbeiten") {
 		super(app);
 		this.onSubmit = onSubmit;
 		this.instruction = initialValue;
 		this.initialValue = initialValue;
+		this.title = title;
 	}
 
 	onOpen() {
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: this.initialValue ? "Anweisung bearbeiten" : "Karten überarbeiten" });
+		contentEl.createEl("h2", { text: this.title });
 
 		new TextAreaComponent(contentEl)
 			.setPlaceholder("Anweisung...")
