@@ -55,10 +55,17 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
 			(this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
             console.log("AnkiGenerator: Provider Registered."); // TRACE
+
+            // Force update on layout ready
+            this.app.workspace.onLayoutReady(() => {
+                this.ankiFileDecorationProvider?.triggerUpdate();
+            });
 		} else {
 			// Legacy handling initialized based on settings
-            console.log("AnkiGenerator: Using LEGACY File Decorator");
-			this.updateLegacyFileDecoration();
+            this.app.workspace.onLayoutReady(() => {
+                console.log("AnkiGenerator: Using LEGACY File Decorator");
+			    this.updateLegacyFileDecoration();
+            });
 		}
 
 		// Check for updates

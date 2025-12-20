@@ -3,6 +3,7 @@ import { Modal, App as ObsidianApp, TextAreaComponent, ButtonComponent } from 'o
 export class RevisionInputModal extends Modal {
 	onSubmit: (result: string) => void;
 	instruction: string;
+	title: string;
 	initialValue: string;
     customTitle: string;
 

@@ -36,7 +36,9 @@ export async function generateCardsWithAI(
 
 		// --- 3. Execute Generation (Sequential for Feedback) ---
 		// Allow manual mode for card generation
-		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
+		const cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
+        
+        let feedbackPromise: Promise<string> = Promise.resolve("");
 
 		let feedbackPromise: Promise<string> = Promise.resolve("");
 
@@ -68,7 +70,7 @@ export async function generateCardsWithAI(
 		};
 
 	} catch (error) {
-		console.error("Error during parallel generation:", error);
+		console.error("Error during generation:", error);
 		throw error;
 	}
 }

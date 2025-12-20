@@ -150,6 +150,7 @@ export async function runGenerationProcess(
 
 		// --- ÜBERGABE der images an generateCardsWithAI ---
 		const { cards: generatedTextRaw, feedbackPromise } = await generateCardsWithAI(
+		const { cards: generatedTextRaw, feedbackPromise } = await generateCardsWithAI(
 			plugin.app,
 			preparedContent, // Nutze den vorbereiteten Content mit Bild-Markern
 			existingCards,
@@ -209,15 +210,16 @@ export async function runGenerationProcess(
 
 		if (generatedText) {
 			if (isRevision) {
-				// REVISION MODE: Replace existing cards
-				console.log("Replacing existing cards with revised content.");
-				// We need to find the range of the existing cards within the block.
-				// ensureAnkiBlock gives us blockStartIndex and blockEndIndex.
-				// We can reconstruct the block with the NEW cards.
+				// REVISION MODE: Parse and Diff
+				console.log("Parsing cards for Revision Diff View...");
+				
+				// 1. Parse Existing Cards
+                // Extract inner content for parser (it expects block source)
+                const fullBlockContent = editor.getValue().substring(blockStartIndex, blockEndIndex);
+                const oldCardsObjects = parseCardsFromBlockSource(fullBlockContent);
 
-				// Re-read block content to be safe
-				const fileContent = editor.getValue();
-				const blockContent = fileContent.substring(blockStartIndex, blockEndIndex);
+				// 2. Parse New Cards
+				const newCardsObjects = parseCardsFromBlockSource(generatedText);
 
 				// 1. Parse Existing Cards
 				// Use blockContent which was just read
@@ -287,7 +289,7 @@ export async function runGenerationProcess(
 				}
 			}
 
-			notice.hide();
+            notice.hide();
 			new Notice(t('notice.updated', { provider }));
 			return ""; // Async feedback matches event trigger
 		} else {

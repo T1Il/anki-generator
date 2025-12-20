@@ -27,6 +27,8 @@ export async function renderFeedback(
     cards?: Card[],
     deckName: string | null = null,
     showControls: boolean = true
+    deckName: string | null = null,
+    showControls: boolean = true
 ) {
 	const existingBox = container.querySelector('.anki-feedback-box');
 	if (existingBox) existingBox.remove();
@@ -82,6 +84,7 @@ export async function renderFeedback(
             // Re-render is safer for layout but slower. Toggle visibility is fast.
             // Let's re-render to keep state consistent.
              renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
+             renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
         }
     };
    
@@ -116,6 +119,7 @@ export async function renderFeedback(
 	clearBtn.onclick = () => {
 		history.length = 0; // Clear array
 		if (sourcePath) plugin.feedbackCache.delete(sourcePath);
+		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 	};
 
@@ -372,6 +376,7 @@ export async function renderFeedback(
 
 		// Re-render immediately to show user message
 		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
+		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 
 		// Call AI
 		const controller = new AbortController();
@@ -462,6 +467,7 @@ export async function renderFeedback(
 			if (feedback) {
 				history.push({ role: 'ai', content: feedback });
 				if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
+				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 			} else {
 				new Notice("Kein Feedback erhalten.");
