@@ -25,7 +25,8 @@ export async function renderFeedback(
     onOpenInAction?: () => void,
     state?: CardPreviewState,
     cards?: Card[],
-    deckName: string | null = null
+    deckName: string | null = null,
+    showControls: boolean = true
 ) {
 	const existingBox = container.querySelector('.anki-feedback-box');
 	if (existingBox) existingBox.remove();
@@ -37,7 +38,7 @@ export async function renderFeedback(
     if (existingActions) existingActions.remove();
 
 	// --- SIDEBAR ACTIONS ---
-    renderSidebarControls(container, plugin, sourcePath, onOpenInAction, deckName, cards);
+    renderSidebarControls(container, plugin, sourcePath, onOpenInAction, deckName, cards, showControls);
 
     // --- CHAT SECTION ---
 	const feedbackBox = container.createDiv({ cls: 'anki-feedback-box' });
@@ -80,7 +81,7 @@ export async function renderFeedback(
             // Force re-render of this specific part or just toggle visibility? 
             // Re-render is safer for layout but slower. Toggle visibility is fast.
             // Let's re-render to keep state consistent.
-             renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+             renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
         }
     };
    
@@ -115,7 +116,7 @@ export async function renderFeedback(
 	clearBtn.onclick = () => {
 		history.length = 0; // Clear array
 		if (sourcePath) plugin.feedbackCache.delete(sourcePath);
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 	};
 
 	// Renaming duplicate closeBtn for clarity (or just reuse logic if appropriate, but cleaner to rename)
@@ -370,9 +371,14 @@ export async function renderFeedback(
 		input.setValue("");
 
 		// Re-render immediately to show user message
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 
 		// Call AI
+		const controller = new AbortController();
+		if (sourcePath) {
+			 plugin.addActiveGeneration(sourcePath + "::chat", controller, "AI Chat", sourcePath);
+		}
+
 		try {
 			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 			const noteContent = view ? view.editor.getValue() : "";
@@ -382,7 +388,7 @@ export async function renderFeedback(
 			else if (plugin.settings.openAiApiKey) provider = 'openai';
 			else if (plugin.settings.ollamaEnabled) provider = 'ollama';
 
-			const aiResponse = await generateChatResponse(plugin.app, history, userText, noteContent, provider, plugin.settings);
+			const aiResponse = await generateChatResponse(plugin.app, history, userText, noteContent, provider, plugin.settings, controller.signal);
 
 			history.push({ role: 'ai', content: aiResponse });
 			if (sourcePath) {
@@ -391,12 +397,20 @@ export async function renderFeedback(
                 plugin.app.workspace.trigger('anki:chat-update', sourcePath, history);
             }
 
-			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 
 		} catch (e: any) {
-			new Notice("Fehler bei der Antwort: " + e.message);
-			history.push({ role: 'ai', content: "Fehler: " + e.message });
-			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+			if (e.name === 'AbortError' || e.message === "Aborted by user") {
+				history.push({ role: 'ai', content: "_(Abgebrochen)_" });
+			} else {
+				new Notice("Fehler bei der Antwort: " + e.message);
+				history.push({ role: 'ai', content: "Fehler: " + e.message });
+			}
+			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
+		} finally {
+			if (sourcePath) {
+				plugin.removeActiveGeneration(sourcePath + "::chat");
+			}
 		}
 	});
 
@@ -411,6 +425,11 @@ export async function renderFeedback(
 	getFeedbackBtn.onClick(async () => {
 		getFeedbackBtn.setDisabled(true);
 		getFeedbackBtn.setButtonText("⏳ Lade...");
+
+		const controller = new AbortController();
+		if (sourcePath) {
+			plugin.addActiveGeneration(sourcePath + "::feedback-ui", controller, "Feedback (Manuell)", sourcePath);
+		}
 
 		try {
 			// Find the correct view based on sourcePath
@@ -438,19 +457,26 @@ export async function renderFeedback(
 			else if (plugin.settings.openAiApiKey) provider = 'openai';
 			else if (plugin.settings.ollamaEnabled) provider = 'ollama';
 
-			const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings);
+			const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings, controller.signal);
 
 			if (feedback) {
 				history.push({ role: 'ai', content: feedback });
 				if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
-				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards);
+				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
 			} else {
 				new Notice("Kein Feedback erhalten.");
 			}
 		} catch (e: any) {
-			new Notice("Fehler beim Abrufen des Feedbacks: " + e.message);
-			console.error(e);
+			if (e.name === 'AbortError' || e.message === "Aborted by user") {
+				new Notice("Feedback abgebrochen.");
+			} else {
+				new Notice("Fehler beim Abrufen des Feedbacks: " + e.message);
+				console.error(e);
+			}
 		} finally {
+			if (sourcePath) {
+				plugin.removeActiveGeneration(sourcePath + "::feedback-ui");
+			}
 			getFeedbackBtn.setDisabled(false);
 			getFeedbackBtn.setButtonText("🔍 Feedback einholen");
 		}
@@ -873,8 +899,8 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
 
 
 
-function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlugin, sourcePath: string | undefined, onOpenInAction: (() => void) | undefined, deckName: string | null, cards: Card[] | undefined) {
-    if (!sourcePath) return;
+function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlugin, sourcePath: string | undefined, onOpenInAction: (() => void) | undefined, deckName: string | null, cards: Card[] | undefined, showControls: boolean = true) {
+    if (!sourcePath || !showControls) return;
 
     const actionContainer = container.createDiv({ cls: 'anki-sidebar-actions' });
     actionContainer.style.marginBottom = '10px';

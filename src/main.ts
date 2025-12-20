@@ -14,11 +14,12 @@ import { ensureBlockIdsForCallouts, removeAllBlockIds } from './utils';
 import { FeedbackView, FEEDBACK_VIEW_TYPE } from './ui/FeedbackView';
 import { InsertCalloutLinkModal } from './ui/InsertCalloutLinkModal';
 import { legacyAnkiStateField } from './ui/LegacyAnkiDecorator';
+import { CancelGenerationModal } from './ui/CancelGenerationModal';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
 	feedbackCache: Map<string, ChatMessage[]> = new Map(); // Stores feedback history by file path
-	activeGenerations: Map<string, AbortController> = new Map(); // Stores abort controllers for active generations
+	activeGenerations: Map<string, { controller: AbortController, description: string, path: string }> = new Map(); // Stores active generations
 	legacyFileDecorator: LegacyFileDecorator | null = null;
 	ankiFileDecorationProvider: AnkiFileDecorationProvider | null = null;
 
@@ -250,27 +251,39 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			id: 'cancel-anki-generation',
 			name: 'Cancel Anki Generation',
 			callback: () => {
-				const activeFile = this.app.workspace.getActiveFile();
-				if (activeFile) {
-					const controller = this.activeGenerations.get(activeFile.path);
-					if (controller) {
-						controller.abort();
-						this.activeGenerations.delete(activeFile.path);
-						new Notice(`Generation cancelled for ${activeFile.basename}`);
-					} else {
-						new Notice("No active generation found for this file.");
-					}
-				} else {
-					// Optional: Cancel all? Or just warn.
-					// Let's just warn for now as per "cancel one of them" (implied context-aware)
-					if (this.activeGenerations.size > 0) {
-						// If no file is focused but generations are running, maybe cancel the last one?
-						// Or just tell user to focus the file.
-						new Notice("Please open the file where generation is running to cancel it.");
-					} else {
-						new Notice("No active generations.");
-					}
-				}
+                if (this.activeGenerations.size === 0) {
+                     new Notice("Keine aktiven Prozesse.");
+                     return;
+                }
+                
+                // If only 1 process, cancel it
+                if (this.activeGenerations.size === 1) {
+                    const [key, process] = this.activeGenerations.entries().next().value;
+                    process.controller.abort();
+                    this.removeActiveGeneration(key);
+                    new Notice(`Abgebrochen: ${process.description}`);
+                    return;
+                }
+                
+                // Multiple: check if any belong to current file
+                const activeFile = this.app.workspace.getActiveFile();
+                if (activeFile) {
+                    // Find processes for this file
+                    const fileProcesses = Array.from(this.activeGenerations.entries())
+                        .filter(([k, p]) => p.path === activeFile.path);
+                        
+                    if (fileProcesses.length === 1) {
+                         // Only one for this file -> Cancel it
+                         const [key, process] = fileProcesses[0];
+                         process.controller.abort();
+                         this.removeActiveGeneration(key);
+                         new Notice(`Abgebrochen: ${process.description}`);
+                         return;
+                    }
+                }
+                
+                // Fallback: Open Modal
+                new CancelGenerationModal(this.app, this).open();
 			}
 		});
 
@@ -361,8 +374,8 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		}
 	}
 
-	addActiveGeneration(filePath: string, controller: AbortController) {
-		this.activeGenerations.set(filePath, controller);
+	addActiveGeneration(key: string, controller: AbortController, description: string = "Anki Generation", path: string = "") {
+		this.activeGenerations.set(key, { controller, description, path: path || key });
 	}
 
 	removeActiveGeneration(filePath: string) {

@@ -4,17 +4,20 @@ export class RevisionInputModal extends Modal {
 	onSubmit: (result: string) => void;
 	instruction: string;
 	initialValue: string;
+    customTitle: string;
 
-	constructor(app: ObsidianApp, onSubmit: (result: string) => void, initialValue: string = "") {
+	constructor(app: ObsidianApp, onSubmit: (result: string) => void, initialValue: string = "", customTitle: string = "") {
 		super(app);
 		this.onSubmit = onSubmit;
 		this.instruction = initialValue;
 		this.initialValue = initialValue;
+        this.customTitle = customTitle;
 	}
 
 	onOpen() {
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: this.initialValue ? "Anweisung bearbeiten" : "Karten überarbeiten" });
+        const defaultTitle = this.initialValue ? "Anweisung bearbeiten" : "Karten überarbeiten";
+		contentEl.createEl("h2", { text: this.customTitle || defaultTitle });
 
 		new TextAreaComponent(contentEl)
 			.setPlaceholder("Anweisung...")
@@ -30,7 +33,7 @@ export class RevisionInputModal extends Modal {
 		btnContainer.style.justifyContent = 'flex-end';
 
 		new ButtonComponent(btnContainer)
-			.setButtonText(this.initialValue ? "Speichern" : "Überarbeiten")
+			.setButtonText(this.initialValue ? "Speichern" : "Start")
 			.setCta()
 			.onClick(() => {
 				this.close();

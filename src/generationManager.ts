@@ -5,14 +5,13 @@ import AnkiGeneratorPlugin from './main';
 import { SubdeckModal } from './ui/SubdeckModal';
 import { ModelSelectionModal } from './ui/ModelSelectionModal';
 // DebugModal wird in aiGenerator verwendet
-import { parseAnkiSection } from './anki/ankiParser';
+import { parseAnkiSection, parseCardsFromBlockSource, ANKI_BLOCK_REGEX } from './anki/ankiParser';
 import { getDeckNames } from './anki/AnkiConnect';
 import { generateCardsWithAI } from './aiGenerator';
-import { ImageInput } from './types';
+import { ImageInput, ChatMessage } from './types';
 import { arrayBufferToBase64, getMimeType, ensureBlockIdsForCallouts } from './utils';
 import { t } from './lang/helpers';
-
-const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)^```$/gm;
+import { RevisionDiffModal } from './ui/RevisionDiffModal';
 
 export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor: Editor) {
 	const initialAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
@@ -98,8 +97,9 @@ export async function runGenerationProcess(
 	// Register active generation
 	const activeFile = plugin.app.workspace.getActiveFile();
 	if (activeFile) {
-		plugin.addActiveGeneration(activeFile.path, abortController);
+		plugin.addActiveGeneration(activeFile.path + "::cards", abortController, "Anki Karten", activeFile.path);
 	}
+
 
 	try {
 		const sub = subdeck || 'Standard';
@@ -149,7 +149,7 @@ export async function runGenerationProcess(
 			: (currentAnkiInfo?.instruction || "");
 
 		// --- ÜBERGABE der images an generateCardsWithAI ---
-		const { cards: generatedTextRaw, feedback } = await generateCardsWithAI(
+		const { cards: generatedTextRaw, feedbackPromise } = await generateCardsWithAI(
 			plugin.app,
 			preparedContent, // Nutze den vorbereiteten Content mit Bild-Markern
 			existingCards,
@@ -163,23 +163,39 @@ export async function runGenerationProcess(
 			abortController.signal // Pass cancellation signal
 		);
 		// --- ENDE ÜBERGABE ---
+		
+		if (activeFile) {
+			plugin.removeActiveGeneration(activeFile.path + "::cards");
+			// We only expect feedback promise to be valid if it's returned.
+			// However, add feedback generation active status even if it resolves quickly.
+			plugin.addActiveGeneration(activeFile.path + "::feedback", abortController, "Anki Feedback", activeFile.path);
+		}
 
-		console.log("runGenerationProcess received feedback:", feedback ? "YES (Length: " + feedback.length + ")" : "NO");
+		// Handle Feedback Asynchronously
+		feedbackPromise.then(feedback => {
+            if (feedback) {
+                const fActiveFile = plugin.app.workspace.getActiveFile();
+                if (fActiveFile) {
+                    console.log("Caching feedback for:", fActiveFile.path);
+                    const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
+                    plugin.feedbackCache.set(fActiveFile.path, history);
+                    // Trigger custom event for UI updates
+                    plugin.app.workspace.trigger('anki:feedback-updated', fActiveFile.path);
+                }
+            }
+        }).catch(err => {
+            console.error("Async feedback generation failed:", err);
+        }).finally(() => {
+            // Remove active generation when feedback is done (or skipped)
+            if (activeFile) {
+                 plugin.removeActiveGeneration(activeFile.path + "::feedback");
+            }
+        });
 
 		if (!generatedTextRaw) {
 			notice.hide();
 			new Notice(t('notice.noCardsGenerated'));
 			return "";
-		}
-
-		// Store feedback in cache BEFORE modifying the file (which triggers re-render)
-		if (feedback) {
-			const activeFile = plugin.app.workspace.getActiveFile();
-			if (activeFile) {
-				console.log("Caching feedback for:", activeFile.path);
-				// Update feedback cache with ChatMessage[]
-				plugin.feedbackCache.set(activeFile.path, [{ role: 'ai', content: feedback }]);
-			}
 		}
 
 		// --- NEU: LOGGING DES ROHEN AI-OUTPUTS ---
@@ -203,56 +219,63 @@ export async function runGenerationProcess(
 				const fileContent = editor.getValue();
 				const blockContent = fileContent.substring(blockStartIndex, blockEndIndex);
 
-				// We want to keep the header (Deck, Instruction, Status) but replace the body.
-				// The body starts after the header lines.
-				const lines = blockContent.split('\n');
-				const headerLines = [];
-				let bodyStartIndex = -1;
+				// 1. Parse Existing Cards
+				// Use blockContent which was just read
+				const oldCardsObjects = parseCardsFromBlockSource(blockContent);
 
-				for (let i = 0; i < lines.length; i++) {
-					const line = lines[i].trim();
-					if (line.startsWith('```anki-cards') ||
-						line.startsWith('TARGET DECK:') ||
-						line.startsWith('INSTRUCTION:') ||
-						line.startsWith('# INSTRUCTION:') ||
-						line.startsWith('STATUS:')) {
-						headerLines.push(lines[i]);
-					} else if (line === '') {
-						// Empty line after header?
-						if (bodyStartIndex === -1) headerLines.push(lines[i]);
-					} else {
-						// First non-header line (likely start of cards or empty lines before cards)
-						// Actually, let's just keep the header lines we know and discard the rest.
-						// But we need to be careful not to discard the closing ``` if it's there?
-						// No, blockContent includes the closing ```.
-						// Let's just reconstruct the block completely.
-					}
-				}
+				// 2. Parse New Cards
+				const newCardsObjects = parseCardsFromBlockSource(generatedText);
 
-				// Simpler approach: Use the same logic as ensureAnkiBlock to reconstruct header, 
-				// then append the NEW generated text, then close block.
+				// 3. Open Modal
+                new RevisionDiffModal(plugin.app, oldCardsObjects, newCardsObjects, activeFile ? activeFile.path : "", async (finalCards) => {
+                    // 4. On Submit: Reconstruct Block with Final Cards
+                    
+                    // Re-read header info (deck, instruction, status)
+                    const headerInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
+                    
+                    // We need to preserve the header exactly as it was, or reconstruct it properly.
+                    // The easiest way is to reuse the 'ensureAnkiBlock' logic or just manual reconstruction.
+                    
+                    let newBlockContent = `TARGET DECK: ${fullDeckPath}`;
+                    
+                    // Instructions
+                    const instructionToUse = headerInfo?.instruction || instructionToUpdate;
+                    if (instructionToUse) {
+                        newBlockContent += `\nINSTRUCTION: ${instructionToUse.trim()}`;
+                    }
+                    if (headerInfo?.disabledInstruction) {
+                        newBlockContent += `\n# INSTRUCTION: ${headerInfo.disabledInstruction.trim()}`;
+                    }
+                    
+                    // Status - clear it after revision
+                    // if (headerInfo?.status) newBlockContent += `\nSTATUS: ${headerInfo.status}`; 
 
-				// Let's parse the header info again or use what we have.
-				// We have fullDeckPath, instructionToUpdate (or currentAnkiInfo.instruction).
+                    // Cards
+                    const cardsText = finalCards.map(c => c.originalText).join('\n\n');
+                    newBlockContent += `\n\n${cardsText}`;
 
-				let newBlockContent = `TARGET DECK: ${fullDeckPath}`;
-				if (instructionsToUse) {
-					newBlockContent += `\nINSTRUCTION: ${instructionsToUse}`;
-				}
-				// Preserve disabled instruction if exists
-				if (currentAnkiInfo?.disabledInstruction) {
-					newBlockContent += `\n# INSTRUCTION: ${currentAnkiInfo.disabledInstruction}`;
-				}
-				// Clear status on revision? Or keep? Usually clear or set to something?
-				// Let's clear it as we just generated new cards.
+                    const newBlockSource = `\`\`\`anki-cards\n${newBlockContent.trim()}\n\`\`\``;
 
-				newBlockContent += `\n\n${generatedText}`;
-
-				const newBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
-
-				const startPos = editor.offsetToPos(blockStartIndex);
-				const endPos = editor.offsetToPos(blockEndIndex);
-				editor.replaceRange(newBlockSource, startPos, endPos);
+                    const startPos = editor.offsetToPos(blockStartIndex);
+                    const endPos = editor.offsetToPos(blockEndIndex);
+                    
+                    // We need to make sure we are replacing the correct range. 
+                    // Since it's async (modal), the user might have changed the file?
+                    // Ideally we should re-find the block, but for now let's assume index is valid or use 'source' matching if possible.
+                    // Given 'editor' is live, offsets might shift. 
+                    // Better to re-find block by content? 
+                    // But we don't have the original block content fully robustly if it changed.
+                    // Let's rely on standard 'editor.replaceRange' with the indices we captured, 
+                    // BUT warn if content doesn't match?
+                    // Actually, 'ensureAnkiBlock' returned indices.
+                    // Let's just try to replace.
+                    editor.replaceRange(newBlockSource, startPos, endPos);
+                    
+                    new Notice(t('notice.updated', { provider }));
+                }).open();
+                
+                // Return immediately (async feedback handles itself)
+                return "";
 
 			} else {
 				// NORMAL MODE: Append
@@ -266,7 +289,7 @@ export async function runGenerationProcess(
 
 			notice.hide();
 			new Notice(t('notice.updated', { provider }));
-			return feedback;
+			return ""; // Async feedback matches event trigger
 		} else {
 			notice.hide();
 			new Notice(t('notice.noNewText', { provider }), 7000);
@@ -275,14 +298,17 @@ export async function runGenerationProcess(
 
 	} catch (error) {
 		notice.hide();
+        if (activeFile) {
+             plugin.removeActiveGeneration(activeFile.path + "::cards");
+        }
+
 		if ((error as Error).name === 'AbortError' || (error as Error).message === "Aborted by user") {
 			return "";
 		}
 
 		console.error(`Fehler bei der Kartengenerierung mit ${provider} (in runGenerationProcess):`, error);
-
-		// Check for Overload
-		if ((error as any).isOverloaded) {
+        // ... rest of catch block checks
+        if ((error as any).isOverloaded) {
 			// Update block with OVERLOADED status
 			const sub = subdeck || 'Standard';
 			const fullDeckPath = `${plugin.settings.mainDeck}::${sub}`;
@@ -295,11 +321,8 @@ export async function runGenerationProcess(
 			new Notice(`Fehler: ${error.message}`, 7000);
 		}
 		return "";
-	} finally {
-		if (activeFile) {
-			plugin.removeActiveGeneration(activeFile.path);
-		}
 	}
+    // removed finally block
 }
 
 // Neue Funktion zum Extrahieren und Laden von Bildern UND Vorbereiten des Contents

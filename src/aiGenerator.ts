@@ -16,7 +16,7 @@ export async function generateCardsWithAI(
 	noteTitle: string,
 	isRevision: boolean = false,
 	abortSignal?: { aborted: boolean }
-): Promise<{ cards: string, feedback: string }> {
+): Promise<{ cards: string, feedbackPromise: Promise<string> }> {
 
 	// --- 1. Construct Card Prompt (User's Prompt) ---
 	const cardPrompt = constructPrompt(noteContent, existingCards, settings, additionalInstructions, isRevision, noteTitle);
@@ -33,36 +33,38 @@ export async function generateCardsWithAI(
 
 	try {
 		let cardsResponse = "";
-		let feedbackResponse = "";
 
-		// --- 3. Execute Generation (Sequential for Feedback) ---
 		// --- 3. Execute Generation (Sequential for Feedback) ---
 		// Allow manual mode for card generation
 		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
 
-		if (settings.enableFeedback) {
-			if (abortSignal?.aborted) throw new Error("Aborted by user");
+		let feedbackPromise: Promise<string> = Promise.resolve("");
 
-			// Append note content and generated cards to feedback prompt
-			feedbackPrompt += `\n\nOriginal Content:\n"""\n${noteContent}\n"""`;
-			feedbackPrompt += `\n\nGenerierte Karten:\n"""\n${cardsResponse}\n"""`;
+		if (settings.enableFeedback && !isRevision) {
+			feedbackPromise = (async () => {
+				if (abortSignal?.aborted) throw new Error("Aborted by user");
 
-			console.log(`--- Feedback Prompt ---\n${feedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);
+				// Append note content and generated cards to feedback prompt
+				// Note: We use the LOCAL feedbackPrompt variable, ensuring we don't mutate shared state if any
+				let currentFeedbackPrompt = feedbackPrompt;
+				currentFeedbackPrompt += `\n\nOriginal Content:\n"""\n${noteContent}\n"""`;
+				currentFeedbackPrompt += `\n\nGenerierte Karten:\n"""\n${cardsResponse}\n"""`;
 
-			// Disable manual mode for feedback generation
-			// Disable manual mode for feedback generation
-			feedbackResponse = await callAIProvider(app, provider, settings, feedbackPrompt, [], [], abortSignal, false);
+				console.log(`--- Feedback Prompt ---\n${currentFeedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);
+
+				// Disable manual mode for feedback generation
+				return await callAIProvider(app, provider, settings, currentFeedbackPrompt, [], [], abortSignal, false);
+			})();
 		} else {
-			console.log("Feedback generation disabled in settings.");
+			console.log("Feedback generation disabled in settings or skipped (Revision).");
 		}
 
-		console.log("Generation Complete.");
+		console.log("Generation Complete (Cards received). Feedback running in background.");
 		console.log("Cards Length:", cardsResponse.length);
-		console.log("Feedback Length:", feedbackResponse.length);
 
 		return {
 			cards: cardsResponse.trim(),
-			feedback: feedbackResponse.trim()
+			feedbackPromise
 		};
 
 	} catch (error) {
@@ -138,7 +140,8 @@ export async function generateFeedbackOnly(
 	app: App,
 	noteContent: string,
 	provider: 'gemini' | 'ollama' | 'openai',
-	settings: AnkiGeneratorSettings
+	settings: AnkiGeneratorSettings,
+    abortSignal?: { aborted: boolean }
 ): Promise<string> {
 	let feedbackPrompt = settings.useCustomFeedbackPrompt ? settings.feedbackPrompt : DEFAULT_SETTINGS.feedbackPrompt;
 	if (!feedbackPrompt || typeof feedbackPrompt !== 'string') {
@@ -146,7 +149,7 @@ export async function generateFeedbackOnly(
 	}
 	feedbackPrompt = feedbackPrompt.replace('{{noteContent}}', noteContent);
 
-	return await callAIProvider(app, provider, settings, feedbackPrompt, [], []);
+	return await callAIProvider(app, provider, settings, feedbackPrompt, [], [], abortSignal, false);
 }
 
 export async function generateChatResponse(
@@ -155,7 +158,8 @@ export async function generateChatResponse(
 	newMessage: string,
 	noteContent: string,
 	provider: 'gemini' | 'ollama' | 'openai',
-	settings: AnkiGeneratorSettings
+	settings: AnkiGeneratorSettings,
+    abortSignal?: { aborted: boolean }
 ): Promise<string> {
 
 	let systemContext = `Du bist ein hilfreicher Tutor. Hier ist der Kontext (Lerninhalt):\n"""\n${noteContent}\n"""\n\n`;
@@ -168,7 +172,7 @@ export async function generateChatResponse(
 
 	fullPrompt += `User: ${newMessage}\nAI:`;
 
-	return await callAIProvider(app, provider, settings, fullPrompt, [], []);
+	return await callAIProvider(app, provider, settings, fullPrompt, [], [], abortSignal);
 }
 
 async function callAIProvider(

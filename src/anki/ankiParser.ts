@@ -2,7 +2,7 @@ import { Editor } from 'obsidian';
 import { Card } from '../types';
 import { normalizeNewlines } from '../utils';
 
-export const ANKI_BLOCK_REGEX = /^```anki-cards\s*\n([\s\S]*?)^```$/gm;
+export const ANKI_BLOCK_REGEX = /^[\s>]*```anki-cards\s*\n([\s\S]*?)^[\s>]*```$/gm;
 
 export interface AnkiParsedInfo {
 	subdeck: string;
@@ -11,6 +11,27 @@ export interface AnkiParsedInfo {
 	instruction?: string;
 	disabledInstruction?: string;
 	status?: string;
+}
+
+// Helper: Entfernt Blockquote-Prefixe ("> " oder ">")
+function stripBlockquotePrefixes(text: string): string {
+    return text.replace(/^[ \t]*>[ \t]?/gm, '');
+}
+
+// Helper to detect common line prefix (e.g. "> " or "   ") to preserve indentation/callouts
+export function detectBlockPrefix(text: string): string {
+    const lines = text.split('\n');
+    if (lines.length === 0) return '';
+    // Look at the first line (fence)
+    const match = lines[0].match(/^([\s>]*)/);
+    return match ? match[1] : '';
+}
+
+export function applyPrefixToBlock(blockContent: string, prefix: string): string {
+    if (!prefix) return blockContent;
+    const lines = blockContent.split('\n');
+    // Don't double prefix if already there? No, blockContent usually clean.
+    return lines.map(l => prefix + l).join('\n');
 }
 
 // Helper: Formatiert eine einzelne Karte konsistent als Q:/A: Block
@@ -77,17 +98,28 @@ export function findSpecificAnkiBlock(fullContent: string, originalSourceContent
 	const normalizedSource = normalizeNewlines(originalSourceContent);
 
 	if (matches.length > 0) {
-		const match = Array.from(matches).find(m => normalizeNewlines(m[1]) === normalizedSource);
+        // Try exact match first (after stripping potential prefixes from file content)
+		const match = Array.from(matches).find(m => {
+            const cleanContent = stripBlockquotePrefixes(m[1]);
+            return normalizeNewlines(cleanContent) === normalizedSource
+        });
+
 		if (match) {
 			originalFullBlockSource = match[0];
 			matchIndex = match.index ?? -1;
 		} else {
+            // Fallback: Trimmed match
 			const normalizedSourceTrimmed = normalizedSource.trim();
-			const fallbackMatch = Array.from(matches).find(m => normalizeNewlines(m[1]).trim() === normalizedSourceTrimmed);
+			const fallbackMatch = Array.from(matches).find(m => {
+                 const cleanContent = stripBlockquotePrefixes(m[1]);
+                 return normalizeNewlines(cleanContent).trim() === normalizedSourceTrimmed
+            });
 			if (fallbackMatch) {
 				originalFullBlockSource = fallbackMatch[0];
 				matchIndex = fallbackMatch.index ?? -1;
 			} else {
+                // Last ditch: just take the last block? 
+                // Maybe risky if multiple blocks. But consistent with previous logic.
 				const lastMatch = matches[matches.length - 1];
 				originalFullBlockSource = lastMatch[0];
 				matchIndex = lastMatch.index ?? -1;

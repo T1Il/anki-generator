@@ -52,6 +52,16 @@ export class FeedbackView extends ItemView {
             }) as any)
         );
 
+        this.registerEvent(
+            this.plugin.app.workspace.on('anki:feedback-updated' as any, ((sourcePath: string) => {
+                if (this.sourcePath && this.sourcePath === sourcePath) {
+                    const cached = this.plugin.feedbackCache.get(this.sourcePath);
+                    this.history = cached || [];
+                    this.render();
+                }
+            }) as any)
+        );
+
         // Listen for active leaf changes
         this.registerEvent(
             this.plugin.app.workspace.on('active-leaf-change', async (leaf) => {
