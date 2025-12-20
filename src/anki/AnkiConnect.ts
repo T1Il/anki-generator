@@ -276,13 +276,47 @@ export async function moveAnkiNotesToDeck(noteIds: number[], deckName: string): 
 	// First ensure the deck exists
 	await createAnkiDeck(deckName);
 
-	// For each note, find its cards and move them
-	for (const noteId of noteIds) {
-		const cardIds = await getCardIdsForNote(noteId);
-		if (cardIds.length > 0) {
-			await changeDeck(cardIds, deckName);
-		} else {
-			console.warn(`Keine Karten für Note ID ${noteId} gefunden.`);
-		}
+	// Optimize: Parallelize the move operations with a concurrency limit
+	const CONCURRENCY_LIMIT = 5;
+	const chunkedPromises = [];
+	
+	for (let i = 0; i < noteIds.length; i += CONCURRENCY_LIMIT) {
+		const chunk = noteIds.slice(i, i + CONCURRENCY_LIMIT);
+		chunkedPromises.push(Promise.all(chunk.map(async (noteId) => {
+			const cardIds = await getCardIdsForNote(noteId);
+			if (cardIds.length > 0) {
+				await changeDeck(cardIds, deckName);
+			} else {
+				console.warn(`Keine Karten für Note ID ${noteId} gefunden.`);
+			}
+		})));
 	}
+
+	await Promise.all(chunkedPromises);
+}
+
+export async function addAnkiNotes(notes: any[]): Promise<(number | null)[]> {
+	if (notes.length === 0) return [];
+	// AnkiConnect 'addNotes' action takes a list of notes
+	return ankiConnectRequest('addNotes', { notes });
+}
+
+export async function storeAnkiMediaFiles(files: {filename: string, data: string}[]): Promise<string[]> {
+    // Parallelize uploads with a concurrency limit to avoid overwhelming Anki
+    const CONCURRENCY_LIMIT = 5;
+    const results: string[] = new Array(files.length).fill("");
+    
+    for (let i = 0; i < files.length; i += CONCURRENCY_LIMIT) {
+        const chunk = files.slice(i, i + CONCURRENCY_LIMIT).map((file, idx) => ({ file, originalIdx: i + idx }));
+        await Promise.all(chunk.map(async ({ file, originalIdx }) => {
+            try {
+                const result = await storeAnkiMediaFile(file.filename, file.data);
+                results[originalIdx] = result;
+            } catch (e) {
+                console.error(`Failed to batch store file ${file.filename}:`, e);
+                results[originalIdx] = ""; // Marker for failure
+            }
+        }));
+    }
+    return results;
 }
