@@ -32,15 +32,13 @@ export async function generateCardsWithAI(
 	console.log(`--- Card Prompt (Images: ${images.length}) ---\n${cardPrompt.substring(0, 200)}...\n--- End Card Prompt ---`);
 
 	try {
-		let cardsResponse = "";
+        let cardsResponse = "";
 
 		// --- 3. Execute Generation (Sequential for Feedback) ---
 		// Allow manual mode for card generation
-		const cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
+		cardsResponse = await callAIProvider(app, provider, settings, cardPrompt, images, files, abortSignal, true);
         
         let feedbackPromise: Promise<string> = Promise.resolve("");
-
-		let feedbackPromise: Promise<string> = Promise.resolve("");
 
 		if (settings.enableFeedback && !isRevision) {
 			feedbackPromise = (async () => {

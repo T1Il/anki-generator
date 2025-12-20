@@ -27,8 +27,6 @@ export async function renderFeedback(
     cards?: Card[],
     deckName: string | null = null,
     showControls: boolean = true
-    deckName: string | null = null,
-    showControls: boolean = true
 ) {
 	const existingBox = container.querySelector('.anki-feedback-box');
 	if (existingBox) existingBox.remove();

@@ -150,7 +150,6 @@ export async function runGenerationProcess(
 
 		// --- ÜBERGABE der images an generateCardsWithAI ---
 		const { cards: generatedTextRaw, feedbackPromise } = await generateCardsWithAI(
-		const { cards: generatedTextRaw, feedbackPromise } = await generateCardsWithAI(
 			plugin.app,
 			preparedContent, // Nutze den vorbereiteten Content mit Bild-Markern
 			existingCards,
@@ -221,12 +220,6 @@ export async function runGenerationProcess(
 				// 2. Parse New Cards
 				const newCardsObjects = parseCardsFromBlockSource(generatedText);
 
-				// 1. Parse Existing Cards
-				// Use blockContent which was just read
-				const oldCardsObjects = parseCardsFromBlockSource(blockContent);
-
-				// 2. Parse New Cards
-				const newCardsObjects = parseCardsFromBlockSource(generatedText);
 
 				// 3. Open Modal
                 new RevisionDiffModal(plugin.app, oldCardsObjects, newCardsObjects, activeFile ? activeFile.path : "", async (finalCards) => {
