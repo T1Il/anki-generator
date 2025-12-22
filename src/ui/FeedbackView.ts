@@ -47,7 +47,7 @@ export class FeedbackView extends ItemView {
             this.plugin.app.workspace.on('anki:chat-update' as any, ((sourcePath: string, history: ChatMessage[]) => {
                 if (this.sourcePath && this.sourcePath === sourcePath) {
                     this.history = history;
-                    this.render();
+                    this.render('new-message');
                 }
             }) as any)
         );
@@ -91,12 +91,12 @@ export class FeedbackView extends ItemView {
     async onOpen() {
         const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
         if (view && view.file) {
-             this.sourcePath = view.file.path;
-             const cached = this.plugin.feedbackCache.get(this.sourcePath);
-             this.history = cached || [];
-             await this.updateCards(view.file);
+            this.sourcePath = view.file.path;
+            const cached = this.plugin.feedbackCache.get(this.sourcePath);
+            this.history = cached || [];
+            await this.updateCards(view.file);
         } else {
-             this.render();
+            this.render();
         }
     }
 
@@ -117,7 +117,7 @@ export class FeedbackView extends ItemView {
             }
         }
         await super.setState(state, result);
-        this.render();
+        this.render('preserve');
     }
 
     getState(): any {
@@ -134,16 +134,16 @@ export class FeedbackView extends ItemView {
         this.render();
     }
 
-    render() {
+    render(scrollBehavior: 'preserve' | 'new-message' | 'default' = 'default') {
         const container = this.contentEl;
         container.empty();
-        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState, this.cards, this.deckName);
+        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState, this.cards, this.deckName, true, scrollBehavior);
     }
-    
+
     async updateCards(file: TFile) {
         const { cards, deckName } = await getAllCardsForFile(this.plugin.app, file);
         this.cards = cards;
         this.deckName = deckName;
-        this.render();
+        this.render('preserve');
     }
 }

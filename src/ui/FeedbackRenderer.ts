@@ -18,18 +18,28 @@ import { RevisionInputModal } from './RevisionInputModal';
 import { getDeckNames, moveAnkiNotesToDeck, getCardCountForDeck, deleteAnkiDeck } from '../anki/AnkiConnect';
 
 export async function renderFeedback(
-    container: HTMLElement, 
-    history: ChatMessage[], 
-    plugin: AnkiGeneratorPlugin, 
-    sourcePath: string | undefined, 
+    container: HTMLElement,
+    history: ChatMessage[],
+    plugin: AnkiGeneratorPlugin,
+    sourcePath: string | undefined,
     onOpenInAction?: () => void,
     state?: CardPreviewState,
     cards?: Card[],
     deckName: string | null = null,
-    showControls: boolean = true
+    showControls: boolean = true,
+    scrollBehavior: 'preserve' | 'new-message' | 'default' = 'default'
 ) {
-	const existingBox = container.querySelector('.anki-feedback-box');
-	if (existingBox) existingBox.remove();
+    // Capture previous scroll position
+    let previousScrollTop = 0;
+    const oldContent = container.querySelector('.anki-feedback-content');
+    if (oldContent) previousScrollTop = oldContent.scrollTop;
+
+    // Cleanup existing elements to prevent duplication
+    const existingBox = container.querySelector('.anki-feedback-box');
+    if (existingBox) existingBox.remove();
+
+    const existingChat = container.querySelector('.anki-chat-section');
+    if (existingChat) existingChat.remove();
 
     const existingPreview = container.querySelector('.anki-preview-wrapper');
     if (existingPreview) existingPreview.remove();
@@ -37,179 +47,162 @@ export async function renderFeedback(
     const existingActions = container.querySelector('.anki-sidebar-actions');
     if (existingActions) existingActions.remove();
 
-	// --- SIDEBAR ACTIONS ---
+    // --- SIDEBAR ACTIONS ---
     renderSidebarControls(container, plugin, sourcePath, onOpenInAction, deckName, cards, showControls);
 
-    // --- CHAT SECTION ---
-	const feedbackBox = container.createDiv({ cls: 'anki-feedback-box' });
-
-	// Styling for persistence and visibility
-	feedbackBox.style.border = '1px solid #4a90e2';
-	feedbackBox.style.borderRadius = '5px';
-	feedbackBox.style.padding = '10px';
-	feedbackBox.style.marginTop = '10px';
-	feedbackBox.style.backgroundColor = 'rgba(74, 144, 226, 0.1)';
-    // Resize capability
-    feedbackBox.style.resize = 'vertical';
-    feedbackBox.style.overflow = 'auto';
+    // --- MAIN STYLES INJECTION (Ensure singular) ---
+    // We check if style exists, if not create. But since we clear container or sections, 
+    // we might need to be careful. The style ID 'anki-sidebar-styles' is good.
+    // --- MAIN STYLES INJECTION (Ensure singular) ---
+    // We check if style exists, if not create. But since we clear container or sections,
+    // we might need to be careful. The style ID 'anki-sidebar-styles' is good.
+    if (!container.ownerDocument.getElementById('anki-sidebar-styles')) {
+        const styleEl = container.createEl('style');
+        styleEl.id = 'anki-sidebar-styles';
+        styleEl.textContent = `
+            .anki-sidebar-header-row {
+                padding: 4px 0;
+            }
+            .anki-sidebar-header-row:hover {
+                 opacity: 0.8;
+            }
+            .anki-sidebar-section-arrow {
+                 transition: transform 0.2s;
+                 margin-right: 5px;
+                 cursor: pointer;
+                 font-size: 0.8em;
+                 width: 15px;
+                 display: inline-block;
+                 text-align: center;
+            }
+            .anki-sidebar-section-collapsed .anki-sidebar-section-arrow {
+                 transform: rotate(-90deg);
+            }
+            .anki-collapsed .anki-card-actions {
+                display: none;
+            }
+            .anki-chat-message {
+                font-size: 0.9em;
+                line-height: 1.4;
+            }
+            .anki-chat-input-area textarea {
+                font-size: 0.9em;
+            }
+        `;
+    } else {
+        // If it exists but we need to update it (e.g. for the new CSS rule), we should?
+        // Simpler: Just append the specific fix dynamically if needed or assume styles are constant.
+        // For development/hot-reload, updating content is better.
+        const styleEl = container.ownerDocument.getElementById('anki-sidebar-styles');
+        if (styleEl && !styleEl.textContent?.includes('.anki-collapsed .anki-card-actions')) {
+            styleEl.textContent += `
+                .anki-collapsed .anki-card-actions {
+                    display: none;
+                }
+             `;
+        }
+    }
     // feedbackBox.style.minHeight = '200px'; // Dynamic now
 
-	const header = feedbackBox.createDiv({ cls: 'anki-feedback-header' });
-	header.style.display = 'flex';
-	header.style.justifyContent = 'space-between';
-	header.style.alignItems = 'center';
-	header.style.marginBottom = '10px';
-    header.style.cursor = 'pointer';
+    // --- CHAT SECTION ---
+    const chatSection = container.createDiv({ cls: 'anki-chat-section' });
+    chatSection.style.marginBottom = '20px';
+    chatSection.style.borderBottom = '1px solid var(--background-modifier-border)';
+    chatSection.style.paddingBottom = '10px';
 
-	header.createSpan({ text: '🤖 KI Chat & Feedback', cls: 'anki-feedback-title' }).style.fontWeight = 'bold';
+    // Chat Header
+    const chatHeader = chatSection.createDiv({ cls: 'anki-sidebar-header-row' });
 
-	const controlsDiv = header.createDiv({ cls: 'anki-feedback-controls' });
-	controlsDiv.style.display = 'flex';
-	controlsDiv.style.gap = '5px';
+    chatHeader.style.display = 'flex';
+    chatHeader.style.alignItems = 'center';
+    chatHeader.style.cursor = 'pointer';
+    chatHeader.style.marginBottom = '10px';
 
-    const toggleIcon = controlsDiv.createSpan({ cls: 'anki-chat-toggle-icon' });
-    toggleIcon.textContent = state?.isChatOpen ? '▼' : '▶';
-    toggleIcon.style.marginRight = '5px';
+    if (!state?.isChatOpen) {
+        chatHeader.addClass('anki-sidebar-section-collapsed');
+    }
 
-    // Header Click -> Toggle
-    header.onclick = (e) => {
-        // Don't toggle if clicking a button
-        if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).closest('button')) return;
-        
+    const chatArrow = chatHeader.createSpan({ cls: 'anki-sidebar-section-arrow', text: '🔽' });
+    const chatTitle = chatHeader.createEl('h4', { text: `🤖 AI Chat` });
+    chatTitle.style.margin = '0';
+
+    chatHeader.onclick = () => {
         if (state) {
             state.isChatOpen = !state.isChatOpen;
-            // Force re-render of this specific part or just toggle visibility? 
-            // Re-render is safer for layout but slower. Toggle visibility is fast.
-            // Let's re-render to keep state consistent.
-             renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
-             renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
+            renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'preserve');
         }
     };
-   
-    // Only show content if open
-    const contentWrapper = feedbackBox.createDiv();
-    
-    // CSS to ensure cleanly collapsed
-    if (state && !state.isChatOpen) {
-        contentWrapper.style.display = 'none';
-        feedbackBox.style.resize = 'none'; 
-        feedbackBox.style.height = 'auto'; // Shrink to fit header
-        feedbackBox.style.minHeight = '0px'; 
-        feedbackBox.style.paddingBottom = '5px'; // Minimal padding
-    } else {
-        feedbackBox.style.minHeight = '200px'; 
-        feedbackBox.style.height = 'auto'; // allow grow
-        feedbackBox.style.paddingBottom = '10px';
-        feedbackBox.style.resize = 'vertical';
-    }
+
+    // Header Controls (Open in New Tab, Clear Chat)
+    const headerControls = chatHeader.createDiv({ cls: 'anki-sidebar-header-controls' });
+    headerControls.style.marginLeft = 'auto';
+    headerControls.style.display = 'flex';
+    headerControls.style.gap = '5px';
 
     // Open in New Tab Button (only if callback provided)
     if (onOpenInAction) {
-        const openBtn = controlsDiv.createEl('button', { cls: 'anki-feedback-action' });
-        openBtn.title = "In neuem Tab öffnen";
-        setIcon(openBtn, 'external-link'); 
-        openBtn.onclick = onOpenInAction;
+        const openBtn = new ButtonComponent(headerControls);
+        openBtn.setIcon('external-link');
+        openBtn.setTooltip("In neuem Tab öffnen");
+        openBtn.buttonEl.style.padding = '0 5px';
+        openBtn.buttonEl.style.height = '24px';
+        openBtn.onClick(onOpenInAction);
     }
 
-	const clearBtn = controlsDiv.createEl('button', { cls: 'anki-feedback-close' });
-	clearBtn.title = "Chat leeren";
-	setIcon(clearBtn, 'trash');
-	clearBtn.onclick = () => {
-		history.length = 0; // Clear array
-		if (sourcePath) plugin.feedbackCache.delete(sourcePath);
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
-	};
+    const clearBtn = new ButtonComponent(headerControls);
+    clearBtn.setIcon('trash');
+    clearBtn.setTooltip("Chat leeren");
+    clearBtn.buttonEl.style.padding = '0 5px';
+    clearBtn.buttonEl.style.height = '24px';
+    clearBtn.onClick((e) => {
+        e.stopPropagation(); // prevent toggle
+        history.length = 0; // Clear array
+        if (sourcePath) plugin.feedbackCache.delete(sourcePath);
+        renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'preserve');
+    });
 
-	// Renaming duplicate closeBtn for clarity (or just reuse logic if appropriate, but cleaner to rename)
-    const viewCloseBtn = controlsDiv.createEl('button', { cls: 'anki-feedback-close' });
-	viewCloseBtn.title = "Schließen"; 
-	setIcon(viewCloseBtn, 'x');
-	viewCloseBtn.onclick = () => {
-		feedbackBox.remove();
-	};
+    // Chat Content Wrapper
+    const chatContentWrapper = chatSection.createDiv({ cls: 'anki-chat-content-wrapper' });
+    if (state && !state.isChatOpen) chatContentWrapper.style.display = 'none';
 
-	const contentArea = contentWrapper.createDiv({ cls: 'anki-feedback-content' });
-    contentArea.style.maxHeight = '600px';
+    const contentArea = chatContentWrapper.createDiv({ cls: 'anki-feedback-content' });
+    contentArea.style.maxHeight = '400px'; // Limit height within section
     contentArea.style.overflowY = 'auto';
+    contentArea.style.marginBottom = '10px';
 
-	// Scrollbar Styling (Webkit)
-	const styleEl = feedbackBox.createEl('style');
-	styleEl.textContent = `
-		.anki-feedback-content::-webkit-scrollbar {
-			width: 12px;
-			background-color: rgba(0, 0, 0, 0.05);
-		}
-		.anki-feedback-content::-webkit-scrollbar-track {
-			background: rgba(0, 0, 0, 0.1);
-			border-radius: 6px;
-		}
-		.anki-feedback-content::-webkit-scrollbar-thumb {
-			background-color: #2e6da4; /* High contrast blue (darker) */
-			border-radius: 6px;
-			border: 2px solid #ffffff; /* White border for contrast against track */
-		}
-		.anki-feedback-content::-webkit-scrollbar-thumb:hover {
-			background-color: #1d4e7a;
-		}
-        /* Quote Styling for Click-to-Edit */
-        .anki-feedback-content blockquote {
-            cursor: pointer;
-            border-left: 4px solid #4a90e2;
-            padding-left: 10px;
-            margin-left: 0;
-            background-color: rgba(255, 255, 255, 0.1);
-            transition: background-color 0.2s;
-            position: relative;
-        }
-        .anki-feedback-content blockquote:hover {
-            background-color: rgba(74, 144, 226, 0.2);
-        }
-        .anki-feedback-content blockquote::after {
-            content: "✏️";
-            position: absolute;
-            right: 5px;
-            top: 5px;
-            font-size: 0.8em;
-            opacity: 0.5;
-        }
-        .anki-feedback-content blockquote:hover::after {
-            opacity: 1;
-        }
-	`;
-
-	// Render History
-	if (history.length === 0) {
-		const emptyMsg = contentArea.createDiv({ cls: 'anki-chat-empty' });
-		emptyMsg.setText("Noch keine Nachrichten. Starte eine Unterhaltung oder hole Feedback ein.");
-		emptyMsg.style.fontStyle = 'italic';
-		emptyMsg.style.color = '#888';
-		emptyMsg.style.textAlign = 'center';
-		emptyMsg.style.padding = '20px';
-	} else {
-		history.forEach(async msg => {
-			const msgDiv = contentArea.createDiv({ cls: `anki-chat-message ${msg.role}` });
-			msgDiv.style.marginBottom = '8px';
-			msgDiv.style.padding = '8px';
-			msgDiv.style.borderRadius = '5px';
-			msgDiv.style.backgroundColor = msg.role === 'ai' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(74, 144, 226, 0.2)';
-			msgDiv.style.alignSelf = msg.role === 'ai' ? 'flex-start' : 'flex-end';
+    // Render History
+    if (history.length === 0) {
+        const emptyMsg = contentArea.createDiv({ cls: 'anki-chat-empty' });
+        emptyMsg.setText("Noch keine Nachrichten. Starte eine Unterhaltung oder hole Feedback ein.");
+        emptyMsg.style.fontStyle = 'italic';
+        emptyMsg.style.color = '#888';
+        emptyMsg.style.textAlign = 'center';
+        emptyMsg.style.padding = '20px';
+    } else {
+        // Sequential rendering to ensure order and DOM stability
+        for (const msg of history) {
+            const msgDiv = contentArea.createDiv({ cls: `anki-chat-message ${msg.role}` });
+            msgDiv.style.marginBottom = '8px';
+            msgDiv.style.padding = '8px';
+            msgDiv.style.borderRadius = '5px';
+            msgDiv.style.backgroundColor = msg.role === 'ai' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(74, 144, 226, 0.2)';
+            msgDiv.style.alignSelf = msg.role === 'ai' ? 'flex-start' : 'flex-end';
             msgDiv.style.width = '100%'; // Ensure full width usage
 
-			const roleLabel = msgDiv.createDiv({ cls: 'anki-chat-role' });
-			roleLabel.setText(msg.role === 'ai' ? '🤖 AI:' : '👤 Du:');
-			roleLabel.style.fontWeight = 'bold';
-			roleLabel.style.fontSize = '0.8em';
-			roleLabel.style.marginBottom = '4px';
+            const roleLabel = msgDiv.createDiv({ cls: 'anki-chat-role' });
+            roleLabel.setText(msg.role === 'ai' ? '🤖 AI:' : '👤 Du:');
+            roleLabel.style.fontWeight = 'bold';
+            roleLabel.style.fontSize = '0.8em';
+            roleLabel.style.marginBottom = '4px';
 
-			const textDiv = msgDiv.createDiv({ cls: 'anki-chat-text' });
-			await MarkdownRenderer.render(plugin.app, msg.content, textDiv, sourcePath || '', plugin);
+            const textDiv = msgDiv.createDiv({ cls: 'anki-chat-text' });
+            await MarkdownRenderer.render(plugin.app, msg.content, textDiv, sourcePath || '', plugin);
 
             // --- CLICK-TO-EDIT LOGIC ---
             if (msg.role === 'ai') {
                 // Select both standard blockquotes and callouts
                 const quoteElements = textDiv.querySelectorAll('blockquote, .callout');
-                
+
                 // EXTRACT RAW QUOTES FROM SOURCE (msg.content)
                 const rawQuotes: string[] = [];
                 const lines = msg.content.split('\n');
@@ -220,7 +213,7 @@ export async function renderFeedback(
                     if (line.trim().startsWith('>')) {
                         inQuote = true;
                         // Remove the leading '>' and space. 
-                        const cleanLine = line.replace(/^\s*>\s?/, ''); 
+                        const cleanLine = line.replace(/^\s*>\s?/, '');
                         currentQuote.push(cleanLine);
                     } else {
                         if (inQuote) {
@@ -235,7 +228,7 @@ export async function renderFeedback(
                 }
                 // Flush last quote if message ends with one
                 if (inQuote && currentQuote.length > 0) {
-                     rawQuotes.push(currentQuote.join('\n'));
+                    rawQuotes.push(currentQuote.join('\n'));
                 }
 
                 // Map DOM elements to raw quotes by index
@@ -244,21 +237,21 @@ export async function renderFeedback(
                 quoteElements.forEach((el, index) => {
                     // Type assertion for title property
                     (el as HTMLElement).title = "Klicken, um Textstelle im Editor zu suchen";
-                    
+
                     // Assign raw content if available (fallback to textContent if mismatch)
                     const rawContent = rawQuotes[index] ? rawQuotes[index].trim() : el.textContent?.trim() || "";
 
                     el.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        e.preventDefault(); // Prevent default callout folding if applicable
-                        
+                        e.preventDefault();
+
                         // Clean the quote from AI artifacts like [...] or (omitted)
                         const cleanQuote = (text: string) => {
                             return text
-                                .replace(/\[\.\.\.\]/g, ' ') // Replace [...] with space
+                                .replace(/\[\.\.\.\]/g, ' ')
                                 .replace(/\(omitted\)/g, ' ')
-                                .replace(/^\s*[\.\u2026]+\s*/, '') // Leading ellipses
-                                .replace(/\s*[\.\u2026]+\s*$/, '') // Trailing ellipses
+                                .replace(/^\s*[\.\u2026]+\s*/, '')
+                                .replace(/\s*[\.\u2026]+\s*$/, '')
                                 .trim();
                         };
 
@@ -276,20 +269,19 @@ export async function renderFeedback(
                             if (view) {
                                 const editor = view.editor;
                                 const content = editor.getValue();
-                                
+
                                 console.log("AnkiGenerator: Searching for:", searchText);
 
                                 // Helper to find index
                                 const findIndex = (text: string, query: string): number => {
                                     if (!query) return -1;
-                                    
+
                                     // 1. Exact match
                                     let idx = text.indexOf(query);
                                     if (idx !== -1) return idx;
 
                                     // 2. Normalized match (ignore whitespace diffs AND blockquote markers >)
                                     const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                    // Replace whitespace in query with a pattern matching whitespace OR > characters (for multiline quotes)
                                     const pattern = escapeRegExp(query).replace(/\s+/g, '[\\s>]+');
                                     try {
                                         const regex = new RegExp(pattern);
@@ -297,20 +289,16 @@ export async function renderFeedback(
                                         if (match && match.index !== undefined) return match.index;
                                     } catch (e) { console.error("Regex error:", e); }
 
-                                    // 3. Fallback: Search for the first significant part (e.g. first 50 chars)
-                                    // This helps if the AI hallucinated the end of the sentence or formatting
+                                    // 3. Fallback
                                     if (query.length > 50) {
                                         const stub = query.substring(0, 50);
-                                        console.log("AnkiGenerator: Trying stub search:", stub);
                                         const stubIdx = text.indexOf(stub);
                                         if (stubIdx !== -1) return stubIdx;
-                                        
-                                        // Normalized stub with > support
                                         const stubPattern = escapeRegExp(stub).replace(/\s+/g, '[\\s>]+');
                                         try {
                                             const match = text.match(new RegExp(stubPattern));
                                             if (match && match.index !== undefined) return match.index;
-                                        } catch (e) {}
+                                        } catch (e) { }
                                     }
 
                                     return -1;
@@ -321,15 +309,13 @@ export async function renderFeedback(
                                 if (idx !== -1) {
                                     const pos = editor.offsetToPos(idx);
                                     const endPos = editor.offsetToPos(Math.min(content.length, idx + searchText.length));
-                                    
+
                                     editor.setCursor(pos);
                                     editor.scrollIntoView({ from: pos, to: endPos }, true);
                                     editor.setSelection(pos, endPos);
                                     new Notice("Textstelle gefunden!");
                                 } else {
-                                    new Notice("Textstelle nicht gefunden. (Details in Konsole)");
-                                    console.warn("AnkiGenerator: Could not find quote in document.");
-                                    console.log("Search Text:", searchText);
+                                    new Notice("Textstelle nicht gefunden.");
                                 }
                             } else {
                                 new Notice("Editor nicht gefunden.");
@@ -338,209 +324,238 @@ export async function renderFeedback(
                     });
                 });
             }
-		});
-	}
+        }
+    }
 
-	// Auto-scroll to bottom
-	setTimeout(() => {
-		contentArea.scrollTop = contentArea.scrollHeight;
-	}, 0);
+    // Smart Scrolling Logic
+    setTimeout(() => {
+        if (scrollBehavior === 'preserve') {
+            contentArea.scrollTop = previousScrollTop;
+        } else if (scrollBehavior === 'new-message') {
+            const lastMsg = contentArea.lastElementChild as HTMLElement;
+            if (lastMsg) {
+                lastMsg.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            }
+        } else {
+            // Let's scroll to bottom for initial load / default
+            contentArea.scrollTop = contentArea.scrollHeight;
+        }
+    }, 0);
 
-	// Input Area (Moved inside wrapper)
-	const inputArea = contentWrapper.createDiv({ cls: 'anki-feedback-input' });
-	inputArea.style.display = 'flex';
-	inputArea.style.flexDirection = 'column'; // Stack input and buttons
-	inputArea.style.gap = '5px';
+    // Input Area
+    const inputArea = chatContentWrapper.createDiv({ cls: 'anki-chat-input-area' });
+    inputArea.style.display = 'flex';
+    inputArea.style.gap = '5px';
+    inputArea.style.marginTop = 'auto'; // Push to bottom if flex container stretches
 
-	const textInputContainer = inputArea.createDiv();
-	textInputContainer.style.display = 'flex';
-	textInputContainer.style.gap = '5px';
+    const input = new TextAreaComponent(inputArea);
+    input.setPlaceholder("Frage an die KI...");
+    input.inputEl.style.width = '100%';
+    input.inputEl.style.minHeight = '40px';
+    input.inputEl.style.resize = 'vertical';
+    input.inputEl.onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            triggerGeneration();
+        }
+    };
 
-	const input = new TextAreaComponent(textInputContainer);
-	input.setPlaceholder("Stelle eine Rückfrage...");
-	input.inputEl.style.flex = '1';
-	input.inputEl.rows = 2;
+    const sendBtn = new ButtonComponent(inputArea)
+        .setIcon("send")
+        .setTooltip("Senden");
+    sendBtn.buttonEl.style.height = 'auto'; // Match textarea height roughly
+    sendBtn.onClick(async () => {
+        triggerGeneration();
+    });
 
-	const sendBtn = new ButtonComponent(textInputContainer);
-	sendBtn.setButtonText("Senden");
-	sendBtn.setCta();
-	sendBtn.onClick(async () => {
-		const userText = input.getValue().trim();
-		if (!userText) return;
+    const triggerGeneration = async () => {
+        const userText = input.getValue().trim();
+        if (!userText) return;
 
-		// Add user message to history
-		history.push({ role: 'user', content: userText });
-		input.setValue("");
+        // Add user message to history
+        history.push({ role: 'user', content: userText });
+        input.setValue("");
 
-		// Re-render immediately to show user message
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
-		renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
+        // Re-render immediately to show user message
+        renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
 
-		// Call AI
-		const controller = new AbortController();
-		if (sourcePath) {
-			 plugin.addActiveGeneration(sourcePath + "::chat", controller, "AI Chat", sourcePath);
-		}
+        // Call AI
+        const controller = new AbortController();
+        if (sourcePath) {
+            plugin.addActiveGeneration(sourcePath + "::chat", controller, "AI Chat", sourcePath);
+        }
 
-		try {
-			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-			const noteContent = view ? view.editor.getValue() : "";
+        try {
+            const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+            const noteContent = view ? view.editor.getValue() : "";
 
-			let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
-			if (plugin.settings.geminiApiKey) provider = 'gemini';
-			else if (plugin.settings.openAiApiKey) provider = 'openai';
-			else if (plugin.settings.ollamaEnabled) provider = 'ollama';
+            let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
+            if (plugin.settings.geminiApiKey) provider = 'gemini';
+            else if (plugin.settings.openAiApiKey) provider = 'openai';
+            else if (plugin.settings.ollamaEnabled) provider = 'ollama';
 
-			const aiResponse = await generateChatResponse(plugin.app, history, userText, noteContent, provider, plugin.settings, controller.signal);
+            const aiResponse = await generateChatResponse(plugin.app, history, userText, noteContent, provider, plugin.settings, controller.signal);
 
-			history.push({ role: 'ai', content: aiResponse });
-			if (sourcePath) {
+            history.push({ role: 'ai', content: aiResponse });
+            if (sourcePath) {
                 plugin.feedbackCache.set(sourcePath, history);
                 // Trigger Sync
                 plugin.app.workspace.trigger('anki:chat-update', sourcePath, history);
             }
 
-			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
+            renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
 
-		} catch (e: any) {
-			if (e.name === 'AbortError' || e.message === "Aborted by user") {
-				history.push({ role: 'ai', content: "_(Abgebrochen)_" });
-			} else {
-				new Notice("Fehler bei der Antwort: " + e.message);
-				history.push({ role: 'ai', content: "Fehler: " + e.message });
-			}
-			renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
-		} finally {
-			if (sourcePath) {
-				plugin.removeActiveGeneration(sourcePath + "::chat");
-			}
-		}
-	});
+        } catch (e: any) {
+            if (e.name === 'AbortError' || e.message === "Aborted by user") {
+                history.push({ role: 'ai', content: "_(Abgebrochen)_" });
+            } else {
+                new Notice("Fehler bei der Antwort: " + e.message);
+                history.push({ role: 'ai', content: "Fehler: " + e.message });
+            }
+            renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
+        } finally {
+            if (sourcePath) {
+                plugin.removeActiveGeneration(sourcePath + "::chat");
+            }
+        }
+    };
 
-	// --- FEEDBACK BUTTON INSIDE CHAT ---
-	const feedbackBtnContainer = inputArea.createDiv();
-	feedbackBtnContainer.style.display = 'flex';
-	feedbackBtnContainer.style.justifyContent = 'flex-start';
+    // --- FEEDBACK BUTTON INSIDE CHAT ---
+    const feedbackBtnContainer = chatContentWrapper.createDiv();
+    feedbackBtnContainer.style.display = 'flex';
+    feedbackBtnContainer.style.justifyContent = 'flex-start';
+    feedbackBtnContainer.style.marginTop = '5px';
 
-	const getFeedbackBtn = new ButtonComponent(feedbackBtnContainer);
-	getFeedbackBtn.setButtonText("🔍 Feedback einholen");
-	getFeedbackBtn.setTooltip("Analysiert die Notiz und gibt Feedback");
-	getFeedbackBtn.onClick(async () => {
-		getFeedbackBtn.setDisabled(true);
-		getFeedbackBtn.setButtonText("⏳ Lade...");
+    const getFeedbackBtn = new ButtonComponent(feedbackBtnContainer);
+    getFeedbackBtn.setButtonText("🔍 Feedback einholen");
+    getFeedbackBtn.setTooltip("Analysiert die Notiz und gibt Feedback");
+    getFeedbackBtn.onClick(async () => {
+        getFeedbackBtn.setDisabled(true);
+        getFeedbackBtn.setButtonText("⏳ Lade...");
 
-		const controller = new AbortController();
-		if (sourcePath) {
-			plugin.addActiveGeneration(sourcePath + "::feedback-ui", controller, "Feedback (Manuell)", sourcePath);
-		}
+        const controller = new AbortController();
+        if (sourcePath) {
+            plugin.addActiveGeneration(sourcePath + "::feedback-ui", controller, "Feedback (Manuell)", sourcePath);
+        }
 
-		try {
-			// Find the correct view based on sourcePath
-			let view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-            
+        try {
+            // Find the correct view based on sourcePath
+            let view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+
             // If we have a sourcePath, try to find the specific leaf for it
             if (sourcePath) {
-                 const leaves = plugin.app.workspace.getLeavesOfType('markdown');
-                 const matchingLeaf = leaves.find(l => (l.view as MarkdownView).file?.path === sourcePath);
-                 if (matchingLeaf) {
-                     view = matchingLeaf.view as MarkdownView;
-                 } else {
-                     console.log("AnkiGenerator Debug: No matching leaf found for sourcePath:", sourcePath);
-                     console.log("Open leaves:", leaves.map(l => (l.view as MarkdownView).file?.path));
-                 }
+                const leaves = plugin.app.workspace.getLeavesOfType('markdown');
+                const matchingLeaf = leaves.find(l => (l.view as MarkdownView).file?.path === sourcePath);
+                if (matchingLeaf) {
+                    view = matchingLeaf.view as MarkdownView;
+                } else {
+                    console.log("AnkiGenerator Debug: No matching leaf found for sourcePath:", sourcePath);
+                    console.log("Open leaves:", leaves.map(l => (l.view as MarkdownView).file?.path));
+                }
             } else {
                 console.log("AnkiGenerator Debug: sourcePath is undefined in renderFeedback.");
             }
 
-			if (!view) { new Notice("Konnte die zugehörige Notiz nicht finden (ist sie geöffnet?)."); return; }
-			const noteContent = view.editor.getValue();
+            if (!view) { new Notice("Konnte die zugehörige Notiz nicht finden (ist sie geöffnet?)."); return; }
+            const noteContent = view.editor.getValue();
 
-			let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
-			if (plugin.settings.geminiApiKey) provider = 'gemini';
-			else if (plugin.settings.openAiApiKey) provider = 'openai';
-			else if (plugin.settings.ollamaEnabled) provider = 'ollama';
+            let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
+            if (plugin.settings.geminiApiKey) provider = 'gemini';
+            else if (plugin.settings.openAiApiKey) provider = 'openai';
+            else if (plugin.settings.ollamaEnabled) provider = 'ollama';
 
-			const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings, controller.signal);
+            const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings, controller.signal);
 
-			if (feedback) {
-				history.push({ role: 'ai', content: feedback });
-				if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
-				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
-				renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls);
-			} else {
-				new Notice("Kein Feedback erhalten.");
-			}
-		} catch (e: any) {
-			if (e.name === 'AbortError' || e.message === "Aborted by user") {
-				new Notice("Feedback abgebrochen.");
-			} else {
-				new Notice("Fehler beim Abrufen des Feedbacks: " + e.message);
-				console.error(e);
-			}
-		} finally {
-			if (sourcePath) {
-				plugin.removeActiveGeneration(sourcePath + "::feedback-ui");
-			}
-			getFeedbackBtn.setDisabled(false);
-			getFeedbackBtn.setButtonText("🔍 Feedback einholen");
-		}
-	});
+            if (feedback) {
+                history.push({ role: 'ai', content: feedback });
+                if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
+                renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
+            } else {
+                new Notice("Kein Feedback erhalten.");
+            }
+        } catch (e: any) {
+            if (e.name === 'AbortError' || e.message === "Aborted by user") {
+                new Notice("Feedback abgebrochen.");
+            } else {
+                new Notice("Fehler beim Abrufen des Feedbacks: " + e.message);
+                console.error(e);
+            }
+        } finally {
+            if (sourcePath) {
+                plugin.removeActiveGeneration(sourcePath + "::feedback-ui");
+            }
+            getFeedbackBtn.setDisabled(false);
+            getFeedbackBtn.setButtonText("🔍 Feedback einholen");
+        }
+    });
 
     // --- CARD PREVIEW SECTION ---
     if (sourcePath && state) {
         // Create a wrapper for the preview section to isolate re-renders if needed
         const previewWrapper = container.createDiv({ cls: 'anki-preview-wrapper' });
-        await renderCardPreviewSection(previewWrapper, sourcePath, plugin, state, cards);
+        await renderCardPreviewSection(previewWrapper, sourcePath, plugin, state, cards, deckName);
     }
 }
 
-async function renderCardPreviewSection(container: HTMLElement, sourcePath: string, plugin: AnkiGeneratorPlugin, state: CardPreviewState, preloadedCards?: Card[]) {
+async function renderCardPreviewSection(
+    container: HTMLElement,
+    sourcePath: string,
+    plugin: AnkiGeneratorPlugin,
+    state: CardPreviewState,
+    preloadedCards?: Card[],
+    deckName: string | null = null
+) {
     const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
     if (!(file instanceof TFile)) return;
 
     try {
         const content = await plugin.app.vault.read(file);
-        
+
         // Use imported regex (needs import) or just match locally for now to avoid circular deps if possible,
         // but we should reuse parser.
-        
+
         const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
         if (matches.length === 0) return;
 
-    let cards: Card[] = [];
+        let cards: Card[] = [];
 
-    if (preloadedCards) {
-        cards = preloadedCards;
-    } else {
-        try {
-            const content = await plugin.app.vault.read(file);
-            // Use imported regex (needs import) or just match locally for now to avoid circular deps if possible,
-            // but we should reuse parser.
-            const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
-            if (matches.length > 0) {
-                 // Aggregating all cards logic similar to getAllCardsForFile if we want full file preview?
-                 // Original logic only took LAST match. 
-                 // If we want consistency with getAllCardsForFile, we should probably loop all matches.
-                 // However, "renderCardPreviewSection" originally only took last match?
-                 // Let's look at original code:
-                 // "const lastMatch = matches[matches.length - 1]; ... const cards = parseCardsFromBlockSource(blockContent);"
-                 // If the new external logic provides ALL cards, and this old logic provided LAST block, checking strictly might be issue.
-                 // But for "Sidebar" we likely want ALL cards in file.
-                 // Let's stick to using preloadedCards if available.
-                 // If not, we fall back to existing behavior (Last Block) for safety, OR upgrade to all blocks.
-                 // Let's upgrade to all blocks to match "Auto-Update" goal which likely implies full file context.
-                 
-                 // Fallback to original behavior if no preloaded:
-                 const lastMatch = matches[matches.length - 1];
-                 const blockContent = lastMatch[1];
-                 cards = parseCardsFromBlockSource(blockContent);
+        if (preloadedCards) {
+            cards = preloadedCards;
+        } else {
+            try {
+                const content = await plugin.app.vault.read(file);
+                // Use imported regex (needs import) or just match locally for now to avoid circular deps if possible,
+                // but we should reuse parser.
+                const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                if (matches.length > 0) {
+                    // Aggregating all cards logic similar to getAllCardsForFile if we want full file preview?
+                    // Original logic only took LAST match. 
+                    // If we want consistency with getAllCardsForFile, we should probably loop all matches.
+                    // However, "renderCardPreviewSection" originally only took last match?
+                    // Let's look at original code:
+                    // "const lastMatch = matches[matches.length - 1]; ... const cards = parseCardsFromBlockSource(blockContent);"
+                    // If the new external logic provides ALL cards, and this old logic provided LAST block, checking strictly might be issue.
+                    // But for "Sidebar" we likely want ALL cards in file.
+                    // Let's stick to using preloadedCards if available.
+                    // If not, we fall back to existing behavior (Last Block) for safety, OR upgrade to all blocks.
+                    // Let's upgrade to all blocks to match "Auto-Update" goal which likely implies full file context.
+
+                    // Fallback to original behavior if no preloaded:
+                    const lastMatch = matches[matches.length - 1];
+                    const blockContent = lastMatch[1];
+                    cards = parseCardsFromBlockSource(blockContent);
+                }
+            } catch (e) {
+                console.error("Error reading file for preview:", e);
             }
-        } catch (e) {
-             console.error("Error reading file for preview:", e);
         }
-    }
 
         if (cards.length === 0) return;
+
+        if (cards.length === 0) return;
+
+        // Ensure state defaults
+        if (state.isQuestionsOpen === undefined) state.isQuestionsOpen = true;
 
         let previewContainer = container.querySelector('.anki-sidebar-preview') as HTMLElement;
         let cardsDiv: HTMLElement;
@@ -589,6 +604,8 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
                 .anki-sidebar-card-header:hover {
                     background-color: var(--background-modifier-hover);
                 }
+                /* Removing sidebar-styles injection here to avoid duplication if we move it up, 
+                   but for safety let's leave card-specific styles. */
                 .anki-sidebar-card-body {
                     padding: 12px;
                     border-top: 1px solid var(--background-modifier-border);
@@ -628,6 +645,14 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
                 .anki-collapsed .anki-arrow {
                     transform: rotate(-90deg);
                 }
+                .anki-sidebar-section-arrow {
+                     transition: transform 0.2s;
+                     margin-right: 5px;
+                     cursor: pointer;
+                }
+                .anki-sidebar-section-collapsed .anki-sidebar-section-arrow {
+                     transform: rotate(-90deg);
+                }
                 .anki-card-actions {
                     display: flex;
                     gap: 5px;
@@ -651,24 +676,38 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
             // TITLE & COUNT
             const headerRow = previewContainer.createDiv({ cls: 'anki-sidebar-header-row' });
             headerRow.style.display = 'flex';
-            headerRow.style.justifyContent = 'space-between';
             headerRow.style.alignItems = 'center';
-            
+            headerRow.style.cursor = 'pointer';
+            headerRow.style.marginBottom = '10px';
+
+            if (!state.isQuestionsOpen) {
+                headerRow.addClass('anki-sidebar-section-collapsed');
+            }
+
+            const sectionArrow = headerRow.createSpan({ cls: 'anki-sidebar-section-arrow', text: '🔽' });
             const h4 = headerRow.createEl('h4', { text: `📝 Fragen (${cards.length})` });
             h4.style.margin = '0';
-            
+
+            // Toggle Logic
+            headerRow.onclick = () => {
+                state.isQuestionsOpen = !state.isQuestionsOpen;
+                // Re-render
+                renderCardPreviewSection(container, sourcePath, plugin, state, cards, deckName);
+            };
+
             // CONTROLS
             const controlsDiv = previewContainer.createDiv({ cls: 'anki-sidebar-controls' });
-            
+            if (!state.isQuestionsOpen) controlsDiv.style.display = 'none';
+
             // Row 1: Search
             const searchRow = controlsDiv.createDiv({ cls: 'anki-control-row' });
             const searchEl = searchRow.createEl('input', { type: 'text', placeholder: '🔍 Suchen...' });
             searchEl.value = state.searchQuery;
-            searchEl.style.width = '100%'; 
+            searchEl.style.width = '100%';
             searchEl.oninput = () => {
-                 state.searchQuery = searchEl.value.toLowerCase();
-                 // Re-render only cards
-                 renderCardPreviewSection(container, sourcePath, plugin, state, cards); 
+                state.searchQuery = searchEl.value.toLowerCase();
+                // Re-render only cards (full re-render for simplicity to ensure handlers attached)
+                renderCardPreviewSection(container, sourcePath, plugin, state, cards);
             };
 
             // Row 2: Sort + Expand/Collapse
@@ -677,7 +716,7 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
 
             // Sort
             const sortSelect = actionRow.createEl('select');
-            sortSelect.style.maxWidth = '130px'; 
+            sortSelect.style.maxWidth = '130px';
             sortSelect.style.backgroundColor = 'var(--background-primary)';
             sortSelect.style.border = '1px solid var(--background-modifier-border)';
             sortSelect.style.color = 'var(--text-normal)';
@@ -687,23 +726,23 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
             sortSelect.style.fontSize = '0.9em';
 
             const sortOpts = [
-                {val: 'default', text: 'Standard'}, 
-                {val: 'type', text: 'Nach Typ'},
-                {val: 'question', text: 'A-Z'}
+                { val: 'default', text: 'Standard' },
+                { val: 'type', text: 'Nach Typ' },
+                { val: 'question', text: 'A-Z' }
             ];
             sortOpts.forEach(o => {
-                const opt = sortSelect.createEl('option', {text: o.text, value: o.val});
+                const opt = sortSelect.createEl('option', { text: o.text, value: o.val });
                 if (state.sortOrder === o.val) opt.selected = true;
             });
             sortSelect.onchange = () => {
                 state.sortOrder = sortSelect.value as any;
-                 renderCardPreviewSection(container, sourcePath, plugin, state, cards);
+                renderCardPreviewSection(container, sourcePath, plugin, state, cards, deckName);
             };
 
-            // Expand/Collapse
+            // Expand/Collapse All
             const toggleAllBtn = new ButtonComponent(actionRow);
             toggleAllBtn.setButtonText(state.isAllExpanded ? "🔼 Alle einklappen" : "🔽 Alle ausklappen");
-            toggleAllBtn.buttonEl.style.flex = '1'; 
+            toggleAllBtn.buttonEl.style.flex = '1';
             toggleAllBtn.onClick(() => {
                 state.isAllExpanded = !state.isAllExpanded;
                 if (state.isAllExpanded) {
@@ -711,27 +750,55 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
                 } else {
                     state.expandedIndices.clear();
                 }
-                toggleAllBtn.setButtonText(state.isAllExpanded ? "🔼 Alle einklappen" : "🔽 Alle ausklappen"); // Update button text manually since we don't re-render shell
-                renderCardPreviewSection(container, sourcePath, plugin, state, cards);
+                // Update button text manually since we don't always re-render shell if reusing elements?
+                // Actually we just re-render properly.
+                renderCardPreviewSection(container, sourcePath, plugin, state, cards, deckName);
             });
 
             cardsDiv = previewContainer.createDiv({ cls: 'anki-sidebar-cards' });
             cardsDiv.style.maxHeight = '500px';
             cardsDiv.style.overflowY = 'auto';
+            if (!state.isQuestionsOpen) cardsDiv.style.display = 'none';
+
+            // Scroll Persistence
+            cardsDiv.onscroll = () => {
+                state.questionsScrollTop = cardsDiv.scrollTop;
+            };
 
         } else {
-             cardsDiv = previewContainer.querySelector('.anki-sidebar-cards') as HTMLElement;
-             if (cardsDiv) cardsDiv.empty();
-             else cardsDiv = previewContainer.createDiv({ cls: 'anki-sidebar-cards' }); // Fallback
+            // Re-using container logic - need to update header and visibility
+            // For simplicity in this function design, we often recreated internal parts if not carefully separated.
+            // The logic above tries to create the SHELL (controls + card container) only once.
+            // But if we toggle "Questions Open", we need to update the arrow and visibility.
+
+            // Update Header Arrow
+            const headerRow = previewContainer.querySelector('.anki-sidebar-header-row') as HTMLElement;
+            if (headerRow) {
+                if (state.isQuestionsOpen) headerRow.removeClass('anki-sidebar-section-collapsed');
+                else headerRow.addClass('anki-sidebar-section-collapsed');
+            }
+
+            // Update Visibility
+            const controlsDiv = previewContainer.querySelector('.anki-sidebar-controls') as HTMLElement;
+            if (controlsDiv) controlsDiv.style.display = state.isQuestionsOpen ? 'flex' : 'none';
+
+            cardsDiv = previewContainer.querySelector('.anki-sidebar-cards') as HTMLElement;
+            if (cardsDiv) {
+                cardsDiv.style.display = state.isQuestionsOpen ? 'block' : 'none';
+                cardsDiv.empty(); // Clear cards to re-render them
+            } else {
+                cardsDiv = previewContainer.createDiv({ cls: 'anki-sidebar-cards' }); // Fallback
+            }
         }
+
 
         // FILTER & SORT LOGIC
         let displayCards = cards.map((c, i) => ({ card: c, originalIndex: i }));
-        
+
         // Search Filter
         if (state.searchQuery) {
             const q = state.searchQuery;
-            displayCards = displayCards.filter(item => 
+            displayCards = displayCards.filter(item =>
                 item.card.q.toLowerCase().includes(q) || item.card.a.toLowerCase().includes(q)
             );
         }
@@ -756,22 +823,22 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
         for (const item of displayCards) {
             const { card, originalIndex } = item;
             const isExpanded = state.expandedIndices.has(originalIndex);
-            
+
             const cardEl = cardsDiv.createDiv({ cls: `anki-sidebar-card ${isExpanded ? '' : 'anki-collapsed'}` });
 
             // HEADER
             const header = cardEl.createDiv({ cls: 'anki-sidebar-card-header' });
-            
+
             // Meta (Arrow + Type)
             const metaDiv = header.createDiv({ cls: 'anki-sidebar-meta' });
-            const arrow = metaDiv.createSpan({ cls: 'anki-arrow', text: '🔽' }); 
+            const arrow = metaDiv.createSpan({ cls: 'anki-arrow', text: '🔽' });
             if (!isExpanded) arrow.style.transform = 'rotate(-90deg)';
-             
+
             // Type Badge Colors
-            let typeColor = '#3498db'; 
+            let typeColor = '#3498db';
             let typeBg = 'rgba(52, 152, 219, 0.15)';
             let typeText = 'Basic';
-            if (card.type === 'Cloze') { 
+            if (card.type === 'Cloze') {
                 typeColor = '#9b59b6'; typeBg = 'rgba(155, 89, 182, 0.15)'; typeText = 'Lücke';
             } else if (card.typeIn) {
                 typeColor = '#d4af37'; typeBg = 'rgba(212, 175, 55, 0.15)'; typeText = 'Type';
@@ -783,14 +850,14 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
 
             // Short Question Preview in Header
             const titlePreview = header.createDiv({ cls: 'anki-card-title-preview' });
-            
+
             // Link Stripping Logic:
             // 1. Replace [[Target|Alias]] with Alias
             // 2. Replace [[Target]] with Target
             // 3. Replace [Text](Target) with Text
             // 4. Remove Bold/Italic chars (*, _)
             let rawQ = card.q;
-            
+
             // [[Target|Alias]] -> Alias
             rawQ = rawQ.replace(/\[\[[^\]|]+\|([^\]]+)\]\]/g, '$1');
             // [[Target]] -> Target
@@ -800,9 +867,9 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
             // Render Title with Markdown to support LaTeX
             // We need to strip block-level styling from the rendered markdown
             titlePreview.empty();
-            
+
             // 1. Get first line of question
-            let previewText = card.q.split('\n')[0]; 
+            let previewText = card.q.split('\n')[0];
 
             // 2. Strip standard Markdown links [text](url) -> text
             previewText = previewText.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
@@ -814,7 +881,7 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
 
             // 4. Render (DO NOT TRUNCATE MANUALLY - Let CSS handle it)
             await MarkdownRenderer.render(plugin.app, previewText, titlePreview, sourcePath, plugin);
-            
+
             // Force inline styling for the rendered paragraph
             const p = titlePreview.querySelector('p');
             if (p) {
@@ -822,15 +889,32 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
                 p.style.display = 'inline-block';
             }
 
+            // Synced Indicator Badge
+            if (card.id) {
+                const syncedBadge = header.createSpan({ cls: 'anki-card-synced-badge' });
+                syncedBadge.innerHTML = '&#10003;'; // Checkmark
+                syncedBadge.title = 'Synchronisiert (ID: ' + card.id + ')';
+                syncedBadge.style.color = '#2ecc71';
+                syncedBadge.style.marginLeft = '8px';
+                syncedBadge.style.fontSize = '1.1em';
+                syncedBadge.style.fontWeight = 'bold';
+            }
+
             // TOGGLE CLICK
             header.onclick = (e) => {
                 // Prevent toggle if clicking a link?
                 if ((e.target as HTMLElement).tagName === 'A' || (e.target as HTMLElement).hasClass('internal-link')) {
-                    return; 
+                    return;
                 }
-                
+
+                // Allow clicking badge too
+                if ((e.target as HTMLElement).hasClass('anki-card-synced-badge')) {
+                    // Maybe show toast info? 
+                    return;
+                }
+
                 if (state.expandedIndices.has(originalIndex)) {
-            // ... (Rest of logic is same, implied by tool)
+                    // ... (Rest of logic is same, implied by tool)
                     state.expandedIndices.delete(originalIndex);
                     arrow.style.transform = 'rotate(-90deg)';
                     body.style.display = 'none';
@@ -849,21 +933,203 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
 
             // Full Q & A
             const qDiv = body.createDiv({ cls: 'anki-sidebar-q' });
-             await MarkdownRenderer.render(plugin.app, card.q, qDiv, sourcePath, plugin);
+            await MarkdownRenderer.render(plugin.app, card.q, qDiv, sourcePath, plugin);
 
             const aDiv = body.createDiv({ cls: 'anki-sidebar-a' });
             await MarkdownRenderer.render(plugin.app, card.a, aDiv, sourcePath, plugin);
-            
+
             // ACTIONS
-            const actionsDiv = body.createDiv({ cls: 'anki-card-actions' });
-            
+            const actionsDiv = cardEl.createDiv({ cls: 'anki-card-actions' });
+
+            if (card.id) {
+                // UNSYNC BUTTON (Destructive)
+                const unsyncBtn = new ButtonComponent(actionsDiv)
+                    .setIcon("trash-2")
+                    .setTooltip("Aus Anki entfernen & ID löschen");
+                unsyncBtn.buttonEl.addClass("anki-unsync-btn");
+                unsyncBtn.buttonEl.style.color = "var(--text-error)";
+
+                unsyncBtn.onClick(async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Möchtest du diese Karte (ID: ${card.id}) wirklich aus Anki löschen? Die Karte bleibt in deiner Notiz erhalten, aber die Synchronisation wird aufgehoben.`)) {
+                        new Notice("Lösche aus Anki...");
+                        // 1. Delete from Anki
+                        const { deleteAnkiNotes } = await import('../anki/AnkiConnect');
+                        if (card.id) await deleteAnkiNotes([card.id]);
+
+                        // 2. Remove ID from file (via saveAnkiBlockChanges logic roughly)
+                        // We need to find the block, parse cards, find THIS card, remove ID, save block.
+                        const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+                        if (file instanceof TFile) {
+                            const content = await plugin.app.vault.read(file);
+                            // Need regex and parser
+                            const { ANKI_BLOCK_REGEX, parseCardsFromBlockSource, formatCardsToString } = await import('../anki/ankiParser');
+                            const { findSpecificAnkiBlock } = await import('../anki/ankiParser');
+
+                            const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                            let foundBlockMatch = null;
+                            let foundCardIndex = -1;
+
+                            for (const m of matches) {
+                                const blockContent = m[1];
+                                const blockCards = parseCardsFromBlockSource(blockContent);
+                                // Match by ID if possible, otherwise content
+                                const idx = blockCards.findIndex(c => c.id === card.id);
+                                if (idx !== -1) {
+                                    foundBlockMatch = m;
+                                    foundCardIndex = idx;
+                                    break;
+                                }
+                            }
+
+                            if (foundBlockMatch && foundCardIndex !== -1) {
+                                const blockContent = foundBlockMatch[1];
+                                const blockCards = parseCardsFromBlockSource(blockContent);
+
+                                // Update the specific card: Remove ID
+                                blockCards[foundCardIndex].id = null;
+
+                                // Reconstruct Block
+                                let currentDeck = deckName || plugin.settings.mainDeck;
+                                const deckMatch = blockContent.match(/^TARGET DECK: (.*)$/m);
+                                if (deckMatch) currentDeck = deckMatch[1];
+
+                                // We need simple reconstruction
+                                // Or utilize saveAnkiBlockChanges? 
+                                // saveAnkiBlockChanges requires us to pass ALL updated cards for the block.
+                                // We have blockCards (modified).
+                                const { saveAnkiBlockChanges } = await import('../anki/syncManager');
+
+                                // saveAnkiBlockChanges handles deck line, instruction etc automatically if we pass them? 
+                                // Actually saveAnkiBlockChanges RE-READS the file content and finds block again. 
+                                // We can use it.
+                                // But saveAnkiBlockChanges takes "updatedCards". 
+                                // We modify the card in the array and pass it.
+
+                                // We do NOT pass the ID in deletedCardIds for saveAnkiBlockChanges because 
+                                // that function CALLS deleteAnkiNotes itself if passed!
+                                // But we already called deleteAnkiNotes manually to accept partial failure? 
+                                // Or better: Let saveAnkiBlockChanges do it all.
+
+                                // Better path: Use saveAnkiBlockChanges.
+                                // 1. Identify block and cards. (Done: blockCards)
+                                // 2. Modify target card in list: remove ID.
+                                // 3. Pass deleted ID separately.
+
+                                const cardIdToDelete = card.id!;
+                                blockCards[foundCardIndex].id = null;
+
+                                await saveAnkiBlockChanges(plugin, blockContent, blockCards, [cardIdToDelete]);
+                                new Notice("Karte erfolgreich entsynchronisiert!");
+                            }
+                        }
+                    }
+                });
+
+            } else {
+                // SYNC BUTTON (Normal)
+                const syncBtn = new ButtonComponent(actionsDiv)
+                    .setIcon("refresh-cw")
+                    .setTooltip("Karte synchronisieren");
+                syncBtn.onClick(async (e) => {
+                    e.stopPropagation();
+
+                    // Find and Sync Logic
+                    const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+                    if (file instanceof TFile) {
+                        const content = await plugin.app.vault.read(file);
+                        // We need to find the block this card belongs to.
+                        // Card has originalText? Yes.
+                        // We can match the originalText in the content? 
+                        // Or we can parse blocks and find which one contains this card.
+
+                        // Simple approach: Iterate blocks, parse matching block, find card.
+                        // IMPORTANT: We need correct index logic.
+                        const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                        let foundBlockMatch = null;
+                        let foundCardIndex = -1;
+
+                        for (const m of matches) {
+                            // Check if this block contains our card
+                            // We can parse the block and try to find matching Q/A
+                            const blockContent = m[1];
+                            const blockCards = parseCardsFromBlockSource(blockContent);
+                            const idx = blockCards.findIndex(c => c.q.trim() === card.q.trim() && c.a.trim() === card.a.trim());
+
+                            if (idx !== -1) {
+                                foundBlockMatch = m;
+                                foundCardIndex = idx; // This is the index WITHIN the block
+                                break;
+                            }
+                        }
+
+                        if (foundBlockMatch && foundCardIndex !== -1) {
+                            const blockContent = foundBlockMatch[1];
+                            const blockCards = parseCardsFromBlockSource(blockContent);
+                            let currentDeck = deckName || plugin.settings.mainDeck;
+                            const deckMatch = blockContent.match(/^TARGET DECK: (.*)$/m);
+                            if (deckMatch) currentDeck = deckMatch[1];
+
+                            // Sync JUST this block, targeting ONLY the specific card index
+                            new Notice(`Synchronisiere einzelne Karte...`);
+                            await syncAnkiBlock(plugin, blockContent, currentDeck, blockCards, file, foundCardIndex);
+                        } else {
+                            new Notice("Konnte den Anki-Block für diese Karte nicht finden.");
+                        }
+                    }
+                });
+            }
+
             const editBtn = new ButtonComponent(actionsDiv);
             editBtn.setIcon('pencil');
             editBtn.setTooltip("Bearbeiten");
             editBtn.onClick(async (e) => {
                 e.stopPropagation(); // Avoid Collapse? It's in body, so no collapse.
-                new CardEditModal(plugin.app, card, sourcePath, async (updatedCard) => {
-                     await updateCardInFile(plugin, sourcePath, card, updatedCard);
+                // Edit Logic
+                state.questionsScrollTop = cardsDiv.scrollTop; // Save scroll position before opening modal (just in case)
+
+                new CardEditModal(plugin.app, card, sourcePath, async (updatedCard, shouldSync) => {
+                    if (isSameCard(card, updatedCard) && !shouldSync) return;
+
+                    // Update in file
+                    await updateCardInFile(plugin, sourcePath, card, updatedCard);
+
+                    if (shouldSync) {
+                        // Trigger Sync Logic for THIS card's block
+                        // Reuse logic from Sync Button
+                        const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+                        if (file instanceof TFile) {
+                            setTimeout(async () => { // Wait for file update to propagate?
+                                const content = await plugin.app.vault.read(file);
+                                const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                                let foundBlockMatch = null;
+                                let foundCardIndex = -1;
+
+                                for (const m of matches) {
+                                    // Check for UPDATED card content
+                                    const blockContent = m[1];
+                                    const blockCards = parseCardsFromBlockSource(blockContent);
+                                    const idx = blockCards.findIndex(c => c.q.trim() === updatedCard.q?.trim() && c.a.trim() === updatedCard.a?.trim());
+
+                                    if (idx !== -1) {
+                                        foundBlockMatch = m;
+                                        foundCardIndex = idx;
+                                        break;
+                                    }
+                                }
+                                if (foundBlockMatch && foundCardIndex !== -1) {
+                                    const blockContent = foundBlockMatch[1];
+                                    const blockCards = parseCardsFromBlockSource(blockContent);
+                                    let currentDeck = deckName || plugin.settings.mainDeck;
+                                    const deckMatch = blockContent.match(/^TARGET DECK: (.*)$/m);
+                                    if (deckMatch) currentDeck = deckMatch[1];
+
+                                    new Notice(`Synchronisiere Karte...`);
+                                    await syncAnkiBlock(plugin, blockContent, currentDeck, blockCards, file, foundCardIndex);
+                                }
+                            }, 500); // 500ms delay to ensure file write
+                        }
+                    }
                 }).open();
             });
 
@@ -896,8 +1162,12 @@ async function renderCardPreviewSection(container: HTMLElement, sourcePath: stri
             }
         });
 
+        // RESTORE SCROLL POSITION
+        if (state.questionsScrollTop) {
+            cardsDiv.scrollTop = state.questionsScrollTop;
+        }
     } catch (e) {
-        console.error("Error rendering sidebar preview:", e);
+        console.error("Error generating card preview:", e);
     }
 }
 
@@ -911,7 +1181,7 @@ function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlug
     actionContainer.style.background = 'var(--background-secondary)';
     actionContainer.style.padding = '8px';
     actionContainer.style.borderRadius = '5px';
-    
+
     // Header Row with Title and Deck
     const headerRow = actionContainer.createDiv({ cls: 'anki-actions-header' });
     headerRow.style.display = 'flex';
@@ -948,18 +1218,18 @@ function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlug
         setIcon(editDeckBtn, 'pencil');
         editDeckBtn.title = "Deck ändern";
         editDeckBtn.onclick = async () => {
-             // Open Deck Selection
+            // Open Deck Selection
             let deckNames: string[] = [];
-            try { deckNames = await getDeckNames(); } catch (e) {}
-             
-             new DeckSelectionModal(plugin.app, deckName || plugin.settings.mainDeck, deckNames, async (newDeckName) => {
-                 if (newDeckName && newDeckName !== deckName) {
-                     const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
-                     if (file instanceof TFile) {
-                         await updateFirstBlockDeck(plugin.app, file, newDeckName);
-                     }
-                 }
-             }).open();
+            try { deckNames = await getDeckNames(); } catch (e) { }
+
+            new DeckSelectionModal(plugin.app, deckName || plugin.settings.mainDeck, deckNames, async (newDeckName) => {
+                if (newDeckName && newDeckName !== deckName) {
+                    const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+                    if (file instanceof TFile) {
+                        await updateFirstBlockDeck(plugin.app, file, newDeckName);
+                    }
+                }
+            }).open();
         };
     }
 
@@ -990,22 +1260,22 @@ function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlug
     syncButton.onclick = async () => {
         const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
         if (!(file instanceof TFile)) return;
-        
+
         const content = await plugin.app.vault.read(file);
         const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
         if (matches.length > 0) {
-             let syncedCount = 0;
-             for (const m of matches) {
-                 const blockContent = m[1];
-                 const blockCards = parseCardsFromBlockSource(blockContent);
-                 let currentDeck = deckName || plugin.settings.mainDeck;
-                 const deckMatch = blockContent.match(/^TARGET DECK: (.*)$/m);
-                 if (deckMatch) currentDeck = deckMatch[1];
-                 
-                 await syncAnkiBlock(plugin, blockContent, currentDeck, blockCards, file);
-                 syncedCount++;
-             }
-             if (syncedCount > 0) new Notice(`${syncedCount} Anki-Blöcke synchronisiert.`);
+            let syncedCount = 0;
+            for (const m of matches) {
+                const blockContent = m[1];
+                const blockCards = parseCardsFromBlockSource(blockContent);
+                let currentDeck = deckName || plugin.settings.mainDeck;
+                const deckMatch = blockContent.match(/^TARGET DECK: (.*)$/m);
+                if (deckMatch) currentDeck = deckMatch[1];
+
+                await syncAnkiBlock(plugin, blockContent, currentDeck, blockCards, file);
+                syncedCount++;
+            }
+            if (syncedCount > 0) new Notice(`${syncedCount} Anki-Blöcke synchronisiert.`);
         } else {
             new Notice("Keine Anki-Blöcke gefunden.");
         }
@@ -1018,44 +1288,44 @@ function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlug
     reviseButton.onclick = async () => {
         const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
         if (!view || view.file?.path !== sourcePath) { new Notice("Bitte die entsprechende Datei öffnen."); return; }
-        
+
         startRevisionProcess(plugin, view.editor, deckName, sourcePath, (history) => {
-             plugin.activateFeedbackView(history, sourcePath);
+            plugin.activateFeedbackView(history, sourcePath);
         });
     };
 
     // 4. Manual
-     if (plugin.settings.enableManualMode) {
+    if (plugin.settings.enableManualMode) {
         const manualBtn = btnRow.createEl('button', { text: '🛠️ Manual' });
         manualBtn.style.flex = '1';
         manualBtn.onclick = async () => {
-             const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
-             if (file instanceof TFile) {
-                 const content = await plugin.app.vault.read(file);
-                 const { preparedContent, files } = await extractImagesAndPrepareContent(plugin, content, file.path);
-                 const existingCardsText = cards ? cards.map(c => c.originalText).join('\n') : "";
-                 const prompt = constructPrompt(preparedContent, existingCardsText, plugin.settings, "", false, file.basename);
-                 
-                 new ManualGenerationModal(plugin.app, prompt, async (response) => {
-                     if (!response) return;
-                     const cleaned = cleanAiGeneratedText(response);
-                     const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
-                     
-                     if (matches.length > 0) {
-                         const lastMatch = matches[matches.length - 1];
-                         const blockContent = lastMatch[1];
-                         const newContent = `\`\`\`anki-cards\n${blockContent}\n${cleaned}\n\`\`\``;
-                         const newFileContent = content.replace(lastMatch[0], newContent);
-                         await plugin.app.vault.modify(file, newFileContent);
-                         new Notice("Karten hinzugefügt.");
-                     } else {
-                         const newBlock = `\`\`\`anki-cards\nTARGET DECK: ${plugin.settings.mainDeck}\n\n${cleaned}\n\`\`\``;
-                         await plugin.app.vault.append(file, "\n" + newBlock);
-                         new Notice("Neuer Anki-Block erstellt.");
-                     }
+            const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
+            if (file instanceof TFile) {
+                const content = await plugin.app.vault.read(file);
+                const { preparedContent, files } = await extractImagesAndPrepareContent(plugin, content, file.path);
+                const existingCardsText = cards ? cards.map(c => c.originalText).join('\n') : "";
+                const prompt = constructPrompt(preparedContent, existingCardsText, plugin.settings, "", false, file.basename);
 
-                 }, undefined, files).open();
-             }
+                new ManualGenerationModal(plugin.app, prompt, async (response) => {
+                    if (!response) return;
+                    const cleaned = cleanAiGeneratedText(response);
+                    const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+
+                    if (matches.length > 0) {
+                        const lastMatch = matches[matches.length - 1];
+                        const blockContent = lastMatch[1];
+                        const newContent = `\`\`\`anki-cards\n${blockContent}\n${cleaned}\n\`\`\``;
+                        const newFileContent = content.replace(lastMatch[0], newContent);
+                        await plugin.app.vault.modify(file, newFileContent);
+                        new Notice("Karten hinzugefügt.");
+                    } else {
+                        const newBlock = `\`\`\`anki-cards\nTARGET DECK: ${plugin.settings.mainDeck}\n\n${cleaned}\n\`\`\``;
+                        await plugin.app.vault.append(file, "\n" + newBlock);
+                        new Notice("Neuer Anki-Block erstellt.");
+                    }
+
+                }, undefined, files).open();
+            }
         };
     }
 }
@@ -1064,16 +1334,16 @@ async function updateCardInFile(plugin: AnkiGeneratorPlugin, sourcePath: string,
     const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
     if (!(file instanceof TFile)) return;
     const content = await plugin.app.vault.read(file);
-    
+
     // Use imported regex (matches all) or local ref if needed. 
     // ANKI_BLOCK_REGEX is imported from parser.
     const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
-    
+
     for (const match of matches) {
         const fullBlock = match[0];
         const blockContent = match[1];
         const cards = parseCardsFromBlockSource(blockContent);
-        
+
         // Find card in this block
         const idx = cards.findIndex(c => isSameCard(c, originalCard));
         if (idx !== -1) {

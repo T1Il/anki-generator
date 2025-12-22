@@ -1,4 +1,4 @@
-import { Modal, Setting, Notice, MarkdownRenderer, setIcon } from 'obsidian';
+import { Modal, Setting, Notice, MarkdownRenderer, setIcon, TFile } from 'obsidian';
 import { Card } from '../types';
 import { CardEditModal } from './CardEditModal';
 import AnkiGeneratorPlugin from '../main';
@@ -12,18 +12,20 @@ export class CardPreviewModal extends Modal {
 	deletedCardIds: number[] = [];
 	currentSort: string = 'default';
 	currentFilter: 'all' | 'synced' | 'unsynced' = 'all';
-	searchQuery: string = ''; 
-    sourcePath: string;
+	searchQuery: string = '';
+	sourcePath: string;
 
 	constructor(plugin: AnkiGeneratorPlugin, cards: Card[], deckName: string, sourcePath: string, onSave: (cards: Card[], deletedCardIds: number[], newDeckName: string) => void, instruction?: string) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.cards = [...cards];
 		this.deckName = deckName || "";
-        this.sourcePath = sourcePath;
+		this.sourcePath = sourcePath;
 		this.instruction = instruction;
 		this.onSave = onSave;
 		this.modalEl.addClass('anki-preview-modal-wide');
+		this.modalEl.style.maxWidth = '800px'; // Wider default
+		this.modalEl.style.width = '90%';
 	}
 
 	onOpen() {
@@ -36,60 +38,10 @@ export class CardPreviewModal extends Modal {
 		contentEl.empty();
 		contentEl.createEl("h2", { text: "Karten bearbeiten & verwalten" });
 
-		// --- Instruction Display ---
-		if (this.instruction) {
-			const instructionEl = contentEl.createDiv({ cls: 'anki-instruction-preview' });
-			instructionEl.style.color = '#4a90e2';
-			instructionEl.style.fontStyle = 'italic';
-			instructionEl.style.borderLeft = '3px solid #4a90e2';
-			instructionEl.style.paddingLeft = '10px';
-			instructionEl.style.marginBottom = '15px';
-			instructionEl.style.padding = '10px';
-			instructionEl.style.backgroundColor = 'rgba(74, 144, 226, 0.1)';
-			instructionEl.style.borderRadius = '5px';
-			instructionEl.createEl('strong', { text: 'Anweisung: ' });
-			instructionEl.createSpan({ text: `"${this.instruction}"` });
-		}
+		// ... (Instruction)
 
 		// --- Deck Name Input ---
-		new Setting(contentEl)
-			.setName("Target Deck")
-			.setDesc("Der Name des Decks in Anki, in das diese Karten synchronisiert werden.")
-			.addText(text => text
-				.setValue(this.deckName)
-				.onChange(value => {
-					this.deckName = value;
-				})
-				.inputEl.style.width = '100%'
-			);
-
-		const buttonContainer = contentEl.createDiv({ cls: 'anki-preview-button-container' });
-		buttonContainer.style.marginTop = '20px';
-
-		buttonContainer.createEl('button', { text: '➕ Neue Karte hinzufügen' }).addEventListener('click', () => {
-			new CardEditModal(this.plugin.app, {}, this.sourcePath, (newCard) => {
-				this.cards.push(newCard);
-				this.render();
-			}).open();
-		});
-
-
-
-		// --- Delete All Button ---
-		const deleteAllBtn = buttonContainer.createEl('button', { text: '🗑️ Alle löschen', cls: 'anki-delete-button' });
-		deleteAllBtn.style.marginLeft = '10px';
-		deleteAllBtn.addEventListener('click', () => {
-			if (confirm("Möchtest du wirklich ALLE Karten in diesem Block löschen? Dies kann nicht rückgängig gemacht werden.")) {
-				this.cards.forEach(card => {
-					if (card.id) {
-						this.deletedCardIds.push(card.id);
-					}
-				});
-				this.cards = [];
-				this.render();
-				new Notice("Alle Karten wurden zum Löschen markiert.");
-			}
-		});
+		// ...
 
 		// --- Sorting Controls ---
 		const sortContainer = contentEl.createDiv({ cls: 'anki-preview-sort-container' });
@@ -97,6 +49,7 @@ export class CardPreviewModal extends Modal {
 		sortContainer.style.display = 'flex';
 		sortContainer.style.alignItems = 'center';
 		sortContainer.style.gap = '10px';
+		sortContainer.style.flexWrap = 'wrap'; // Allow wrapping
 
 		// --- Filter Controls ---
 		sortContainer.createSpan({ text: 'Filter:' });
@@ -133,14 +86,14 @@ export class CardPreviewModal extends Modal {
 		// If render clears contentEl, we lose focus. Ideally we only re-render the card list.
 		// For now, let's just make it simple. If we type, we filter immediately? 
 		// Better: store searchQuery in class.
-		
+
 		// Note: searchInput.value = this.searchQuery;
-		
+
 		searchInput.addEventListener('input', () => {
 			this.searchQuery = searchInput.value.toLowerCase();
 			// We only want to re-render the card container, not the whole header to avoid losing focus.
 			// Implementing separate renderCards() properly.
-			this.renderCardsContainer(container, sourcePath); 
+			this.renderCardsContainer(container, sourcePath);
 		});
 
 		sortContainer.createSpan({ text: 'Sortieren:' });
@@ -165,7 +118,7 @@ export class CardPreviewModal extends Modal {
 			this.sortCards();
 			this.render(); // This re-renders everything
 		});
-		
+
 		// --- Save Search Query reference to restore value if full render ---
 		searchInput.value = this.searchQuery;
 
@@ -259,7 +212,7 @@ export class CardPreviewModal extends Modal {
 		});
 
 		const container = contentEl.createDiv({ cls: 'anki-preview-container' });
-		
+
 		// Pfad der aktuellen Datei holen für Bilder-Auflösung
 		const activeFile = this.app.workspace.getActiveFile();
 		const sourcePath = activeFile ? activeFile.path : '';
@@ -270,9 +223,9 @@ export class CardPreviewModal extends Modal {
 		// Event listener for search now has access to container and sourcePath
 		searchInput.addEventListener('input', () => {
 			this.searchQuery = searchInput.value.toLowerCase();
-			this.renderCardsContainer(container, sourcePath); 
+			this.renderCardsContainer(container, sourcePath);
 		});
-		
+
 		if (scrollTop) {
 			setTimeout(() => {
 				contentEl.scrollTop = scrollTop;
@@ -282,7 +235,7 @@ export class CardPreviewModal extends Modal {
 
 	renderCardsContainer(container: HTMLElement, sourcePath: string) {
 		container.empty();
-		
+
 		if (this.cards.length === 0) {
 			container.setText('Keine Karten in diesem Block gefunden.');
 			return;
@@ -355,6 +308,136 @@ export class CardPreviewModal extends Modal {
 
 			// Actions (Icons only)
 			const actions = header.createDiv({ cls: 'anki-card-actions-compact' });
+
+			// Sync / Unsync Button
+			if (card.id) {
+				// UNSYNC BUTTON
+				const unsyncBtn = actions.createEl('button', { cls: 'anki-card-action-btn' });
+				setIcon(unsyncBtn, 'trash-2'); // Different trash icon to distinguish? Or link-2-off?
+				// Using trash-2 for now as it's destructive.
+				unsyncBtn.style.color = 'var(--text-error)';
+				unsyncBtn.setAttribute('aria-label', 'Aus Anki entfernen');
+				unsyncBtn.title = "Aus Anki entfernen (Entsync)";
+
+				unsyncBtn.onclick = async (e) => {
+					e.stopPropagation();
+					if (confirm(`Möchtest du diese Karte (ID: ${card.id}) wirklich aus Anki löschen?`)) {
+						// Unsync Logic
+						const file = this.plugin.app.vault.getAbstractFileByPath(sourcePath);
+						if (file instanceof TFile) {
+							const content = await this.plugin.app.vault.read(file);
+							const { ANKI_BLOCK_REGEX, parseCardsFromBlockSource } = await import('../anki/ankiParser');
+							const { saveAnkiBlockChanges } = await import('../anki/syncManager');
+
+							const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+							let foundBlockMatch = null;
+							let foundCardIndex = -1;
+
+							for (const m of matches) {
+								const blockContent = m[1];
+								const blockCards = parseCardsFromBlockSource(blockContent);
+								const idx = blockCards.findIndex(c => c.id === card.id); // Match by ID
+								if (idx !== -1) {
+									foundBlockMatch = m;
+									foundCardIndex = idx;
+									break;
+								}
+							}
+
+							if (foundBlockMatch && foundCardIndex !== -1) {
+								const blockContent = foundBlockMatch[1];
+								const blockCards = parseCardsFromBlockSource(blockContent);
+
+								const cardIdToDelete = card.id!;
+								blockCards[foundCardIndex].id = null;
+
+								await saveAnkiBlockChanges(this.plugin, blockContent, blockCards, [cardIdToDelete]);
+
+								// Update local list view
+								this.cards[index].id = null;
+								this.render(); // Re-render to show Sync button again?
+							}
+						}
+					}
+				};
+			} else {
+				// SYNC BUTTON
+				const syncBtn = actions.createEl('button', { cls: 'anki-card-action-btn' });
+				setIcon(syncBtn, 'refresh-cw');
+				syncBtn.setAttribute('aria-label', 'Karte synchronisieren');
+				syncBtn.title = "Synchronisieren";
+				syncBtn.onclick = async (e) => {
+					e.stopPropagation();
+					// Sync Logic (copied/adapted from FeedbackRenderer)
+					const file = this.plugin.app.vault.getAbstractFileByPath(sourcePath);
+					if (file instanceof TFile) {
+						new Notice(`Suche Block...`);
+						const content = await this.plugin.app.vault.read(file);
+						const { ANKI_BLOCK_REGEX, parseCardsFromBlockSource } = await import('../anki/ankiParser');
+						const { syncAnkiBlock } = await import('../anki/syncManager');
+
+						const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+						let foundBlockMatch = null;
+						let foundCardIndex = -1;
+
+						for (const m of matches) {
+							const blockContent = m[1];
+							const blockCards = parseCardsFromBlockSource(blockContent);
+							const idx = blockCards.findIndex(c => c.q.trim() === card.q.trim() && c.a.trim() === card.a.trim());
+
+							if (idx !== -1) {
+								foundBlockMatch = m;
+								foundCardIndex = idx;
+								break;
+							}
+						}
+
+						if (foundBlockMatch && foundCardIndex !== -1) {
+							const blockContent = foundBlockMatch[1];
+							const blockCards = parseCardsFromBlockSource(blockContent);
+							let currentDeck = this.deckName || this.plugin.settings.mainDeck;
+							const deckMatch = blockContent.match(/^TARGET DECK: (.*)$/m);
+							if (deckMatch) currentDeck = deckMatch[1];
+
+							new Notice(`Synchronisiere Karte...`);
+							await syncAnkiBlock(this.plugin, blockContent, currentDeck, blockCards, file, foundCardIndex);
+
+							// RELOAD STATE FROM FILE TO CAPTURE THE NEW ID
+							// syncAnkiBlock has modified the file. We must re-read it to get the ID.
+							const freshContent = await this.plugin.app.vault.read(file);
+							const freshMatches = [...freshContent.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+							// Re-find key is tricky if multiple blocks, but usually singular.
+							// We can use the SAME match index/logic if nothing shifted too much, 
+							// but safest is to re-find by content or assume block structure is stable-ish.
+
+							// Let's re-find by content approximation or simply re-parse the same block index if possible.
+							// Simplest: Re-find array index of the match.
+
+							// Actually, 'syncAnkiBlock' doesn't return the ID. 
+							// But we know 'this.cards[index]' corresponds to 'foundCardIndex' in the block (if single block).
+							// Wait, 'this.cards' in modal might be a subset or filtered?
+							// 'this.cards' is initialized from 'cards' passed in constructor.
+							// If we reload everything, we might lose state?
+
+							// Let's just re-find the card in the FRESH file content and update 'this.cards[index].id'
+							for (const m of freshMatches) {
+								const bContent = m[1];
+								const bCards = parseCardsFromBlockSource(bContent);
+								// The card content (q/a) shouldn't have changed, only ID added.
+								const freshCard = bCards.find(c => c.q.trim() === card.q.trim() && c.a.trim() === card.a.trim());
+								if (freshCard && freshCard.id) {
+									this.cards[index].id = freshCard.id;
+									break;
+								}
+							}
+							this.render(); // Re-render to show 'Unsync' button
+
+						} else {
+							new Notice("Konnte den Anki-Block nicht finden.");
+						}
+					}
+				};
+			}
 
 			// Edit Button
 			const editBtn = actions.createEl('button', { cls: 'anki-card-action-btn' });

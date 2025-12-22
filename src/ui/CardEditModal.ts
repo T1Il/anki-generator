@@ -2,28 +2,28 @@ import { App, Modal, Setting, TextAreaComponent, TFile } from 'obsidian';
 import { Card } from '../types';
 
 export class CardEditModal extends Modal {
-	card: Partial<Card>;
-	onSubmit: (result: Card) => void;
+    card: Partial<Card>;
+    onSubmit: (result: Card, shouldSync?: boolean) => void;
 
-	sourcePath: string;
+    sourcePath: string;
 
-	constructor(app: App, card: Partial<Card>, sourcePath: string, onSubmit: (result: Card) => void) {
-		super(app);
-		this.card = card;
+    constructor(app: App, card: Partial<Card>, sourcePath: string, onSubmit: (result: Card, shouldSync?: boolean) => void) {
+        super(app);
+        this.card = card;
         this.sourcePath = sourcePath;
-		this.onSubmit = onSubmit;
-		this.modalEl.addClass('anki-card-edit-modal');
-	}
+        this.onSubmit = onSubmit;
+        this.modalEl.addClass('anki-card-edit-modal');
+    }
 
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-		contentEl.createEl("h2", { text: this.card.q ? "Karte bearbeiten" : "Neue Karte erstellen" });
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl("h2", { text: this.card.q ? "Karte bearbeiten" : "Neue Karte erstellen" });
 
-		// Add styles here or in CSS. Inline for now as per request pattern.
-		// Layout: Stacked. Labels small, TextAreas big.
-		const style = contentEl.createEl('style');
-		style.textContent = `
+        // Add styles here or in CSS. Inline for now as per request pattern.
+        // Layout: Stacked. Labels small, TextAreas big.
+        const style = contentEl.createEl('style');
+        style.textContent = `
 			.anki-card-edit-modal .modal-content {
 				display: flex;
 				flex-direction: column;
@@ -75,41 +75,48 @@ export class CardEditModal extends Modal {
             }
 		`;
 
-		let question = this.card.q || '';
-		let answer = this.card.a || '';
+        let question = this.card.q || '';
+        let answer = this.card.a || '';
 
         // --- Question Field ---
-		const qContainer = contentEl.createDiv({ cls: 'anki-edit-field' });
-		qContainer.createDiv({ cls: 'anki-edit-label', text: 'Frage / Lückentext' });
-		const qText = new TextAreaComponent(qContainer);
-		qText.inputEl.addClass('anki-edit-textarea');
-		qText.setValue(question);
-		qText.onChange(val => question = val);
+        const qContainer = contentEl.createDiv({ cls: 'anki-edit-field' });
+        qContainer.createDiv({ cls: 'anki-edit-label', text: 'Frage / Lückentext' });
+        const qText = new TextAreaComponent(qContainer);
+        qText.inputEl.addClass('anki-edit-textarea');
+        qText.setValue(question);
+        qText.onChange(val => question = val);
         this.setupAutocomplete(qText.inputEl);
 
         // --- Answer Field ---
-		const aContainer = contentEl.createDiv({ cls: 'anki-edit-field' });
-		aContainer.createDiv({ cls: 'anki-edit-label', text: 'Antwort' });
-		const aText = new TextAreaComponent(aContainer);
-		aText.inputEl.addClass('anki-edit-textarea');
-		aText.setValue(answer);
-		aText.onChange(val => answer = val);
+        const aContainer = contentEl.createDiv({ cls: 'anki-edit-field' });
+        aContainer.createDiv({ cls: 'anki-edit-label', text: 'Antwort' });
+        const aText = new TextAreaComponent(aContainer);
+        aText.inputEl.addClass('anki-edit-textarea');
+        aText.setValue(answer);
+        aText.onChange(val => answer = val);
         this.setupAutocomplete(aText.inputEl);
 
         // --- Buttons ---
-		new Setting(contentEl)
-			.addButton(btn => btn
-				.setButtonText("Speichern")
-				.setCta()
-				.onClick(() => {
-					const type = question.includes('{{c') || question.includes('____') ? 'Cloze' : 'Basic'; // Smarter detection? Or stick to existing logic.
-            // Existing logic checked for '____' OR if user explicitly made it Cloze.
-            // Let's assume user intends Cloze if they use {{c1::...}} or ____.
-            // Default to Basic if not obvious.
-					this.onSubmit({ q: question, a: answer, id: this.card.id || null, type: this.card.type || type });
-					this.close();
-				}));
-	}
+        const btnContainer = new Setting(contentEl)
+            .addButton(btn => btn
+                .setButtonText("Speichern")
+                .setCta()
+                .onClick(() => {
+                    const type = question.includes('{{c') || question.includes('____') ? 'Cloze' : 'Basic';
+                    this.onSubmit({ q: question, a: answer, id: this.card.id || null, type: this.card.type || type }, false);
+                    this.close();
+                }));
+
+        // Add Sync Button (Icon only or Text?)
+        btnContainer.addButton(btn => btn
+            .setIcon("refresh-cw")
+            .setTooltip("Speichern & Synchronisieren")
+            .onClick(() => {
+                const type = question.includes('{{c') || question.includes('____') ? 'Cloze' : 'Basic';
+                this.onSubmit({ q: question, a: answer, id: this.card.id || null, type: this.card.type || type }, true);
+                this.close();
+            }));
+    }
 
     // Simple Autocomplete Implementation
     private cleanupFns: (() => void)[] = [];
@@ -118,15 +125,15 @@ export class CardEditModal extends Modal {
         // ... (Logic)
         // Since we can't use registerDomEvent if it's not on Modal type (it should be on Scope or Component?), 
         // we use native listeners and cleanup manually.
-        
+
         const suggestionBox = document.createElement('div');
         suggestionBox.addClass('anki-suggestion-container');
-        document.body.appendChild(suggestionBox); 
+        document.body.appendChild(suggestionBox);
 
         const cleanup = () => {
-             suggestionBox.style.display = 'none';
+            suggestionBox.style.display = 'none';
         };
-        
+
         const blurHandler = () => setTimeout(cleanup, 200);
         textarea.addEventListener('blur', blurHandler);
         this.cleanupFns.push(() => textarea.removeEventListener('blur', blurHandler));
@@ -137,7 +144,7 @@ export class CardEditModal extends Modal {
             // Scan backwards for [[
             const textBefore = val.substring(0, cursor);
             const triggerIdx = textBefore.lastIndexOf('[[');
-            
+
             if (triggerIdx !== -1 && cursor - triggerIdx < 60) { // Increased limit for longer paths 
                 const queryRaw = textBefore.substring(triggerIdx + 2);
                 if (queryRaw.includes(']]')) { cleanup(); return; }
@@ -151,21 +158,21 @@ export class CardEditModal extends Modal {
                 const hashIdx = queryRaw.lastIndexOf('#');
                 const caretIdx = queryRaw.lastIndexOf('^');
                 const pipeIdx = queryRaw.lastIndexOf('|'); // Alias separator - stop suggestions if pass pipe?
-                
+
                 if (pipeIdx !== -1) { cleanup(); return; } // Don't suggest aliases
 
                 if (hashIdx !== -1) {
                     mode = 'heading';
                     const fileNameObj = queryRaw.substring(0, hashIdx);
                     // If empty filename, use current file
-                    targetFile = fileNameObj ? this.app.metadataCache.getFirstLinkpathDest(fileNameObj, this.sourcePath) 
-                                             : this.app.vault.getAbstractFileByPath(this.sourcePath) as TFile;
+                    targetFile = fileNameObj ? this.app.metadataCache.getFirstLinkpathDest(fileNameObj, this.sourcePath)
+                        : this.app.vault.getAbstractFileByPath(this.sourcePath) as TFile;
                     searchTerm = queryRaw.substring(hashIdx + 1).toLowerCase();
                 } else if (caretIdx !== -1) {
                     mode = 'block';
                     const fileNameObj = queryRaw.substring(0, caretIdx);
-                    targetFile = fileNameObj ? this.app.metadataCache.getFirstLinkpathDest(fileNameObj, this.sourcePath) 
-                                             : this.app.vault.getAbstractFileByPath(this.sourcePath) as TFile;
+                    targetFile = fileNameObj ? this.app.metadataCache.getFirstLinkpathDest(fileNameObj, this.sourcePath)
+                        : this.app.vault.getAbstractFileByPath(this.sourcePath) as TFile;
                     searchTerm = queryRaw.substring(caretIdx + 1).toLowerCase();
                 } else {
                     searchTerm = queryRaw.toLowerCase();
@@ -178,8 +185,8 @@ export class CardEditModal extends Modal {
                 if (mode === 'file') {
                     const files = this.app.vault.getFiles();
                     matches = files.filter(f => f.basename.toLowerCase().includes(searchTerm))
-                                   .slice(0, 10)
-                                   .map(f => ({ text: f.basename, type: 'File', insert: f.basename }));
+                        .slice(0, 10)
+                        .map(f => ({ text: f.basename, type: 'File', insert: f.basename }));
                 } else if (targetFile && targetFile instanceof TFile) {
                     const cache = this.app.metadataCache.getFileCache(targetFile);
                     if (cache) {
@@ -187,7 +194,7 @@ export class CardEditModal extends Modal {
                             matches = cache.headings
                                 .filter(h => h.heading.toLowerCase().includes(searchTerm))
                                 .map(h => ({ text: h.heading, type: 'H' + h.level, insert: targetFile!.basename + '#' + h.heading }));
-                                // If local file, maybe just '#' + heading? Obsidian usually puts full link [[File#Heading]].
+                            // If local file, maybe just '#' + heading? Obsidian usually puts full link [[File#Heading]].
                         } else if (mode === 'block' && cache.blocks) {
                             matches = Object.entries(cache.blocks)
                                 .filter(([id, block]) => id.toLowerCase().includes(searchTerm))
@@ -201,7 +208,7 @@ export class CardEditModal extends Modal {
                         const item = suggestionBox.createDiv({ cls: 'anki-suggestion-item' });
                         item.createSpan({ text: m.text });
                         item.createSpan({ cls: 'anki-suggestion-type', text: m.type });
-                        
+
                         item.onclick = () => {
                             const before = val.substring(0, triggerIdx);
                             const after = val.substring(cursor);
@@ -209,9 +216,9 @@ export class CardEditModal extends Modal {
                             // Standardize on full link [[File#Heading]] for stability? Logic above puts full basename.
                             // But if user typed `[[#` (implied local), we should probably insert `[[#Heading]]`.
                             // Let's refine insert logic based on user input.
-                            
+
                             let linkText = `[[${m.insert}]]`;
-                            
+
                             // Check if user started with pure # or ^ (local link)
                             if ((mode === 'heading' || mode === 'block') && (queryRaw.startsWith('#') || queryRaw.startsWith('^'))) {
                                 // Strip filename from insert if it matches current file? 
@@ -219,18 +226,18 @@ export class CardEditModal extends Modal {
                                 // If m.insert is "File#Heading" and user typed "[[#Head", 
                                 // we want "[[#Heading]]".
                                 if (targetFile && targetFile.path === this.sourcePath && m.insert.startsWith(targetFile.basename)) {
-                                     // Remove basename
-                                     linkText = `[[${m.insert.substring(targetFile.basename.length)}]]`;
+                                    // Remove basename
+                                    linkText = `[[${m.insert.substring(targetFile.basename.length)}]]`;
                                 }
                             }
 
                             textarea.value = before + linkText + after;
                             textarea.focus();
                             textarea.selectionStart = textarea.selectionEnd = triggerIdx + linkText.length;
-                            
+
                             textarea.dispatchEvent(new Event('input'));
                             textarea.dispatchEvent(new Event('change'));
-                            
+
                             cleanup();
                         };
                     });
@@ -247,17 +254,17 @@ export class CardEditModal extends Modal {
                 cleanup();
             }
         };
-        
+
         textarea.addEventListener('input', inputHandler);
         this.cleanupFns.push(() => textarea.removeEventListener('input', inputHandler));
-        
+
         this.cleanupFns.push(() => suggestionBox.remove());
     }
 
-	onClose() {
-		this.contentEl.empty();
+    onClose() {
+        this.contentEl.empty();
         this.cleanupFns.forEach(fn => fn());
         this.cleanupFns = [];
         document.querySelectorAll('.anki-suggestion-container').forEach(el => el.remove());
-	}
+    }
 }

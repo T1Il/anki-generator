@@ -30,123 +30,242 @@ export async function getCardCountForDeck(deckName: string): Promise<number> {
 }
 
 export async function getNotesInfo(noteIds: number[]): Promise<any[]> {
-    if (noteIds.length === 0) return [];
-    return ankiConnectRequest('notesInfo', { notes: noteIds });
+	if (noteIds.length === 0) return [];
+	return ankiConnectRequest('notesInfo', { notes: noteIds });
 }
 
 export async function findAnkiNoteId(front: string, frontFieldName: string, deckName?: string): Promise<number | null> {
-    // 1. First attempt: Strict exact match (fastest)
-    const escapedFront = front.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const exactQuery = `${frontFieldName}:"${escapedFront}"`;
-    let noteIds = await ankiConnectRequest('findNotes', { query: exactQuery });
-    
-    if (noteIds && noteIds.length > 0) return noteIds[0];
+	let noteIds: any = null;
 
-    // 2. Second attempt: Search by substring
-    const safeFront = front.replace(/["':\(\)]/g, " ").replace(/\s+/g, " ").trim().substring(0, 50);
-    if (safeFront.length > 5) {
-        const sloppyQuery = `${frontFieldName}:"${safeFront}*"`;
-        noteIds = await ankiConnectRequest('findNotes', { query: sloppyQuery });
+	// 1. First attempt: Strict exact match (fastest) - KEEP HTML for exact match
+	const escapedFront = front.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+	const exactQuery = `${frontFieldName}:"${escapedFront}"`;
+	noteIds = await ankiConnectRequest('findNotes', { query: exactQuery });
+	if (noteIds && noteIds.length > 0) return noteIds[0];
 
-        if (noteIds && noteIds.length > 0) {
-            const notesInfo = await getNotesInfo(noteIds);
-            for (const note of notesInfo) {
-                if (note.fields && note.fields[frontFieldName] && note.fields[frontFieldName].value === front) {
-                    return note.noteId;
-                }
-            }
-            if (noteIds.length === 1) return noteIds[0]; 
-        }
-    }
+	// Helper to strip HTML and decode entities
+	const normalizeText = (html: string) => {
+		// 1. Strip Tags
+		let text = html.replace(/<[^>]*>/g, ' ');
+		// 2. Decode common entities
+		text = text.replace(/&nbsp;/g, ' ')
+			.replace(/&amp;/g, '&')
+			.replace(/&lt;/g, '<')
+			.replace(/&gt;/g, '>')
+			.replace(/&quot;/g, '"');
+		// 3. Normalize whitespace (collapse multiple spaces/newlines to single space)
+		return text.replace(/\s+/g, ' ').trim();
+	};
 
-    // 3. Fallback: Search ENTIRE DECK (Heavy, but guaranteed to find it if it exists)
-    if (deckName) {
-         console.log(`Fallback: Searching entire deck '${deckName}' for duplicate...`);
-         console.log(`Fallback: Looking for front field '${frontFieldName}' with content length ${front.length}`);
-         // Limit to cards in that deck
-         const allDeckNotes = await ankiConnectRequest('findNotes', { query: `deck:"${deckName}"` });
-         if (allDeckNotes && allDeckNotes.length > 0) {
-             console.log(`Fallback: Found ${allDeckNotes.length} notes in deck. Scanning content...`);
-             // We process in chunks to avoid overwhelming notesInfo
-             const chunkSize = 20; // Smaller chunk for debug safety
-             for (let i = 0; i < allDeckNotes.length; i += chunkSize) {
-                 const chunk = allDeckNotes.slice(i, i + chunkSize);
-                 const chunkInfo = await getNotesInfo(chunk);
-                 for (const note of chunkInfo) {
-                     if (note.fields && note.fields[frontFieldName]) {
-                         const val = note.fields[frontFieldName].value;
-                         if (val === front) {
-                             console.log("Fallback: Found duplicate via EXACT deck scan!");
-                             return note.noteId;
-                         }
-                         // Debug: Print near misses or just the first few invalid ones to see format
-                         if (val.includes(front.substring(0, 20))) {
-                             console.log(`Fallback: Potential match found but equality failed. \nAnki: '${val}'\nObsidian: '${front}'`);
-                             
-                             // FIX: Strip HTML tags for comparison (Anki might have <b>, <i> etc.)
-                             const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '');
-                             const cleanVal = stripHtml(val).trim();
-                             const cleanFront = stripHtml(front).trim();
+	const cleanAuthoredFront = normalizeText(front);
 
-                             if (cleanVal === cleanFront) {
-                                  console.log("Fallback: Found duplicate via STRIPPED HTML check!");
-                                  return note.noteId;
-                             }
-                         }
-                     }
-                 }
-             }
-         } else {
-             console.log("Fallback: No notes returned for deck query.");
-         }
-    }
-    
-    return null;
+	// 2. Second attempt: Search by substring (HTML stripped)
+	const safeFront = cleanAuthoredFront.substring(0, 50).replace(/["':\(\)]/g, " ").trim();
+	if (safeFront.length > 5) {
+		const sloppyQuery = `${frontFieldName}:"${safeFront}*"`;
+		noteIds = await ankiConnectRequest('findNotes', { query: sloppyQuery });
+
+		if (noteIds && noteIds.length > 0) {
+			const notesInfo = await getNotesInfo(noteIds);
+			for (const note of notesInfo) {
+				// Strict check
+				if (note.fields && note.fields[frontFieldName] && note.fields[frontFieldName].value === front) {
+					return note.noteId;
+				}
+				// Relaxed check
+				if (note.fields && note.fields[frontFieldName]) {
+					const val = note.fields[frontFieldName].value;
+					const cleanVal = normalizeText(val);
+					if (cleanVal === cleanAuthoredFront) return note.noteId;
+				}
+			}
+			if (noteIds.length === 1) return noteIds[0];
+		}
+	}
+
+	// 2.5a: Broad Search in Deck (SafeFront is now HTML-free)
+	if (deckName && safeFront.length > 5) {
+		const broadQuery = `deck:"${deckName}" "${safeFront}*"`;
+		try {
+			noteIds = await ankiConnectRequest('findNotes', { query: broadQuery });
+
+			if (noteIds && noteIds.length > 0) {
+				const notesInfo = await getNotesInfo(noteIds);
+				for (const note of notesInfo) {
+					if (note.fields && note.fields[frontFieldName] && note.fields[frontFieldName].value === front) return note.noteId;
+					if (note.fields) {
+						const values = Object.values(note.fields).map((f: any) => f.value);
+						if (values.includes(front)) return note.noteId;
+						// Relaxed check on all fields
+						const cleanValues = values.map((v: string) => normalizeText(v));
+						if (cleanValues.includes(cleanAuthoredFront)) return note.noteId;
+					}
+				}
+				if (noteIds.length === 1) return noteIds[0];
+			}
+		} catch (e) { /* ignore */ }
+	}
+
+	// 2.5b: Global Broad Search
+	if (safeFront.length > 5) {
+		const globalQuery = `"${safeFront}*"`;
+		try {
+			noteIds = await ankiConnectRequest('findNotes', { query: globalQuery });
+
+			if (noteIds && noteIds.length > 0) {
+				const notesInfo = await getNotesInfo(noteIds);
+				for (const note of notesInfo) {
+					if (note.fields && note.fields[frontFieldName] && note.fields[frontFieldName].value === front) return note.noteId;
+					if (note.fields && note.fields[frontFieldName] && note.fields[frontFieldName].value.includes(front)) return note.noteId;
+					// Relaxed check
+					if (note.fields && note.fields[frontFieldName]) {
+						const val = note.fields[frontFieldName].value;
+						if (normalizeText(val) === cleanAuthoredFront) return note.noteId;
+					}
+				}
+				if (noteIds.length === 1) return noteIds[0];
+			}
+		} catch (e) { /* ignore */ }
+	}
+
+	// 3. Fallback: Search ENTIRE DECK (Heavy)
+	if (deckName) {
+		const allDeckNotes = await ankiConnectRequest('findNotes', { query: `deck:"${deckName}"` });
+
+		if (allDeckNotes && allDeckNotes.length > 0) {
+			const chunkSize = 20;
+			for (let i = 0; i < allDeckNotes.length; i += chunkSize) {
+				const chunk = allDeckNotes.slice(i, i + chunkSize);
+				const chunkInfo = await getNotesInfo(chunk);
+				for (const note of chunkInfo) {
+					if (note.fields && note.fields[frontFieldName]) {
+						const val = note.fields[frontFieldName].value;
+						if (val === front) return note.noteId;
+						if (val.includes(front.substring(0, 20))) {
+							if (normalizeText(val) === cleanAuthoredFront) return note.noteId;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return null;
 }
 
 export async function findAnkiClozeNoteId(questionText: string, textFieldName: string, deckName?: string): Promise<number | null> {
-    // 1. First attempt: Standard strict search
-    const searchQuery = questionText.replace(/\\/g, '\\\\').replace(/____/g, '*').replace(/"/g, '\\"');
-    const query = `${textFieldName}:"${searchQuery}"`;
-    let noteIds = await ankiConnectRequest('findNotes', { query });
-    
-    if (noteIds && noteIds.length > 0) return noteIds[0];
+	let noteIds: any = null;
 
-    // 2. Fallback: Search by clean substring
-    const cleanText = questionText.substring(0, 50).replace(/["':\(\)\{\}]/g, " ").trim();
-    if (cleanText.length > 5) {
-        const sloppyQuery = `${textFieldName}:"${cleanText}*"`;
-        noteIds = await ankiConnectRequest('findNotes', { query: sloppyQuery });
-         if (noteIds && noteIds.length > 0) {
-            // Verify
-            const notesInfo = await getNotesInfo(noteIds);
-            for (const note of notesInfo) {
-                if (note.fields && note.fields[textFieldName] && note.fields[textFieldName].value === questionText) {
-                    return note.noteId;
-                }
-            }
-             if (noteIds.length === 1) return noteIds[0]; 
-        }
-    }
+	// 1. First attempt: Standard strict search
+	const searchQuery = questionText.replace(/\\/g, '\\\\').replace(/____/g, '*').replace(/"/g, '\\"');
+	const exactQuery = `${textFieldName}:"${searchQuery}"`;
+	noteIds = await ankiConnectRequest('findNotes', { query: exactQuery });
+	if (noteIds && noteIds.length > 0) return noteIds[0];
 
-    // 3. Fallback: Search ENTIRE DECK
-    if (deckName) {
-         const allDeckNotes = await ankiConnectRequest('findNotes', { query: `deck:"${deckName}"` });
-         if (allDeckNotes && allDeckNotes.length > 0) {
-             const chunkSize = 50;
-             for (let i = 0; i < allDeckNotes.length; i += chunkSize) {
-                 const chunk = allDeckNotes.slice(i, i + chunkSize);
-                 const chunkInfo = await getNotesInfo(chunk);
-                 for (const note of chunkInfo) {
-                     if (note.fields && note.fields[textFieldName] && note.fields[textFieldName].value === questionText) {
-                         return note.noteId;
-                     }
-                 }
-             }
-         }
-    }
+	// Helper to strip HTML and decode entities
+	const normalizeText = (html: string) => {
+		// 1. Strip Tags
+		let text = html.replace(/<[^>]*>/g, ' ');
+		// 2. Decode common entities
+		text = text.replace(/&nbsp;/g, ' ')
+			.replace(/&amp;/g, '&')
+			.replace(/&lt;/g, '<')
+			.replace(/&gt;/g, '>')
+			.replace(/&quot;/g, '"');
+		// 3. Normalize whitespace (collapse multiple spaces/newlines to single space)
+		return text.replace(/\s+/g, ' ').trim();
+	};
 
-    return null;
+	const cleanAuthoredText = normalizeText(questionText);
+
+	// 2. Fallback: Search by clean substring
+	const safeFront = cleanAuthoredText.substring(0, 50).replace(/["':\(\)\{\}]/g, " ").trim();
+	if (safeFront.length > 5) {
+		const sloppyQuery = `${textFieldName}:"${safeFront}*"`;
+		noteIds = await ankiConnectRequest('findNotes', { query: sloppyQuery });
+
+		if (noteIds && noteIds.length > 0) {
+			const notesInfo = await getNotesInfo(noteIds);
+			for (const note of notesInfo) {
+				if (note.fields && note.fields[textFieldName] && note.fields[textFieldName].value === questionText) {
+					return note.noteId;
+				}
+				if (note.fields && note.fields[textFieldName]) {
+					const val = note.fields[textFieldName].value;
+					const cleanVal = normalizeText(val);
+					if (cleanVal === cleanAuthoredText) return note.noteId;
+				}
+			}
+			if (noteIds.length === 1) return noteIds[0];
+		}
+	}
+
+	// 2.5a: Broad search for Cloze in Deck
+	if (deckName && safeFront.length > 5) {
+		const broadQuery = `deck:"${deckName}" "${safeFront}*"`;
+		try {
+			noteIds = await ankiConnectRequest('findNotes', { query: broadQuery });
+
+			if (noteIds && noteIds.length > 0) {
+				const notesInfo = await getNotesInfo(noteIds);
+				for (const note of notesInfo) {
+					if (note.fields && note.fields[textFieldName] && note.fields[textFieldName].value === questionText) {
+						return note.noteId;
+					}
+					if (note.fields) {
+						const values = Object.values(note.fields).map((f: any) => f.value);
+						if (values.includes(questionText)) return note.noteId;
+
+						const cleanValues = values.map((v: string) => normalizeText(v));
+						if (cleanValues.includes(cleanAuthoredText)) return note.noteId;
+					}
+				}
+				if (noteIds.length === 1) return noteIds[0];
+			}
+		} catch (e) { /* ignore */ }
+	}
+
+	// 2.5b: Global Broad Search for Cloze
+	if (safeFront.length > 5) {
+		const globalQuery = `"${safeFront}*"`;
+		try {
+			noteIds = await ankiConnectRequest('findNotes', { query: globalQuery });
+
+			if (noteIds && noteIds.length > 0) {
+				const notesInfo = await getNotesInfo(noteIds);
+				for (const note of notesInfo) {
+					if (note.fields && note.fields[textFieldName] && note.fields[textFieldName].value === questionText) return note.noteId;
+					if (note.fields && note.fields[textFieldName] && note.fields[textFieldName].value.includes(questionText)) return note.noteId;
+
+					if (note.fields && note.fields[textFieldName]) {
+						const val = note.fields[textFieldName].value;
+						if (normalizeText(val) === cleanAuthoredText) return note.noteId;
+					}
+				}
+				if (noteIds.length === 1) return noteIds[0];
+			}
+		} catch (e) { /* ignore */ }
+	}
+
+	// 3. Fallback: Search ENTIRE DECK
+	if (deckName) {
+		const allDeckNotes = await ankiConnectRequest('findNotes', { query: `deck:"${deckName}"` });
+
+		if (allDeckNotes && allDeckNotes.length > 0) {
+			const chunkSize = 50;
+			for (let i = 0; i < allDeckNotes.length; i += chunkSize) {
+				const chunk = allDeckNotes.slice(i, i + chunkSize);
+				const chunkInfo = await getNotesInfo(chunk);
+				for (const note of chunkInfo) {
+					if (note.fields && note.fields[textFieldName] && note.fields[textFieldName].value === questionText) {
+						return note.noteId;
+					}
+				}
+			}
+		}
+	}
+
+	return null;
 }
 
 export async function deleteAnkiNotes(noteIds: number[]): Promise<void> {
@@ -279,7 +398,7 @@ export async function moveAnkiNotesToDeck(noteIds: number[], deckName: string): 
 	// Optimize: Parallelize the move operations with a concurrency limit
 	const CONCURRENCY_LIMIT = 5;
 	const chunkedPromises = [];
-	
+
 	for (let i = 0; i < noteIds.length; i += CONCURRENCY_LIMIT) {
 		const chunk = noteIds.slice(i, i + CONCURRENCY_LIMIT);
 		chunkedPromises.push(Promise.all(chunk.map(async (noteId) => {
@@ -301,22 +420,22 @@ export async function addAnkiNotes(notes: any[]): Promise<(number | null)[]> {
 	return ankiConnectRequest('addNotes', { notes });
 }
 
-export async function storeAnkiMediaFiles(files: {filename: string, data: string}[]): Promise<string[]> {
-    // Parallelize uploads with a concurrency limit to avoid overwhelming Anki
-    const CONCURRENCY_LIMIT = 5;
-    const results: string[] = new Array(files.length).fill("");
-    
-    for (let i = 0; i < files.length; i += CONCURRENCY_LIMIT) {
-        const chunk = files.slice(i, i + CONCURRENCY_LIMIT).map((file, idx) => ({ file, originalIdx: i + idx }));
-        await Promise.all(chunk.map(async ({ file, originalIdx }) => {
-            try {
-                const result = await storeAnkiMediaFile(file.filename, file.data);
-                results[originalIdx] = result;
-            } catch (e) {
-                console.error(`Failed to batch store file ${file.filename}:`, e);
-                results[originalIdx] = ""; // Marker for failure
-            }
-        }));
-    }
-    return results;
+export async function storeAnkiMediaFiles(files: { filename: string, data: string }[]): Promise<string[]> {
+	// Parallelize uploads with a concurrency limit to avoid overwhelming Anki
+	const CONCURRENCY_LIMIT = 5;
+	const results: string[] = new Array(files.length).fill("");
+
+	for (let i = 0; i < files.length; i += CONCURRENCY_LIMIT) {
+		const chunk = files.slice(i, i + CONCURRENCY_LIMIT).map((file, idx) => ({ file, originalIdx: i + idx }));
+		await Promise.all(chunk.map(async ({ file, originalIdx }) => {
+			try {
+				const result = await storeAnkiMediaFile(file.filename, file.data);
+				results[originalIdx] = result;
+			} catch (e) {
+				console.error(`Failed to batch store file ${file.filename}:`, e);
+				results[originalIdx] = ""; // Marker for failure
+			}
+		}));
+	}
+	return results;
 }
