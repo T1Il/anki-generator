@@ -31,12 +31,12 @@ export interface AnkiGeneratorSettings {
 	folderDecorations: boolean;
 	enableManualMode: boolean;
 	iconSynced: string;
-    iconUnsynced: string;
-    iconEmpty: string;
-    iconIgnored: string;
-    decorationTemplate: string;
+	iconUnsynced: string;
+	iconEmpty: string;
+	iconIgnored: string;
+	decorationTemplate: string;
 	maxRetries: number;
-    ignoredFiles: string[];
+	ignoredFiles: string[];
 }
 
 export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
@@ -99,6 +99,11 @@ REGELN ZUR KARTENERSTELLUNG:
 
 4. **Bilder**:
    - Kopiere Bild-Links (![[bild.png]]) exakt in das 'A:' Feld.
+   - **Vermeide 'Visualisiere...' in der Frage (Q:)!**
+   - Stattdessen: Frage konkret nach dem Inhalt, der auf dem Bild zu sehen ist.
+   - Beispiel:
+     - ⛔️ Falsch: "Visualisiere die Übersicht zu X."
+     - ✅ Richtig: "Zeige die Übersicht zu X." oder "Nenne die Risikofaktoren für X."
 
 5. **Verlinkungen (ESSENTIELL)**:
    - Deine Aufgabe ist es, Schlüsselbegriffe im Text mit vorhandenen Block-IDs zu verknüpfen.
@@ -147,13 +152,13 @@ Hier ist der Lerninhalt:
 	fileDecorations: false,
 	folderDecorations: true,
 	enableManualMode: false,
-    iconSynced: '✅',
-    iconUnsynced: '🔴',
-    iconEmpty: '🗃️',
-    iconIgnored: '👁️‍🗨️',
-    decorationTemplate: ' {count}',
+	iconSynced: '✅',
+	iconUnsynced: '🔴',
+	iconEmpty: '🗃️',
+	iconIgnored: '👁️‍🗨️',
+	decorationTemplate: ' {count}',
 	maxRetries: 3,
-    ignoredFiles: []
+	ignoredFiles: []
 };
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {
@@ -169,18 +174,18 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		containerEl.createEl('h2', { text: t('settings.title') });
-		
-        // --- General Settings ---
-        new Setting(containerEl)
-            .setName('Vault Name')
-            .setDesc('Name of your Obsidian Vault (used for links). If empty, auto-detection is attempted.')
-            .addText(text => text
-                .setPlaceholder('My Vault')
-                .setValue(this.plugin.settings.vaultName)
-                .onChange(async (value) => {
-                    this.plugin.settings.vaultName = value;
-                    await this.plugin.saveSettings();
-                }));
+
+		// --- General Settings ---
+		new Setting(containerEl)
+			.setName('Vault Name')
+			.setDesc('Name of your Obsidian Vault (used for links). If empty, auto-detection is attempted.')
+			.addText(text => text
+				.setPlaceholder('My Vault')
+				.setValue(this.plugin.settings.vaultName)
+				.onChange(async (value) => {
+					this.plugin.settings.vaultName = value;
+					await this.plugin.saveSettings();
+				}));
 
 		// --- AI Provider Settings ---
 		containerEl.createEl('h3', { text: 'AI Provider Settings' });
@@ -276,25 +281,25 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					this.plugin.settings.fileDecorations = value;
 					await this.plugin.saveSettings();
 					new Notice("Bitte Plugin neu laden, um Änderungen anzuwenden.");
-                    this.display(); // Refresh to show/hide sub-settings
+					this.display(); // Refresh to show/hide sub-settings
 				}));
 
 		if (this.plugin.settings.fileDecorations) {
-            new Setting(containerEl)
-                .setName(t('settings.folderDecorations'))
-                .setDesc(t('settings.folderDecorationsDesc'))
-                .addToggle(toggle => toggle
-                    .setValue(this.plugin.settings.folderDecorations)
-                    .onChange(async (value) => {
-                        this.plugin.settings.folderDecorations = value;
-                        await this.plugin.saveSettings();
-                        if (this.plugin.ankiFileDecorationProvider) {
-                             this.plugin.ankiFileDecorationProvider.triggerUpdate();
-                        }
-                    }));
-            
-            this.addDecorationSettings(containerEl);
-        }
+			new Setting(containerEl)
+				.setName(t('settings.folderDecorations'))
+				.setDesc(t('settings.folderDecorationsDesc'))
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.folderDecorations)
+					.onChange(async (value) => {
+						this.plugin.settings.folderDecorations = value;
+						await this.plugin.saveSettings();
+						if (this.plugin.ankiFileDecorationProvider) {
+							this.plugin.ankiFileDecorationProvider.triggerUpdate();
+						}
+					}));
+
+			this.addDecorationSettings(containerEl);
+		}
 
 		new Setting(containerEl)
 			.setName('Manueller Modus bei Fehler')
@@ -508,45 +513,45 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 		try { const r = await requestUrl({ url: 'https://api.openai.com/v1/models', method: 'GET', headers: { 'Authorization': `Bearer ${apiKey}` } }); const o: any = {}; r.json.data?.filter((m: any) => m.id.startsWith('gpt')).sort((a: any, b: any) => b.created - a.created).forEach((m: any) => o[m.id] = m.id); dropdown.selectEl.innerHTML = ''; dropdown.addOptions(o); dropdown.setDisabled(false); const c = this.plugin.settings.openAiModel; if (c && o[c]) dropdown.setValue(c); else { const d = 'gpt-4o'; if (o[d]) { this.plugin.settings.openAiModel = d; dropdown.setValue(d); } else { const f = Object.keys(o)[0]; if (f) { this.plugin.settings.openAiModel = f; dropdown.setValue(f); } } await this.plugin.saveSettings(); } } catch (e) { dropdown.selectEl.innerHTML = ''; dropdown.addOption(this.plugin.settings.openAiModel || 'gpt-4o', "Fehler"); }
 	}
 
-    addDecorationSettings(containerEl: HTMLElement) {
-        containerEl.createEl('h4', { text: 'Decoration Icons' });
+	addDecorationSettings(containerEl: HTMLElement) {
+		containerEl.createEl('h4', { text: 'Decoration Icons' });
 
-        const addIconSetting = (name: string, desc: string, key: 'iconSynced' | 'iconUnsynced' | 'iconEmpty' | 'iconIgnored') => {
-            new Setting(containerEl)
-                .setName(name)
-                .setDesc(desc)
-                .addText(text => text
-                    .setValue(this.plugin.settings[key])
-                    .onChange(async (value) => {
-                        this.plugin.settings[key] = value;
-                        await this.plugin.saveSettings();
-                    }))
-                .addButton(btn => btn
-                    .setButtonText('Pick Icon')
-                    .onClick(() => {
-                        new IconPickerModal(this.app, async (icon) => {
-                            this.plugin.settings[key] = icon;
-                            await this.plugin.saveSettings();
-                            this.display(); // Refresh to show new value
-                        }).open();
-                    }));
-        };
+		const addIconSetting = (name: string, desc: string, key: 'iconSynced' | 'iconUnsynced' | 'iconEmpty' | 'iconIgnored') => {
+			new Setting(containerEl)
+				.setName(name)
+				.setDesc(desc)
+				.addText(text => text
+					.setValue(this.plugin.settings[key])
+					.onChange(async (value) => {
+						this.plugin.settings[key] = value;
+						await this.plugin.saveSettings();
+					}))
+				.addButton(btn => btn
+					.setButtonText('Pick Icon')
+					.onClick(() => {
+						new IconPickerModal(this.app, async (icon) => {
+							this.plugin.settings[key] = icon;
+							await this.plugin.saveSettings();
+							this.display(); // Refresh to show new value
+						}).open();
+					}));
+		};
 
-        addIconSetting('Synced Icon', 'Icon shown when all cards are synced', 'iconSynced');
-        addIconSetting('Unsynced Icon', 'Icon shown when there are unsynced cards', 'iconUnsynced');
-        addIconSetting('Empty Icon', 'Icon shown when block exists but has no recognized cards', 'iconEmpty');
-        addIconSetting('Ignored Icon', 'Icon shown when file is explicitly ignored from folder stats', 'iconIgnored');
+		addIconSetting('Synced Icon', 'Icon shown when all cards are synced', 'iconSynced');
+		addIconSetting('Unsynced Icon', 'Icon shown when there are unsynced cards', 'iconUnsynced');
+		addIconSetting('Empty Icon', 'Icon shown when block exists but has no recognized cards', 'iconEmpty');
+		addIconSetting('Ignored Icon', 'Icon shown when file is explicitly ignored from folder stats', 'iconIgnored');
 
-        containerEl.createEl('h4', { text: 'Label Format' });
-        new Setting(containerEl)
-            .setName('Decoration Label Template')
-            .setDesc('Format string for the text next to the icon. Placeholders: {count} (total cards), {synced}, {unsynced}. Leave empty for no text.')
-            .addText(text => text
-                .setPlaceholder(' {count}')
-                .setValue(this.plugin.settings.decorationTemplate)
-                .onChange(async (value) => {
-                    this.plugin.settings.decorationTemplate = value;
-                    await this.plugin.saveSettings();
-                }));
-    }
+		containerEl.createEl('h4', { text: 'Label Format' });
+		new Setting(containerEl)
+			.setName('Decoration Label Template')
+			.setDesc('Format string for the text next to the icon. Placeholders: {count} (total cards), {synced}, {unsynced}. Leave empty for no text.')
+			.addText(text => text
+				.setPlaceholder(' {count}')
+				.setValue(this.plugin.settings.decorationTemplate)
+				.onChange(async (value) => {
+					this.plugin.settings.decorationTemplate = value;
+					await this.plugin.saveSettings();
+				}));
+	}
 }
