@@ -40,6 +40,7 @@ export async function findAnkiNoteId(front: string, frontFieldName: string, deck
 	// 1. First attempt: Strict exact match (fastest) - KEEP HTML for exact match
 	const escapedFront = front.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 	const exactQuery = `${frontFieldName}:"${escapedFront}"`;
+	console.log(`[AnkiConnect] Strict Query: ${exactQuery}`);
 	noteIds = await ankiConnectRequest('findNotes', { query: exactQuery });
 	if (noteIds && noteIds.length > 0) return noteIds[0];
 
@@ -60,7 +61,7 @@ export async function findAnkiNoteId(front: string, frontFieldName: string, deck
 	const cleanAuthoredFront = normalizeText(front);
 
 	// 2. Second attempt: Search by substring (HTML stripped)
-	const safeFront = cleanAuthoredFront.substring(0, 50).replace(/["':\(\)]/g, " ").trim();
+	const safeFront = cleanAuthoredFront.substring(0, 50).replace(/\\/g, '\\\\').replace(/["':\(\)]/g, " ").trim();
 	if (safeFront.length > 5) {
 		const sloppyQuery = `${frontFieldName}:"${safeFront}*"`;
 		noteIds = await ankiConnectRequest('findNotes', { query: sloppyQuery });
@@ -179,7 +180,7 @@ export async function findAnkiClozeNoteId(questionText: string, textFieldName: s
 	const cleanAuthoredText = normalizeText(questionText);
 
 	// 2. Fallback: Search by clean substring
-	const safeFront = cleanAuthoredText.substring(0, 50).replace(/["':\(\)\{\}]/g, " ").trim();
+	const safeFront = cleanAuthoredText.substring(0, 50).replace(/\\/g, '\\\\').replace(/["':\(\)\{\}]/g, " ").trim();
 	if (safeFront.length > 5) {
 		const sloppyQuery = `${textFieldName}:"${safeFront}*"`;
 		noteIds = await ankiConnectRequest('findNotes', { query: sloppyQuery });

@@ -3,6 +3,7 @@ import AnkiGeneratorPlugin from '../main';
 import { Card } from '../types';
 import { deleteAnkiNotes, createAnkiDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './AnkiConnect';
 import { arrayBufferToBase64, basicMarkdownToHtml, convertObsidianLatexToAnki, convertObsidianLinks } from '../utils';
+import { containsMermaid, processMermaidBlocks } from '../mermaidRenderer';
 import { findSpecificAnkiBlock, formatCardsToString } from './ankiParser';
 
 export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent: string, deckName: string | null, cards: Card[], file: TFile, targetIndex?: number) {
@@ -147,6 +148,16 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
 
             let processedQ = replaceImages(card.q);
             let processedA = replaceImages(card.a);
+
+            // Render mermaid diagrams to PNG images and upload to Anki
+            if (containsMermaid(processedQ)) {
+                notice.setMessage(`Rendere Mermaid-Diagramm (Karte ${i + 1})...`);
+                processedQ = await processMermaidBlocks(processedQ, plugin.app);
+            }
+            if (containsMermaid(processedA)) {
+                notice.setMessage(`Rendere Mermaid-Diagramm (Karte ${i + 1})...`);
+                processedA = await processMermaidBlocks(processedA, plugin.app);
+            }
 
             processedQ = convertObsidianLatexToAnki(processedQ);
             processedA = convertObsidianLatexToAnki(processedA);
@@ -329,6 +340,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                     // For now, let's try the duplicate check fallback just in case it WAS a duplicate.
                     try {
                         console.log(`[SyncManager] Attempting recovery for card at index ${cItem.index}...`);
+                        console.log(`[SyncManager] Recovery args: Front='${cItem.front.substring(0, 50)}...', Field='${cItem.f1}', Deck='${deckName}'`);
                         const existingId = cItem.card.type === 'Basic'
                             ? await findAnkiNoteId(cItem.front, cItem.f1, deckName)
                             : await findAnkiClozeNoteId(cItem.clozeText, cItem.f1, deckName);
@@ -346,8 +358,32 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                                 clozeText: cItem.clozeText
                             });
                         } else {
-                            console.warn(`[SyncManager] FAILURE: Could not recover ID for card at index ${cItem.index}`);
-                            new Notice(`Fehler beim Erstellen von Karte: "${cItem.card.q.substring(0, 15)}..." Prüfe Kartentyp & Felder.`);
+                            // Recovery failed (not found in Anki). This means it was likely NOT a duplicate,
+                            // but failing the batch prevented it from being added. Try adding individually.
+                            console.log(`[SyncManager] ID not recovered for index ${cItem.index}. Attempting individual creation...`);
+
+                            const singleNotePayload = {
+                                deckName: deckName,
+                                modelName: cItem.model, // Use the corrected model/fields from the item
+                                fields: cItem.card.type === 'Basic'
+                                    ? { [cItem.f1]: cItem.front, [cItem.f2]: cItem.back }
+                                    : { [cItem.f1]: cItem.clozeText },
+                                tags: ['obsidian-anki-generator']
+                            };
+
+                            try {
+                                const singleAddResult = await import('./AnkiConnect').then(m => m.addAnkiNotes([singleNotePayload]));
+                                if (singleAddResult && singleAddResult[0]) {
+                                    const newSingleId = singleAddResult[0];
+                                    console.log(`[SyncManager] Individual creation SUCCESS. ID: ${newSingleId}`);
+                                    updatedCardsWithIds[cItem.index] = { ...cItem.card, id: newSingleId };
+                                } else {
+                                    console.warn(`[SyncManager] Individual creation FAILED for index ${cItem.index}`);
+                                    new Notice(`Fehler: Karte konnte nicht erstellt werden (Index ${cItem.index}).`);
+                                }
+                            } catch (e) {
+                                console.warn(`[SyncManager] Individual creation ERROR for index ${cItem.index}`, e);
+                            }
                         }
                     } catch (e) {
                         console.error("Fallback check failed", e);

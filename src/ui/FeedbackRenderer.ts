@@ -27,12 +27,16 @@ export async function renderFeedback(
     cards?: Card[],
     deckName: string | null = null,
     showControls: boolean = true,
-    scrollBehavior: 'preserve' | 'new-message' | 'default' = 'default'
+    scrollBehavior: 'preserve' | 'new-message' | 'default' = 'default',
+    initialScrollTop?: number
 ) {
-    // Capture previous scroll position
-    let previousScrollTop = 0;
-    const oldContent = container.querySelector('.anki-feedback-content');
-    if (oldContent) previousScrollTop = oldContent.scrollTop;
+    // Capture previous scroll position (if validated from outside) or try to find it
+    let previousScrollTop = initialScrollTop !== undefined ? initialScrollTop : 0;
+
+    if (initialScrollTop === undefined) {
+        const oldContent = container.querySelector('.anki-feedback-content');
+        if (oldContent) previousScrollTop = oldContent.scrollTop;
+    }
 
     // Cleanup existing elements to prevent duplication
     const existingBox = container.querySelector('.anki-feedback-box');

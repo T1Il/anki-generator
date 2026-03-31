@@ -15,6 +15,7 @@ import { FeedbackView, FEEDBACK_VIEW_TYPE } from './ui/FeedbackView';
 import { InsertCalloutLinkModal } from './ui/InsertCalloutLinkModal';
 import { legacyAnkiStateField } from './ui/LegacyAnkiDecorator';
 import { CancelGenerationModal } from './ui/CancelGenerationModal';
+import { FileSuggestModal } from './ui/FileSuggestModal';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -26,7 +27,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-        // console.log("!!! ANKI PLUGIN LOADED !!!");
+		// console.log("!!! ANKI PLUGIN LOADED !!!");
 
 		// Register ViewPlugin for Legacy Auto-Hide
 		this.registerEditorExtension(legacyAnkiStateField);
@@ -51,59 +52,59 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		// Initialize File Decorations
 		if ((this as any).registerFileDecorationProvider) {
-            console.log("AnkiGenerator: Registering Native File Decoration Provider..."); // TRACE
+			console.log("AnkiGenerator: Registering Native File Decoration Provider..."); // TRACE
 			this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
 			(this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
-            console.log("AnkiGenerator: Provider Registered."); // TRACE
+			console.log("AnkiGenerator: Provider Registered."); // TRACE
 
-            // Force update on layout ready
-            this.app.workspace.onLayoutReady(() => {
-                this.ankiFileDecorationProvider?.triggerUpdate();
-            });
+			// Force update on layout ready
+			this.app.workspace.onLayoutReady(() => {
+				this.ankiFileDecorationProvider?.triggerUpdate();
+			});
 		} else {
 			// Legacy handling initialized based on settings
-            this.app.workspace.onLayoutReady(() => {
-                console.log("AnkiGenerator: Using LEGACY File Decorator");
-			    this.updateLegacyFileDecoration();
-            });
+			this.app.workspace.onLayoutReady(() => {
+				console.log("AnkiGenerator: Using LEGACY File Decorator");
+				this.updateLegacyFileDecoration();
+			});
 		}
 
 		// Check for updates
 		this.checkForUpdates();
 
-        // Register File Menu Event (Context Menu)
-        this.registerEvent(
-            this.app.workspace.on("file-menu", (menu, file) => {
-                if ((file instanceof TFile && file.extension === 'md') || file instanceof TFolder) {
-                    const isIgnored = this.settings.ignoredFiles.includes(file.path);
-                    
-                    menu.addItem((item) => {
-                        item
-                            .setTitle(isIgnored ? "Anki: Ignorieren aufheben" : "Anki: Datei/Ordner ignorieren")
-                            .setIcon(isIgnored ? "check-circle" : "eye-off")
-                            .onClick(async () => {
-                                if (isIgnored) {
-                                    this.settings.ignoredFiles = this.settings.ignoredFiles.filter(p => p !== file.path);
-                                    new Notice(`Anki: ${file.name} wird nicht mehr ignoriert.`);
-                                } else {
-                                    if (!this.settings.ignoredFiles.includes(file.path)) {
-                                        this.settings.ignoredFiles.push(file.path);
-                                    }
-                                    new Notice(`Anki: ${file.name} wird jetzt ignoriert.`);
-                                }
-                                await this.saveSettings();
+		// Register File Menu Event (Context Menu)
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				if ((file instanceof TFile && file.extension === 'md') || file instanceof TFolder) {
+					const isIgnored = this.settings.ignoredFiles.includes(file.path);
 
-                                // Trigger Decoration Update
-                                if (this.ankiFileDecorationProvider) {
-                                    this.ankiFileDecorationProvider.triggerUpdate();
-                                } else if (this.legacyFileDecorator) {
-                                    this.legacyFileDecorator.updateAllDecorations();
-                                }
-                            });
-                    });
-                }
-            })
-        );
+					menu.addItem((item) => {
+						item
+							.setTitle(isIgnored ? "Anki: Ignorieren aufheben" : "Anki: Datei/Ordner ignorieren")
+							.setIcon(isIgnored ? "check-circle" : "eye-off")
+							.onClick(async () => {
+								if (isIgnored) {
+									this.settings.ignoredFiles = this.settings.ignoredFiles.filter(p => p !== file.path);
+									new Notice(`Anki: ${file.name} wird nicht mehr ignoriert.`);
+								} else {
+									if (!this.settings.ignoredFiles.includes(file.path)) {
+										this.settings.ignoredFiles.push(file.path);
+									}
+									new Notice(`Anki: ${file.name} wird jetzt ignoriert.`);
+								}
+								await this.saveSettings();
+
+								// Trigger Decoration Update
+								if (this.ankiFileDecorationProvider) {
+									this.ankiFileDecorationProvider.triggerUpdate();
+								} else if (this.legacyFileDecorator) {
+									this.legacyFileDecorator.updateAllDecorations();
+								}
+							});
+					});
+				}
+			})
+		);
 
 		// Ribbon Icon - Generate Cards
 		this.addRibbonIcon('brain-circuit', t('anki.generateGemini'), (evt: MouseEvent) => {
@@ -125,11 +126,11 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			await processAnkiCardsBlock(this, source, el, ctx);
 		});
 
-        // Register Editor Extension (CM6)
-        this.registerEditorExtension(legacyAnkiStateField);
+		// Register Editor Extension (CM6)
+		this.registerEditorExtension(legacyAnkiStateField);
 
 		// Command Registrierung
- 
+
 		this.addCommand({
 			id: 'force-reload-anki-data',
 			name: 'Generate Anki Cards from Note',
@@ -180,33 +181,33 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			}
 		});
 
-        this.addCommand({
-            id: 'force-reload-decorations',
-            name: 'Force Reload Decorations',
-            callback: async () => {
-                console.log("Force Reload Decorations triggered.");
-                if (this.ankiFileDecorationProvider) {
-                    console.log("Reloading Native Provider...");
-                    await this.ankiFileDecorationProvider.load();
-                    this.ankiFileDecorationProvider.triggerUpdate();
-                } else if (this.legacyFileDecorator) {
-                    console.log("Reloading Legacy Decorator...");
-                    this.legacyFileDecorator.destroy(); // Ensure old one is gone
-                    this.legacyFileDecorator.load();
-                } else {
-                     console.log("No active decorator found. Attempting to re-init.");
-                     if ((this as any).registerFileDecorationProvider) {
-                        console.log("Init Native Provider");
-                        this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
-                        (this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
-                    } else {
-                        console.log("Init Legacy Decorator");
-                        this.updateLegacyFileDecoration();
-                    }
-                }
-                new Notice("Decorations reloaded. Check console for details.");
-            }
-        });
+		this.addCommand({
+			id: 'force-reload-decorations',
+			name: 'Force Reload Decorations',
+			callback: async () => {
+				console.log("Force Reload Decorations triggered.");
+				if (this.ankiFileDecorationProvider) {
+					console.log("Reloading Native Provider...");
+					await this.ankiFileDecorationProvider.load();
+					this.ankiFileDecorationProvider.triggerUpdate();
+				} else if (this.legacyFileDecorator) {
+					console.log("Reloading Legacy Decorator...");
+					this.legacyFileDecorator.destroy(); // Ensure old one is gone
+					this.legacyFileDecorator.load();
+				} else {
+					console.log("No active decorator found. Attempting to re-init.");
+					if ((this as any).registerFileDecorationProvider) {
+						console.log("Init Native Provider");
+						this.ankiFileDecorationProvider = new AnkiFileDecorationProvider(this.app, this);
+						(this as any).registerFileDecorationProvider(this.ankiFileDecorationProvider);
+					} else {
+						console.log("Init Legacy Decorator");
+						this.updateLegacyFileDecoration();
+					}
+				}
+				new Notice("Decorations reloaded. Check console for details.");
+			}
+		});
 
 		this.addCommand({
 			id: 'reload-plugin',
@@ -237,60 +238,70 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			}
 		});
 
-        this.addCommand({
-            id: 'remove-all-block-ids',
-            name: 'Remove All Block IDs',
-            editorCallback: (editor: Editor, view: MarkdownView) => {
-                removeAllBlockIds(editor);
-                new Notice("All block IDs removed.");
-            }
-        });
+		this.addCommand({
+			id: 'remove-all-block-ids',
+			name: 'Remove All Block IDs',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				removeAllBlockIds(editor);
+				new Notice("All block IDs removed.");
+			}
+		});
 
-        this.addCommand({
-            id: 'insert-callout-link',
-            name: 'Insert Callout Link',
-            editorCallback: (editor: Editor, view: MarkdownView) => {
-                new InsertCalloutLinkModal(this.app, editor).open();
-            }
-        });
+		this.addCommand({
+			id: 'insert-callout-link',
+			name: 'Insert Callout Link',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				new InsertCalloutLinkModal(this.app, editor).open();
+			}
+		});
+
+		this.addCommand({
+			id: 'insert-callout-link-from-file',
+			name: 'Insert Callout Link from File',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				new FileSuggestModal(this.app, (file) => {
+					new InsertCalloutLinkModal(this.app, editor, file).open();
+				}).open();
+			}
+		});
 
 		this.addCommand({
 			id: 'cancel-anki-generation',
 			name: 'Cancel Anki Generation',
 			callback: () => {
-                if (this.activeGenerations.size === 0) {
-                     new Notice("Keine aktiven Prozesse.");
-                     return;
-                }
-                
-                // If only 1 process, cancel it
-                if (this.activeGenerations.size === 1) {
-                    const [key, process] = this.activeGenerations.entries().next().value;
-                    process.controller.abort();
-                    this.removeActiveGeneration(key);
-                    new Notice(`Abgebrochen: ${process.description}`);
-                    return;
-                }
-                
-                // Multiple: check if any belong to current file
-                const activeFile = this.app.workspace.getActiveFile();
-                if (activeFile) {
-                    // Find processes for this file
-                    const fileProcesses = Array.from(this.activeGenerations.entries())
-                        .filter(([k, p]) => p.path === activeFile.path);
-                        
-                    if (fileProcesses.length === 1) {
-                         // Only one for this file -> Cancel it
-                         const [key, process] = fileProcesses[0];
-                         process.controller.abort();
-                         this.removeActiveGeneration(key);
-                         new Notice(`Abgebrochen: ${process.description}`);
-                         return;
-                    }
-                }
-                
-                // Fallback: Open Modal
-                new CancelGenerationModal(this.app, this).open();
+				if (this.activeGenerations.size === 0) {
+					new Notice("Keine aktiven Prozesse.");
+					return;
+				}
+
+				// If only 1 process, cancel it
+				if (this.activeGenerations.size === 1) {
+					const [key, process] = this.activeGenerations.entries().next().value;
+					process.controller.abort();
+					this.removeActiveGeneration(key);
+					new Notice(`Abgebrochen: ${process.description}`);
+					return;
+				}
+
+				// Multiple: check if any belong to current file
+				const activeFile = this.app.workspace.getActiveFile();
+				if (activeFile) {
+					// Find processes for this file
+					const fileProcesses = Array.from(this.activeGenerations.entries())
+						.filter(([k, p]) => p.path === activeFile.path);
+
+					if (fileProcesses.length === 1) {
+						// Only one for this file -> Cancel it
+						const [key, process] = fileProcesses[0];
+						process.controller.abort();
+						this.removeActiveGeneration(key);
+						new Notice(`Abgebrochen: ${process.description}`);
+						return;
+					}
+				}
+
+				// Fallback: Open Modal
+				new CancelGenerationModal(this.app, this).open();
 			}
 		});
 
@@ -389,27 +400,27 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		this.activeGenerations.delete(filePath);
 	}
 
-    // ACTIVATE VIEW HELPER
-    async activateFeedbackView(history: ChatMessage[], sourcePath: string) {
-        const { workspace } = this.app;
+	// ACTIVATE VIEW HELPER
+	async activateFeedbackView(history: ChatMessage[], sourcePath: string) {
+		const { workspace } = this.app;
 
-        let leaf: WorkspaceLeaf | null = null;
-        const leaves = workspace.getLeavesOfType(FEEDBACK_VIEW_TYPE);
+		let leaf: WorkspaceLeaf | null = null;
+		const leaves = workspace.getLeavesOfType(FEEDBACK_VIEW_TYPE);
 
-        if (leaves.length > 0) {
-            // Use existing leaf
-            leaf = leaves[0];
-        } else {
-            // Open in right sidebar
-            leaf = workspace.getRightLeaf(false);
-            if(leaf) await leaf.setViewState({ type: FEEDBACK_VIEW_TYPE, active: true });
-        }
-        
-        if (leaf) {
-            workspace.revealLeaf(leaf);
-            if (leaf.view instanceof FeedbackView) {
-                leaf.view.setFeedbackContext(history, sourcePath);
-            }
-        }
-    }
+		if (leaves.length > 0) {
+			// Use existing leaf
+			leaf = leaves[0];
+		} else {
+			// Open in right sidebar
+			leaf = workspace.getRightLeaf(false);
+			if (leaf) await leaf.setViewState({ type: FEEDBACK_VIEW_TYPE, active: true });
+		}
+
+		if (leaf) {
+			workspace.revealLeaf(leaf);
+			if (leaf.view instanceof FeedbackView) {
+				leaf.view.setFeedbackContext(history, sourcePath);
+			}
+		}
+	}
 }

@@ -119,7 +119,45 @@ export class CardPreviewModal extends Modal {
 			this.render(); // This re-renders everything
 		});
 
-		// --- Save Search Query reference to restore value if full render ---
+		// --- Delete All Button ---
+		const deleteContainer = sortContainer.createDiv();
+		deleteContainer.style.marginLeft = 'auto'; // Right align
+
+		const deleteAllBtn = deleteContainer.createEl('button', { text: '🗑️ Alle löschen' });
+		deleteAllBtn.classList.add('mod-warning'); // Obsidian style for dangerous action
+		deleteAllBtn.onclick = () => {
+			// Simple confirmation
+			// Ideally use a Modal, but confirm() is quick for restoring functionality
+			// Or better: Use a small Notice based confirmation or just a check?
+			// Let's use a standard Obsidian Modal for safety
+
+			const confirmModal = new Modal(this.app);
+			confirmModal.contentEl.createEl('h3', { text: 'Alle Karten löschen?' });
+			confirmModal.contentEl.createEl('p', { text: 'Möchtest du wirklich alle Karten in diesem Block löschen? Dies kann nicht rückgängig gemacht werden.' });
+
+			const btnContainer = confirmModal.contentEl.createDiv();
+			btnContainer.style.display = 'flex';
+			btnContainer.style.justifyContent = 'flex-end';
+			btnContainer.style.gap = '10px';
+			btnContainer.style.marginTop = '20px';
+
+			const cancelBtn = btnContainer.createEl('button', { text: 'Abbrechen' });
+			cancelBtn.onclick = () => confirmModal.close();
+
+			const confirmBtn = btnContainer.createEl('button', { text: 'Ja, alle löschen', cls: 'mod-destructive' });
+			confirmBtn.onclick = () => {
+				// Mark all synced cards for deletion
+				this.cards.forEach(card => {
+					if (card.id) this.deletedCardIds.push(card.id);
+				});
+				this.cards = [];
+				this.render(); // Full render handles everything (container, sourcePath, etc.)
+				confirmModal.close();
+				new Notice("Alle Karten gelöscht.");
+			};
+
+			confirmModal.open();
+		};
 		searchInput.value = this.searchQuery;
 
 		// --- CSS Styles for Compact Design ---
@@ -210,6 +248,8 @@ export class CardPreviewModal extends Modal {
 				}
 			`
 		});
+
+
 
 		const container = contentEl.createDiv({ cls: 'anki-preview-container' });
 

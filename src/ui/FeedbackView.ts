@@ -136,8 +136,16 @@ export class FeedbackView extends ItemView {
 
     render(scrollBehavior: 'preserve' | 'new-message' | 'default' = 'default') {
         const container = this.contentEl;
+
+        // Capture scroll position BEFORE emptying
+        let currentScroll = 0;
+        const contentArea = container.querySelector('.anki-feedback-content');
+        if (contentArea) {
+            currentScroll = contentArea.scrollTop;
+        }
+
         container.empty();
-        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState, this.cards, this.deckName, true, scrollBehavior);
+        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState, this.cards, this.deckName, true, scrollBehavior, currentScroll);
     }
 
     async updateCards(file: TFile) {
