@@ -15,7 +15,9 @@ export function basicMarkdownToHtml(text: string): string {
     let html = text;
     
     // 1. Markdown Links [Text](URL) -> <a href="URL">Text</a>
-    html = html.replace(/\[([^\]]+)\]\(([^)]+(?:\([^)]+\)[^)]*)*)\)/g, (match, text, url) => {
+    // The URL group uses (?:[^()]+|\([^()]*\))* to correctly handle URLs that contain
+    // balanced parentheses (e.g. vault names like "NFS-Ausbildung (Till)").
+    html = html.replace(/\[([^\]]+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, (match, text, url) => {
         const safeUrl = url.trim().replace(/\s/g, '%20');
         return `<a href="${safeUrl}">${text}</a>`;
     });
@@ -73,7 +75,7 @@ export function convertObsidianLinks(text: string, vaultName: string, currentFil
         return `<a href="${href}" style="text-decoration: underline; color: #007AFF;">${alias || linkPath}</a>`;
     });
 
-    return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+    return text.replace(/\[([^\]]+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, (match, linkText, url) => {
         if (url.startsWith('http')) return match;
         
         if (app && currentFile && !url.startsWith('#') && !url.includes('obsidian://')) {
