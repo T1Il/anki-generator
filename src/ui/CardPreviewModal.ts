@@ -2,6 +2,7 @@ import { Modal, Setting, Notice, MarkdownRenderer, setIcon, TFile } from 'obsidi
 import { Card } from '../types';
 import { CardEditModal } from './CardEditModal';
 import AnkiGeneratorPlugin from '../main';
+import { stripHybridObsidianLinks } from '../utils';
 
 export class CardPreviewModal extends Modal {
 	plugin: AnkiGeneratorPlugin;
@@ -501,12 +502,12 @@ export class CardPreviewModal extends Modal {
 
 			// Question
 			const qDiv = body.createDiv({ cls: 'anki-card-q' });
-			const highlightedQ = this.highlightClozes(card.q);
+			const highlightedQ = this.highlightClozes(stripHybridObsidianLinks(card.q));
 			MarkdownRenderer.render(this.app, highlightedQ, qDiv, sourcePath, this.plugin);
 
 			// Answer
 			const aDiv = body.createDiv({ cls: 'anki-card-a' });
-			const highlightedA = this.highlightClozes(card.a);
+			const highlightedA = this.highlightClozes(stripHybridObsidianLinks(card.a));
 			MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
 		});
 	}

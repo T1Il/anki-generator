@@ -16,6 +16,7 @@ import { startRevisionProcess, updateFirstBlockDeck } from '../ankiBlockProcesso
 import { DeckSelectionModal } from './DeckSelectionModal';
 import { RevisionInputModal } from './RevisionInputModal';
 import { getDeckNames, moveAnkiNotesToDeck, getCardCountForDeck, deleteAnkiDeck } from '../anki/AnkiConnect';
+import { stripHybridObsidianLinks } from '../utils';
 
 export async function renderFeedback(
     container: HTMLElement,
@@ -873,7 +874,7 @@ async function renderCardPreviewSection(
             titlePreview.empty();
 
             // 1. Get first line of question
-            let previewText = card.q.split('\n')[0];
+            let previewText = stripHybridObsidianLinks(card.q.split('\n')[0]);
 
             // 2. Strip standard Markdown links [text](url) -> text
             previewText = previewText.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');

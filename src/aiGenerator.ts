@@ -128,7 +128,12 @@ Gib NUR die überarbeiteten Karten zurück.`;
 			.replace('{{existingCards}}', existingCards);
 	}
 
-	const noteURI = `obsidian://open?vault=${encodeURIComponent(settings.vaultName)}&file=${encodeURIComponent(noteTitle)}`;
+	// encodeURIComponent leaves '(' and ')' untouched, which breaks the markdown link
+	// syntax [text](url) when vault or file names contain parens (e.g. "NFS-Ausbildung (Till)").
+	// We additionally encode parens to keep links parseable.
+	const encodeForMarkdownUrl = (s: string) =>
+		encodeURIComponent(s).replace(/\(/g, '%28').replace(/\)/g, '%29');
+	const noteURI = `obsidian://open?vault=${encodeForMarkdownUrl(settings.vaultName)}&file=${encodeForMarkdownUrl(noteTitle)}`;
 
 	return cardPrompt
 		.split('{{noteContent}}').join(noteContent)

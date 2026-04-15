@@ -52,9 +52,41 @@ export function convertObsidianLatexToAnki(text: string): string {
     return converted;
 }
 
+/**
+ * Fixes AI-generated obsidian:// links.
+ * Two problems are handled:
+ *   1. Hybrid wikilink+markdown: [[Note]](obsidian://...) → [[Note]]
+ *   2. Unescaped parens in vault/file names like "NFS-Ausbildung (Till)"
+ *      which break the markdown [text](url) syntax. We re-encode ( → %28 and ) → %29.
+ * The URL regex allows balanced paren pairs inside the URL portion.
+ */
+export function stripHybridObsidianLinks(text: string): string {
+    if (!text) return text;
+
+    // 1) Drop the trailing (obsidian://...) after a wikilink — balanced paren aware.
+    text = text.replace(
+        /(\[\[[^\]]+\]\])\(obsidian:\/\/(?:[^()]|\([^()]*\))*\)/g,
+        '$1'
+    );
+
+    // 2) Re-encode parens inside plain [text](obsidian://... ) URLs so that
+    //    vault names like "NFS-Ausbildung (Till)" do not confuse the markdown parser.
+    text = text.replace(
+        /\[([^\]]+)\]\((obsidian:\/\/(?:[^()]|\([^()]*\))*)\)/g,
+        (_match, linkText, url) => {
+            const fixedUrl = url.replace(/\(/g, '%28').replace(/\)/g, '%29');
+            return `[${linkText}](${fixedUrl})`;
+        }
+    );
+
+    return text;
+}
+
 export function convertObsidianLinks(text: string, vaultName: string, currentFile?: string, app?: App): string {
     if (!text) return text;
     const encodedVault = encodeURIComponent(vaultName);
+
+    text = stripHybridObsidianLinks(text);
 
     text = text.replace(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g, (match, linkPath, alias) => {
         if (app && currentFile) {

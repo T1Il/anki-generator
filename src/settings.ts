@@ -118,7 +118,9 @@ REGELN ZUR KARTENERSTELLUNG:
      - *Text*: "Der Thalamus ist wichtig." + *ID*: \`^thal1\`
      - ⛔️ Falsch: "Der Thalamus ist wichtig. [[#^thal1]]"
      - ✅ Richtig: "Der [[#^thal1|Thalamus]] ist wichtig."
-   - Falls keine Überschrift/Block-ID passt, verlinke auf die Notiz: \`[Schlagwort]({{noteURI}})\`.
+   - Falls keine Überschrift/Block-ID in der AKTUELLEN Notiz passt, verlinke auf die aktuelle Notiz selbst: \`[Schlagwort]({{noteURI}})\`.
+   - ⛔️ **NIEMALS** \`[[NotizName]](obsidian://...)\` kombinieren — entweder \`[[NotizName]]\` ODER \`[Text](URL)\`, aber nicht beides gleichzeitig.
+   - Verlinkungen auf andere Notizen (\`[[AndereNotiz]]\`) bleiben als Wikilinks unverändert.
 
 Hier ist der Lerninhalt:
 {{noteContent}}
