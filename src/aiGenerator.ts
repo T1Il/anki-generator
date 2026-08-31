@@ -51,6 +51,7 @@ export async function generateCardsWithAI(
 				let currentFeedbackPrompt = feedbackPrompt;
 				currentFeedbackPrompt += `\n\nOriginal Content:\n"""\n${noteContent}\n"""`;
 				currentFeedbackPrompt += `\n\nGenerierte Karten:\n"""\n${cardsResponse}\n"""`;
+				currentFeedbackPrompt += '\n\n' + SUGGESTION_FORMAT_INSTRUCTIONS;
 
 				console.log(`--- Feedback Prompt ---\n${currentFeedbackPrompt.substring(0, 200)}...\n--- End Feedback Prompt ---`);
 
@@ -155,6 +156,9 @@ export async function generateFeedbackOnly(
 		feedbackPrompt = DEFAULT_SETTINGS.feedbackPrompt;
 	}
 	feedbackPrompt = feedbackPrompt.replace('{{noteContent}}', noteContent);
+	// Ohne diese Anweisung liefert das Feedback nur Fliesstext und die
+	// Vorschlaege lassen sich nicht per Klick uebernehmen.
+	feedbackPrompt += '\n\n' + SUGGESTION_FORMAT_INSTRUCTIONS;
 
 	return await callAIProvider(app, provider, settings, feedbackPrompt, [], [], abortSignal, false);
 }

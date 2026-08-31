@@ -70,7 +70,9 @@ Bevorzuge \`anki-card\`, wenn es um Karten geht - das ist zuverlässiger als
 Textsuche. Benutze \`anki-edit\` nur für den Fließtext der Notiz.
 `.trim();
 
-const FENCE = /^[ \t]*```(anki-edit|anki-card)[ \t]*$/;
+// 3 oder mehr Backticks erlauben - Modelle nutzen gern vier.
+const FENCE = /^[ \t]*`{3,}(anki-edit|anki-card)[ \t]*$/;
+const CLOSE_FENCE = /^[ \t]*`{3,}[ \t]*$/;
 
 /** Zerlegt eine KI-Antwort in Vorschläge. Unbekannte oder kaputte Blöcke werden übersprungen. */
 export function parseSuggestions(markdown: string): Suggestion[] {
@@ -88,7 +90,7 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 		const kind = open[1];
 		const body: string[] = [];
 		i++;
-		while (i < lines.length && !/^[ \t]*```[ \t]*$/.test(lines[i])) {
+		while (i < lines.length && !CLOSE_FENCE.test(lines[i])) {
 			body.push(lines[i]);
 			i++;
 		}
@@ -188,7 +190,7 @@ export function stripSuggestionBlocks(markdown: string): string {
 	while (i < lines.length) {
 		if (FENCE.test(lines[i])) {
 			i++;
-			while (i < lines.length && !/^[ \t]*```[ \t]*$/.test(lines[i])) i++;
+			while (i < lines.length && !CLOSE_FENCE.test(lines[i])) i++;
 			i++;
 			continue;
 		}

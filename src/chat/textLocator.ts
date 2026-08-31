@@ -108,6 +108,11 @@ function originalEnd(norm: Normalized, lastIndex: number, haystackLength: number
 	return haystackLength;
 }
 
+/** Nur der normalisierte Text, ohne Index-Abbildung. Fuer Vergleiche. */
+export function normalizeText(input: string): string {
+	return normalize(input).text.trim();
+}
+
 /**
  * Sucht `needle` in `haystack`. Erst exakt, dann normalisiert,
  * dann normalisiert ohne Groß-/Kleinschreibung.

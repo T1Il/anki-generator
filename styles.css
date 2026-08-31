@@ -540,3 +540,183 @@
 	display: inline-block;
 	text-align: center;
 }
+
+/* =========================================================================
+   Abweichungen zu Anki
+   ========================================================================= */
+
+.anki-drift-modal {
+	max-width: 900px;
+	width: 92%;
+}
+
+.anki-drift-summary {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin-bottom: 10px;
+	line-height: 1.5;
+}
+
+.anki-drift-count-changed {
+	color: var(--text-accent);
+	font-weight: 600;
+}
+
+.anki-drift-count-missing {
+	color: var(--text-error);
+	font-weight: 600;
+}
+
+.anki-drift-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
+	margin-bottom: 12px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.anki-drift-sync-btn {
+	margin-left: auto;
+}
+
+.anki-drift-list {
+	max-height: 60vh;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.anki-drift-empty {
+	text-align: center;
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 28px 12px;
+}
+
+.anki-drift-group-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+	padding: 4px 0;
+	position: sticky;
+	top: 0;
+	background: var(--background-primary);
+	z-index: 1;
+}
+
+.anki-drift-group-count {
+	margin-left: auto;
+	background: var(--background-modifier-border);
+	border-radius: 10px;
+	padding: 0 7px;
+}
+
+.anki-drift-item {
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--text-accent);
+	border-radius: var(--radius-m, 8px);
+	padding: 8px 10px;
+	margin-bottom: 8px;
+	background: var(--background-primary);
+}
+
+.anki-drift-item.is-missing {
+	border-left-color: var(--text-error);
+}
+
+.anki-drift-item.is-edited {
+	border-left-color: var(--text-success, var(--interactive-accent));
+}
+
+.anki-drift-item-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.anki-drift-item-head input[type="checkbox"] {
+	flex: 0 0 auto;
+	margin: 0;
+}
+
+.anki-drift-question {
+	flex: 1 1 auto;
+	font-weight: 500;
+	overflow-wrap: anywhere;
+}
+
+.anki-drift-id {
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-family: var(--font-monospace);
+}
+
+.anki-drift-warn-icon {
+	display: inline-flex;
+	color: var(--text-error);
+}
+
+.anki-drift-note {
+	margin-top: 6px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-error);
+	line-height: 1.45;
+}
+
+.anki-drift-diff {
+	margin-top: 8px;
+}
+
+.anki-drift-field-label {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+	margin-bottom: 3px;
+}
+
+.anki-drift-line {
+	display: flex;
+	gap: 8px;
+	padding: 4px 6px;
+	border-radius: 4px;
+	font-size: var(--font-ui-small);
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+	margin-bottom: 2px;
+}
+
+.anki-drift-line.is-anki {
+	background: rgba(220, 70, 70, 0.12);
+}
+
+.anki-drift-line.is-note {
+	background: rgba(70, 180, 100, 0.12);
+}
+
+.anki-drift-tag {
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	opacity: 0.75;
+	min-width: 38px;
+}
+
+.anki-drift-actions {
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+	justify-content: flex-end;
+}
+
+.anki-drift-actions button {
+	font-size: var(--font-ui-smaller);
+	padding: 3px 10px;
+	height: auto;
+}

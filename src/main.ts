@@ -1,5 +1,5 @@
 import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf, TFile, TFolder } from 'obsidian';
-import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings } from './settings';
+import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings, repairCorruptedPrompt } from './settings';
 import { processAnkiCardsBlock } from './ankiBlockProcessor';
 import { triggerCardGeneration } from './generationManager';
 import { parseAnkiSection as parseAnkiSectionType } from './anki/ankiParser'; // Nur für Typdeklaration
@@ -17,6 +17,8 @@ import { legacyAnkiStateField } from './ui/LegacyAnkiDecorator';
 import { CancelGenerationModal } from './ui/CancelGenerationModal';
 import { FileSuggestModal } from './ui/FileSuggestModal';
 import { loadHistory, saveHistory } from './chat/chatHistory';
+import { checkDrift } from './anki/driftCheck';
+import { DriftReviewModal } from './ui/DriftReviewModal';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -132,6 +134,29 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		this.registerEditorExtension(legacyAnkiStateField);
 
 		// Command Registrierung
+
+		this.addCommand({
+			id: 'check-anki-drift-file',
+			name: 'Abweichungen zu Anki pr\u00fcfen (aktuelle Notiz)',
+			callback: () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) {
+					new Notice('Keine Notiz ge\u00f6ffnet.');
+					return;
+				}
+				void this.runDriftCheck([file]);
+			}
+		});
+
+		this.addCommand({
+			id: 'check-anki-drift-vault',
+			name: 'Abweichungen zu Anki pr\u00fcfen (ganzer Vault)',
+			callback: () => {
+				const files = this.app.vault.getMarkdownFiles()
+					.filter(f => !this.settings.ignoredFiles?.includes(f.path));
+				void this.runDriftCheck(files);
+			}
+		});
 
 		this.addCommand({
 			id: 'open-anki-chat',
@@ -390,6 +415,15 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+
+		// Beschaedigten Prompt aus alten Installationen einmalig reparieren.
+		const repaired = repairCorruptedPrompt(this.settings.prompt);
+		if (repaired !== null) {
+			console.warn('[AnkiGenerator] Gespeicherter Prompt enthielt Quelltext-Reste und wurde bereinigt.');
+			this.settings.prompt = repaired;
+			await this.saveSettings();
+			new Notice('Anki Generator: Ein beschaedigter gespeicherter Prompt wurde repariert.', 8000);
+		}
 	}
 
 	async saveSettings() {
@@ -425,6 +459,31 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	}
 
 	// ACTIVATE VIEW HELPER
+	/** Notizen gegen Anki abgleichen und das Ergebnis zur Auswahl anzeigen. */
+	async runDriftCheck(files: TFile[]) {
+		const notice = new Notice('Pr\u00fcfe Abweichungen zu Anki...', 0);
+
+		try {
+			const report = await checkDrift(this.app, this.settings, files, (done, total) => {
+				if (total > 5) notice.setMessage(`Lese Notizen... ${done}/${total}`);
+			});
+
+			notice.hide();
+
+			if (report.items.length === 0) {
+				new Notice(`Keine Abweichungen. ${report.checked} Karten gepr\u00fcft.`, 6000);
+				return;
+			}
+
+			new DriftReviewModal(this, report, () => void this.runDriftCheck(files)).open();
+
+		} catch (e: any) {
+			notice.hide();
+			console.error('[AnkiGenerator] Drift-Pr\u00fcfung fehlgeschlagen:', e);
+			new Notice('Abgleich fehlgeschlagen: ' + (e?.message || e) + ' (L\u00e4uft Anki mit AnkiConnect?)', 10000);
+		}
+	}
+
 	async activateFeedbackView(history: ChatMessage[], sourcePath: string, location: 'sidebar' | 'tab' = 'sidebar') {
 		const { workspace } = this.app;
 

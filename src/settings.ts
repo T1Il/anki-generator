@@ -44,6 +44,30 @@ export interface AnkiGeneratorSettings {
 	ignoredFiles: string[];
 }
 
+/**
+ * Repariert einen historisch beschaedigten gespeicherten Prompt.
+ *
+ * In data.json aelterer Installationen ist beim Speichern roher Quelltext
+ * mitgewandert: der Wert laeuft ueber die Feldgrenze hinaus und endet mit
+ * ' `,\n\tfeedbackPrompt: `Du bist ein erfahrener Tutor...'.
+ * Darin steht unter anderem 'Erstelle KEINE Karteikarten hier' - sobald jemand
+ * useCustomPrompt einschaltet, bekommt das Modell diese Anweisung und erzeugt
+ * keine Karten mehr. Das sieht dann nach Modellversagen aus.
+ *
+ * Gibt den bereinigten Prompt zurueck oder null, wenn nichts zu tun ist.
+ */
+export function repairCorruptedPrompt(prompt: unknown): string | null {
+	if (typeof prompt !== 'string' || !prompt) return null;
+
+	// Backtick, Komma, Zeilenumbruch, danach ein JS-Feldname mit Doppelpunkt.
+	const match = prompt.match(/`\s*,\s*[\r\n]+\s*[A-Za-z_$][\w$]*\s*:/);
+	if (!match || match.index === undefined) return null;
+
+	const repaired = prompt.substring(0, match.index).trimEnd();
+	// Nur uebernehmen, wenn danach noch ein brauchbarer Prompt uebrig bleibt.
+	return repaired.length > 50 ? repaired : null;
+}
+
 export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
 	vaultName: 'My Vault',
 	enableFeedback: false,
@@ -139,10 +163,9 @@ Bestehende Karten (vermeide Duplikate):
 Das Feedback soll kurz sein, ausschließlich inhaltlich und auf die Präklinik (Rettungsdienst) bezogen sein.
 
 WICHTIG FÜR KORREKTUREN:
-Wenn du dich auf konkrete Textstellen beziehst, ZITIERE sie bitte als Zitatblock (> Zitat), damit ich sie direkt finden kann.
-Beispiel:
-> Das Herz ist ein Muskel.
-Das ist ungenau. Besser: "Das Herz ist ein Hohlmuskel."
+Wenn du eine konkrete Änderung vorschlägst, gib sie im unten beschriebenen
+anki-edit- bzw. anki-card-Format aus - nur so lässt sie sich per Klick übernehmen.
+Reine Zitatblöcke (> Zitat) helfen nicht weiter.
 
 Gib konstruktives Feedback und Verbesserungsvorschläge zum Inhalt selbst.
 	
