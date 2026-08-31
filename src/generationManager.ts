@@ -5,7 +5,7 @@ import AnkiGeneratorPlugin from './main';
 import { SubdeckModal } from './ui/SubdeckModal';
 import { ModelSelectionModal } from './ui/ModelSelectionModal';
 // DebugModal wird in aiGenerator verwendet
-import { parseAnkiSection, parseCardsFromBlockSource, ANKI_BLOCK_REGEX, getAnkiBlockMatches } from './anki/ankiParser';
+import { parseAnkiSection, parseCardsFromBlockSource, ANKI_BLOCK_REGEX, getAnkiBlockMatches, getAnkiBlocks, buildFullBlock, parseBlockHeader } from './anki/ankiParser';
 import { getDeckNames } from './anki/AnkiConnect';
 import { generateCardsWithAI } from './aiGenerator';
 import { ImageInput, ChatMessage } from './types';
@@ -212,63 +212,71 @@ export async function runGenerationProcess(
 				// REVISION MODE: Parse and Diff
 				console.log("Parsing cards for Revision Diff View...");
 				
-				// 1. Parse Existing Cards
-                // Extract inner content for parser (it expects block source)
-                const fullBlockContent = editor.getValue().substring(blockStartIndex, blockEndIndex);
-                const oldCardsObjects = parseCardsFromBlockSource(fullBlockContent);
+                // 1. Bestehende Karten aus dem Zielblock lesen.
+                //    Ueber getAnkiBlocks statt roher Offsets, damit Callout-Prefix
+                //    und Backtick-Anzahl des Blocks bekannt sind.
+                const blocksNow = getAnkiBlocks(editor.getValue());
+                const targetBlock = blocksNow.find(b => b.start === blockStartIndex)
+                    || blocksNow[blocksNow.length - 1];
 
-				// 2. Parse New Cards
-				const newCardsObjects = parseCardsFromBlockSource(generatedText);
+                if (!targetBlock) {
+                    notice.hide();
+                    new Notice("Konnte den zu ueberarbeitenden Anki-Block nicht finden.");
+                    return "";
+                }
 
+                const originalInner = targetBlock.innerClean;
+                const oldCardsObjects = parseCardsFromBlockSource(originalInner);
 
-				// 3. Open Modal
+                // 2. Parse New Cards
+                const newCardsObjects = parseCardsFromBlockSource(generatedText);
+
+                // 3. Open Modal
                 new RevisionDiffModal(plugin.app, oldCardsObjects, newCardsObjects, activeFile ? activeFile.path : "", async (finalCards) => {
-                    // 4. On Submit: Reconstruct Block with Final Cards
-                    
-                    // Re-read header info (deck, instruction, status)
-                    const headerInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
-                    
-                    // We need to preserve the header exactly as it was, or reconstruct it properly.
-                    // The easiest way is to reuse the 'ensureAnkiBlock' logic or just manual reconstruction.
-                    
+                    // 4. Block ERNEUT suchen: zwischen Oeffnen und Bestaetigen des
+                    //    Modals kann sich die Datei verschoben haben, die alten
+                    //    Offsets waeren dann falsch.
+                    const freshBlocks = getAnkiBlocks(editor.getValue());
+                    const block = freshBlocks.find(b => b.innerClean === originalInner)
+                        || freshBlocks.find(b => b.innerClean.trim() === originalInner.trim());
+
+                    if (!block) {
+                        new Notice("Der Anki-Block hat sich zwischenzeitlich geaendert - nichts geschrieben.");
+                        return;
+                    }
+
+                    // Kopfzeilen aus GENAU diesem Block uebernehmen, inklusive
+                    // weiterer und deaktivierter INSTRUCTION-Zeilen.
+                    const headerInfo = parseBlockHeader(block.innerClean);
+
                     let newBlockContent = `TARGET DECK: ${fullDeckPath}`;
-                    
-                    // Instructions
-                    const instructionToUse = headerInfo?.instruction || instructionToUpdate;
+
+                    const instructionToUse = headerInfo.instruction || instructionToUpdate;
                     if (instructionToUse) {
                         newBlockContent += `\nINSTRUCTION: ${instructionToUse.trim()}`;
                     }
-                    if (headerInfo?.disabledInstruction) {
-                        newBlockContent += `\n# INSTRUCTION: ${headerInfo.disabledInstruction.trim()}`;
-                    }
-                    
-                    // Status - clear it after revision
-                    // if (headerInfo?.status) newBlockContent += `\nSTATUS: ${headerInfo.status}`; 
+                    headerInfo.extraHeaderLines.forEach(line => {
+                        newBlockContent += `\n${line}`;
+                    });
 
-                    // Cards
+                    // Status wird nach einer Ueberarbeitung bewusst entfernt.
+
                     const cardsText = finalCards.map(c => c.originalText).join('\n\n');
                     newBlockContent += `\n\n${cardsText}`;
 
-                    const newBlockSource = `\`\`\`anki-cards\n${newBlockContent.trim()}\n\`\`\``;
+                    // buildFullBlock statt handgebauter Fence: erhaelt "> " im
+                    // Callout und die urspruengliche Backtick-Anzahl.
+                    const newBlockSource = buildFullBlock(block, newBlockContent.trim());
 
-                    const startPos = editor.offsetToPos(blockStartIndex);
-                    const endPos = editor.offsetToPos(blockEndIndex);
-                    
-                    // We need to make sure we are replacing the correct range. 
-                    // Since it's async (modal), the user might have changed the file?
-                    // Ideally we should re-find the block, but for now let's assume index is valid or use 'source' matching if possible.
-                    // Given 'editor' is live, offsets might shift. 
-                    // Better to re-find block by content? 
-                    // But we don't have the original block content fully robustly if it changed.
-                    // Let's rely on standard 'editor.replaceRange' with the indices we captured, 
-                    // BUT warn if content doesn't match?
-                    // Actually, 'ensureAnkiBlock' returned indices.
-                    // Let's just try to replace.
-                    editor.replaceRange(newBlockSource, startPos, endPos);
-                    
+                    editor.replaceRange(
+                        newBlockSource,
+                        editor.offsetToPos(block.start),
+                        editor.offsetToPos(block.end)
+                    );
+
                     new Notice(t('notice.updated', { provider }));
                 }).open();
-                
+
                 // Return immediately (async feedback handles itself)
                 return "";
 

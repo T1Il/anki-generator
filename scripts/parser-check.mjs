@@ -169,6 +169,49 @@ console.log('\nSchreiben:');
 	check('Kein stiller Fallback auf den letzten Block', res.matchIndex === -1, res);
 }
 
+console.log('\nBlockkopf (Ueberarbeiten-Pfad):');
+
+{
+	const inner = [
+		'TARGET DECK: A::B',
+		'INSTRUCTION: erste',
+		'INSTRUCTION: zweite',
+		'# INSTRUCTION: deaktivierte',
+		'STATUS: OVERLOADED',
+		'',
+		'Q: Frage',
+		'ID: 1'
+	].join('\n');
+
+	const h = P.parseBlockHeader(inner);
+	check('Deck erkannt', h.deckName === 'A::B', h.deckName);
+	check('Erste Instruction erkannt', h.instruction === 'erste', h.instruction);
+	check('Status erkannt', h.status === 'OVERLOADED', h.status);
+	check('Weitere + deaktivierte Instructions bleiben erhalten',
+		h.extraHeaderLines.length === 2, h.extraHeaderLines);
+
+	const rebuilt = P.formatCardsToString(
+		'TARGET DECK: ' + h.deckName,
+		P.parseCardsFromBlockSource(inner),
+		h.instruction, h.status, h.extraHeaderLines);
+	check('Zweite Instruction ueberlebt das Neuschreiben',
+		rebuilt.includes('INSTRUCTION: zweite'), rebuilt);
+	check('Deaktivierte Instruction ueberlebt das Neuschreiben',
+		rebuilt.includes('# INSTRUCTION: deaktivierte'), rebuilt);
+}
+
+{
+	// So schreibt der Ueberarbeiten-Pfad zurueck: Callout muss Callout bleiben.
+	const src = '> ```anki-cards\n> TARGET DECK: A\n>\n> Q: Alt\n> ID: 5\n> ```';
+	const block = P.getAnkiBlocks(src)[0];
+	const revised = P.buildFullBlock(block, 'TARGET DECK: A\n\nQ: Neu\nID: 5');
+	const out = P.spliceBlock(src, block, revised);
+	check('Ueberarbeiteter Callout-Block behaelt "> "',
+		out.split('\n').every(l => l.startsWith('> ')), out);
+	check('Ueberarbeitung hat den Inhalt ersetzt',
+		out.includes('Q: Neu') && !out.includes('Q: Alt'), out);
+}
+
 console.log('');
 if (failures > 0) {
 	console.error(failures + ' Pruefung(en) fehlgeschlagen.');
