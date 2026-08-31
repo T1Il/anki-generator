@@ -764,3 +764,22 @@
 	border-radius: 3px;
 	margin-top: 2px;
 }
+
+/* Kurze Einordnung, WAS sich geändert hat. */
+.anki-drift-field-label {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.anki-drift-reason {
+	font-weight: 500;
+	font-size: 0.95em;
+	color: var(--text-normal);
+	background: var(--background-modifier-border);
+	border-radius: 10px;
+	padding: 1px 8px;
+	text-transform: none;
+	letter-spacing: 0;
+}

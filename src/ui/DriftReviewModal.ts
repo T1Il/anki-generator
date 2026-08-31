@@ -1,49 +1,11 @@
 import { App, Modal, Notice, Setting, ButtonComponent, TFile, setIcon } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 import { Card } from '../types';
-import { DriftItem, DriftReport } from '../anki/driftCheck';
+import { DriftItem, DriftReport, DiffPart, wordDiff } from '../anki/driftCheck';
 import { syncAnkiBlock } from '../anki/syncManager';
 import { CardEditModal } from './CardEditModal';
 import { getAnkiBlocks, parseCardsFromBlockSource, formatCardsToString, parseBlockHeader, buildFullBlock, spliceBlock } from '../anki/ankiParser';
 
-
-interface DiffPart {
-	text: string;
-	changed: boolean;
-}
-
-/**
- * Wortweiser Vergleich ueber gemeinsamen Anfang und gemeinsames Ende.
- * Reicht voellig, um zu zeigen WAS sich geaendert hat - ein vollstaendiger
- * Diff-Algorithmus waere hier Overkill.
- */
-function wordDiff(a: string, b: string): [DiffPart[], DiffPart[]] {
-	const aw = a.split(' ');
-	const bw = b.split(' ');
-
-	let start = 0;
-	while (start < aw.length && start < bw.length && aw[start] === bw[start]) start++;
-
-	let end = 0;
-	while (
-		end < aw.length - start &&
-		end < bw.length - start &&
-		aw[aw.length - 1 - end] === bw[bw.length - 1 - end]
-	) end++;
-
-	const build = (words: string[]): DiffPart[] => {
-		const parts: DiffPart[] = [];
-		const head = words.slice(0, start).join(' ');
-		const mid = words.slice(start, words.length - end).join(' ');
-		const tail = words.slice(words.length - end).join(' ');
-		if (head) parts.push({ text: head, changed: false });
-		if (mid) parts.push({ text: mid, changed: true });
-		if (tail) parts.push({ text: tail, changed: false });
-		return parts;
-	};
-
-	return [build(aw), build(bw)];
-}
 
 function renderParts(parent: HTMLElement, parts: DiffPart[], fallback: string) {
 	if (parts.length === 0) {
@@ -207,7 +169,12 @@ export class DriftReviewModal extends Modal {
 		} else {
 			item.fields.filter((f) => f.differs).forEach((field) => {
 				const diff = row.createDiv({ cls: 'anki-drift-diff' });
-				diff.createDiv({ cls: 'anki-drift-field-label', text: field.label });
+				const labelRow = diff.createDiv({ cls: 'anki-drift-field-label' });
+				labelRow.createSpan({ text: field.label });
+				const badge = labelRow.createSpan({ cls: 'anki-drift-reason' });
+				badge.setText(field.reason.detail
+					? `${field.reason.label}: ${field.reason.detail}`
+					: field.reason.label);
 
 				// Die VERGLICHENE Fassung zeigen, nicht das Roh-HTML: sonst sieht
 				// ein blosser Wikilink wie ein riesiger Unterschied aus, obwohl er

@@ -24,6 +24,8 @@ export interface DriftField {
 	noteNorm: string;
 	ankiNorm: string;
 	differs: boolean;
+	/** Art der Abweichung, nicht das Motiv. */
+	reason: ChangeDescription;
 }
 
 export interface DriftItem {
@@ -56,6 +58,21 @@ const ENTITIES: Record<string, string> = {
 	'&quot;': '"', '&#39;': "'", '&apos;': "'"
 };
 
+/**
+ * LaTeX-Begrenzer entfernen.
+ *
+ * Der Sync wandelt $x$ -> \(x\) und $$x$$ -> \[x\]. Ohne diesen Schritt gilt
+ * jede Karte mit Formel als abweichend, obwohl sich inhaltlich nichts
+ * geaendert hat.
+ */
+function stripMathDelimiters(text: string): string {
+	return text
+		.replace(/\$\$([\s\S]*?)\$\$/g, '$1')
+		.replace(/\\\[([\s\S]*?)\\\]/g, '$1')
+		.replace(/\\\(([\s\S]*?)\\\)/g, '$1')
+		.replace(/(?<!\\)\$([^$]+?)(?<!\\)\$/g, '$1');
+}
+
 /** Anki speichert HTML. Daraus vergleichbaren Klartext machen. */
 export function htmlToPlain(html: string): string {
 	if (!html) return '';
@@ -72,6 +89,9 @@ export function htmlToPlain(html: string): string {
 	text = text.replace(/<[^>]+>/g, '');
 	text = text.replace(/&[a-z#0-9]+;/gi, (m) => ENTITIES[m.toLowerCase()] ?? ' ');
 
+	// Erst nach dem Entfernen der Tags: \( und \) stehen dort als Klartext.
+	text = stripMathDelimiters(text);
+
 	return collapse(text);
 }
 
@@ -80,9 +100,18 @@ export function noteToPlain(markdown: string): string {
 	if (!markdown) return '';
 	let text = markdown;
 
+	// Mermaid landet in Anki als gerendertes PNG - der Quelltext waere sonst
+	// eine Dauerabweichung. Auch unabgeschlossene Bloecke abfangen.
+	text = text.replace(/```mermaid[\s\S]*?(?:```|$)/g, ' ');
+
 	// Bild-Einbettungen entfernen (siehe oben).
 	text = text.replace(/!\[\[[^\]]*\]\]/g, ' ');
 	text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ');
+
+	// Hybrid-Links [[X]](obsidian://...) werden beim Sync auf [[X]] reduziert.
+	text = text.replace(/(\]\])\(obsidian:\/\/(?:[^()]|\([^()]*\))*\)/g, '$1');
+
+	text = stripMathDelimiters(text);
 
 	// Aufzaehlungszeichen MUESSEN vor normalizeText weg: das fasst
 	// Whitespace-Laeufe inkl. Zeilenumbruechen zu Leerzeichen zusammen,
@@ -109,7 +138,116 @@ function stripBullets(text: string): string {
 }
 
 function collapse(text: string): string {
-	return stripBullets(text).replace(/\s+/g, ' ').trim();
+	// Unterstriche auf BEIDEN Seiten entfernen: die Notiz-Normalisierung wertet
+	// '_' als Kursiv-Markierung, in Formeln wie O_2 ist es aber ein Index.
+	// Sonst gilt jede Karte mit Tiefstellung als abweichend.
+	return stripBullets(text)
+		.replace(/_/g, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+// --- Beschreibung der Aenderung -------------------------------------------
+
+export interface DiffPart {
+	text: string;
+	changed: boolean;
+}
+
+/**
+ * Wortweiser Vergleich ueber gemeinsamen Anfang und gemeinsames Ende.
+ * Reicht, um zu zeigen WAS sich geaendert hat - ein vollstaendiger
+ * Diff-Algorithmus waere hier Overkill.
+ */
+export function wordDiff(a: string, b: string): [DiffPart[], DiffPart[]] {
+	const aw = a.split(' ');
+	const bw = b.split(' ');
+
+	let start = 0;
+	while (start < aw.length && start < bw.length && aw[start] === bw[start]) start++;
+
+	let end = 0;
+	while (
+		end < aw.length - start &&
+		end < bw.length - start &&
+		aw[aw.length - 1 - end] === bw[bw.length - 1 - end]
+	) end++;
+
+	const build = (words: string[]): DiffPart[] => {
+		const parts: DiffPart[] = [];
+		const head = words.slice(0, start).join(' ');
+		const mid = words.slice(start, words.length - end).join(' ');
+		const tail = words.slice(words.length - end).join(' ');
+		if (head) parts.push({ text: head, changed: false });
+		if (mid) parts.push({ text: mid, changed: true });
+		if (tail) parts.push({ text: tail, changed: false });
+		return parts;
+	};
+
+	return [build(aw), build(bw)];
+}
+
+export interface ChangeDescription {
+	label: string;
+	detail?: string;
+}
+
+function changedText(parts: DiffPart[]): string {
+	return parts.filter((p) => p.changed).map((p) => p.text).join(' ').trim();
+}
+
+function wordCount(text: string): number {
+	return text ? text.split(' ').filter(Boolean).length : 0;
+}
+
+/**
+ * Beschreibt die ART der Abweichung.
+ *
+ * Bewusst keine Vermutung ueber das MOTIV: das Plugin sieht nur zwei
+ * Textstaende und kann nicht wissen, warum jemand etwas geaendert hat.
+ */
+export function describeChange(ankiNorm: string, noteNorm: string): ChangeDescription {
+	if (!ankiNorm && noteNorm) return { label: 'In Anki leer' };
+	if (ankiNorm && !noteNorm) return { label: 'In der Notiz leer' };
+
+	const [ankiParts, noteParts] = wordDiff(ankiNorm, noteNorm);
+	const ankiChanged = changedText(ankiParts);
+	const noteChanged = changedText(noteParts);
+
+	// Angehaengte Anzahlangabe wie "(7)".
+	if (!ankiChanged && /^\(\d+\)[.,;:]?$/.test(noteChanged)) {
+		return { label: 'Anzahlangabe ergänzt', detail: noteChanged };
+	}
+	if (!noteChanged && /^\(\d+\)[.,;:]?$/.test(ankiChanged)) {
+		return { label: 'Anzahlangabe entfernt', detail: ankiChanged };
+	}
+
+	if (ankiNorm.toLowerCase() === noteNorm.toLowerCase()) {
+		return { label: 'Nur Groß-/Kleinschreibung' };
+	}
+
+	const lettersOnly = (text: string) => text.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+	if (lettersOnly(ankiNorm) === lettersOnly(noteNorm)) {
+		return { label: 'Nur Zeichensetzung oder Abstände' };
+	}
+
+	// Gleicher Satzbau, andere Zahl - der haeufigste inhaltliche Fall.
+	const digitsMasked = (text: string) => text.replace(/\d+/g, '#');
+	if (digitsMasked(ankiNorm) === digitsMasked(noteNorm)) {
+		return { label: 'Zahl geändert', detail: `${ankiChanged} → ${noteChanged}` };
+	}
+
+	if (!ankiChanged && noteChanged) {
+		return { label: 'Text ergänzt', detail: `+${wordCount(noteChanged)} Wörter` };
+	}
+	if (ankiChanged && !noteChanged) {
+		return { label: 'Text entfernt', detail: `−${wordCount(ankiChanged)} Wörter` };
+	}
+
+	return {
+		label: 'Umformuliert',
+		detail: `${wordCount(ankiChanged)} → ${wordCount(noteChanged)} Wörter`
+	};
 }
 
 // --- Erwartete Anki-Inhalte aus einer Karte -------------------------------
@@ -157,7 +295,8 @@ function compareCard(card: Card, note: any, settings: AnkiGeneratorSettings): Dr
 			ankiValue,
 			noteNorm,
 			ankiNorm,
-			differs: noteNorm !== ankiNorm
+			differs: noteNorm !== ankiNorm,
+			reason: describeChange(ankiNorm, noteNorm)
 		}];
 	}
 
@@ -170,7 +309,11 @@ function compareCard(card: Card, note: any, settings: AnkiGeneratorSettings): Dr
 	const build = (label: string, noteValue: string, ankiValue: string): DriftField => {
 		const noteNorm = noteToPlain(noteValue);
 		const ankiNorm = htmlToPlain(ankiValue);
-		return { label, noteValue, ankiValue, noteNorm, ankiNorm, differs: noteNorm !== ankiNorm };
+		return {
+			label, noteValue, ankiValue, noteNorm, ankiNorm,
+			differs: noteNorm !== ankiNorm,
+			reason: describeChange(ankiNorm, noteNorm)
+		};
 	};
 
 	return [
