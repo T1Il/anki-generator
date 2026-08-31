@@ -43,9 +43,39 @@ export function stripBlockquotePrefixes(text: string): string {
 	return text.replace(/^[ \t]*>[ \t]?/gm, '');
 }
 
-/** Der Inhalt, auf dem alle Vergleiche und das Karten-Parsing arbeiten. */
-export function cleanBlockInner(inner: string): string {
-	return stripBlockquotePrefixes(normalizeNewlines(inner));
+/** Wie viele '>' der Block selbst als Prefix trägt (Callout-Verschachtelung). */
+function prefixDepth(prefix: string): number {
+	const found = prefix.match(/>/g);
+	return found ? found.length : 0;
+}
+
+/** Genau `depth` Blockquote-Ebenen abtragen, nicht mehr. */
+function stripDepth(text: string, depth: number): string {
+	if (depth <= 0) return text;
+	return text
+		.split('\n')
+		.map((line) => {
+			let rest = line;
+			for (let d = 0; d < depth; d++) {
+				const m = rest.match(/^[ \t]*>[ \t]?/);
+				if (!m) break;
+				rest = rest.substring(m[0].length);
+			}
+			return rest;
+		})
+		.join('\n');
+}
+
+/**
+ * Der Inhalt, auf dem alle Vergleiche und das Karten-Parsing arbeiten.
+ *
+ * WICHTIG: Es wird nur der Prefix abgetragen, den der BLOCK selbst hat.
+ * Früher wurde jede Zeile entprefixt - dadurch verschwand ein Zitat
+ * ("> Laut Leitlinie ...") innerhalb einer Antwort und war beim nächsten
+ * Schreibvorgang dauerhaft weg.
+ */
+export function cleanBlockInner(inner: string, prefix = ''): string {
+	return stripDepth(normalizeNewlines(inner), prefixDepth(prefix));
 }
 
 // Helper to detect common line prefix (e.g. "> " or "   ") to preserve indentation/callouts
@@ -119,7 +149,7 @@ export function getAnkiBlocks(content: string): AnkiBlock[] {
 			prefix,
 			fence,
 			inner,
-			innerClean: cleanBlockInner(inner)
+			innerClean: cleanBlockInner(inner, prefix)
 		});
 
 		i = j + 1;
@@ -336,7 +366,14 @@ function isCardBoundary(trimmed: string): boolean {
 export function parseCardsFromBlockSource(source: string): Card[] {
 	// Selbstverteidigung: der Aufrufer sollte innerClean liefern, aber ein roher
 	// Callout-Block darf nicht stillschweigend 0 Karten ergeben.
-	const lines = cleanBlockInner(source).trim().split('\n');
+	// Selbstverteidigung fuer den Fall, dass jemand rohen Callout-Inhalt
+	// hereinreicht: nur dann entprefixen, wenn WIRKLICH jede nicht-leere Zeile
+	// ein '>' traegt. Ein einzelnes Zitat in einer Antwort bleibt so erhalten.
+	const normalized = normalizeNewlines(source);
+	const contentLines = normalized.split('\n').filter((l) => l.trim().length > 0);
+	const allQuoted = contentLines.length > 0 && contentLines.every((l) => /^[ \t]*>/.test(l));
+
+	const lines = (allQuoted ? stripDepth(normalized, 1) : normalized).trim().split('\n');
 	const cards: Card[] = [];
 	let i = 0;
 

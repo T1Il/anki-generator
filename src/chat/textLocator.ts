@@ -78,12 +78,28 @@ function normalize(input: string): Normalized {
 			continue;
 		}
 
-		// Whitespace-Läufe (inkl. Blockquote-Marker) auf ein Leerzeichen
-		m = rest.match(/^[\s>]+/);
+		// Whitespace-Läufe auf ein Leerzeichen. Ein '>' zählt nur dann als
+		// Zitatmarke, wenn es am Zeilenanfang steht - sonst würde ein
+		// Vergleichsoperator wie "RR > 120" stillschweigend verschwinden.
+		m = rest.match(/^\s+/);
 		if (m) {
+			let consumed = m[0].length;
+			if (m[0].indexOf('\n') !== -1) {
+				const quote = rest.substring(consumed).match(/^(?:[ \t]*>)+[ \t]?/);
+				if (quote) consumed += quote[0].length;
+			}
 			push(' ', i);
-			i += m[0].length;
+			i += consumed;
 			continue;
+		}
+
+		// Zitatmarke ganz am Anfang des Textes
+		if (i === 0) {
+			m = rest.match(/^(?:[ \t]*>)+[ \t]?/);
+			if (m) {
+				i += m[0].length;
+				continue;
+			}
 		}
 
 		const ch = input[i];

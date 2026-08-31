@@ -212,6 +212,69 @@ console.log('\nBlockkopf (Ueberarbeiten-Pfad):');
 		out.includes('Q: Neu') && !out.includes('Q: Alt'), out);
 }
 
+console.log('\nZitate INNERHALB von Karten:');
+
+{
+	// Normaler Block, dessen Antwort ein Markdown-Zitat enthaelt.
+	const src = [
+		'```anki-cards',
+		'TARGET DECK: Test',
+		'',
+		'Q: Was sagt die Leitlinie?',
+		'A: Dazu heisst es:',
+		'> Adrenalin 1 mg i.v.',
+		'Das gilt seit 2021.',
+		'ID: 123',
+		'```'
+	].join('\n');
+
+	const block = P.getAnkiBlocks(src)[0];
+	const cards = P.parseCardsFromBlockSource(block.innerClean);
+	check('Zitat bleibt beim Parsen erhalten',
+		cards[0] && cards[0].a.includes('> Adrenalin'), cards[0] && cards[0].a);
+
+	const header = P.parseBlockHeader(block.innerClean);
+	const inner = P.formatCardsToString('TARGET DECK: ' + header.deckName, cards,
+		header.instruction, header.status, header.extraHeaderLines);
+	const out = P.spliceBlock(src, block, P.buildFullBlock(block, inner));
+	check('Zitat ueberlebt einen Schreibvorgang', out.includes('> Adrenalin'), out);
+}
+
+{
+	// Callout-Block: hier MUSS der Prefix weg, sonst werden 0 Karten geparst.
+	const src = [
+		'> ```anki-cards',
+		'> TARGET DECK: Test',
+		'>',
+		'> Q: Frage',
+		'> A: Antwort',
+		'> ID: 9',
+		'> ```'
+	].join('\n');
+
+	const block = P.getAnkiBlocks(src)[0];
+	const cards = P.parseCardsFromBlockSource(block.innerClean);
+	check('Callout-Block liefert weiterhin Karten', cards.length === 1, cards);
+	check('Callout-Karte hat die ID', cards[0] && cards[0].id === 9, cards[0]);
+}
+
+{
+	// Callout-Block, dessen Antwort zusaetzlich ein Zitat enthaelt.
+	const src = [
+		'> ```anki-cards',
+		'> Q: Frage',
+		'> A: Text',
+		'> > Zitat drin',
+		'> ID: 4',
+		'> ```'
+	].join('\n');
+
+	const block = P.getAnkiBlocks(src)[0];
+	const cards = P.parseCardsFromBlockSource(block.innerClean);
+	check('Verschachteltes Zitat im Callout bleibt erhalten',
+		cards[0] && cards[0].a.includes('> Zitat drin'), cards[0] && cards[0].a);
+}
+
 console.log('');
 if (failures > 0) {
 	console.error(failures + ' Pruefung(en) fehlgeschlagen.');
