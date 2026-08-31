@@ -80,6 +80,8 @@ npm run build
 
 ## Testing
 
+- `npm test` runs the fixture suites in `scripts/` (block parser, chat
+  suggestion format, Anki comparison). Run it after touching those areas.
 - Manual install for testing: copy `main.js`, `manifest.json`, `styles.css` (if any) to:
   ```
   <Vault>/.obsidian/plugins/<plugin-id>/
