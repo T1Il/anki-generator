@@ -39,16 +39,21 @@ export async function renderFeedback(
     // Stabile Wrapper: nur so kann der Chat zwischen Renders ueberleben.
     // Frueher wurde bei jeder Nachricht der gesamte Chat-DOM neu gebaut -
     // daher Flackern, Scroll-Spruenge und verlorener Eingabetext.
-    let actionsHost = container.querySelector('.anki-actions-host') as HTMLElement | null;
-    let chatHost = container.querySelector('.anki-chat-host') as HTMLElement | null;
-    let previewHost = container.querySelector('.anki-preview-host') as HTMLElement | null;
+    // NICHT container.empty(): im Notiz-Block stehen oberhalb die Kopfzeile und
+    // die Generieren-Buttons des Block-Prozessors, die sonst mit verschwinden.
+    const stale = container.querySelector('.anki-feedback-box');
+    if (stale) stale.remove();
+    const staleChat = container.querySelector('.anki-chat-section');
+    if (staleChat) staleChat.remove();
 
-    if (!actionsHost || !chatHost || !previewHost) {
-        container.empty();
-        actionsHost = container.createDiv({ cls: 'anki-actions-host' });
-        chatHost = container.createDiv({ cls: 'anki-chat-host' });
-        previewHost = container.createDiv({ cls: 'anki-preview-host' });
-    }
+    let actionsHost = container.querySelector('.anki-actions-host') as HTMLElement | null;
+    if (!actionsHost) actionsHost = container.createDiv({ cls: 'anki-actions-host' });
+
+    let chatHost = container.querySelector('.anki-chat-host') as HTMLElement | null;
+    if (!chatHost) chatHost = container.createDiv({ cls: 'anki-chat-host' });
+
+    let previewHost = container.querySelector('.anki-preview-host') as HTMLElement | null;
+    if (!previewHost) previewHost = container.createDiv({ cls: 'anki-preview-host' });
 
     // --- SIDEBAR ACTIONS ---
     actionsHost.empty();

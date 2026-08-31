@@ -518,3 +518,25 @@
 	overflow-y: auto;
 	max-height: 45%;
 }
+
+/* Beim Umbau des Chats ging ein injizierter <style>-Block verloren, der diese
+   Regeln enthielt. Ohne sie zeigen zugeklappte Karten ihre Aktions-Buttons. */
+.anki-collapsed .anki-card-actions {
+	display: none;
+}
+
+.anki-sidebar-header-row {
+	padding: 4px 0;
+}
+
+.anki-sidebar-header-row:hover {
+	opacity: 0.8;
+}
+
+/* Pfeil der aufklappbaren Abschnitte (war im selben verlorenen Style-Block). */
+.anki-sidebar-section-arrow {
+	font-size: 0.8em;
+	width: 15px;
+	display: inline-block;
+	text-align: center;
+}
