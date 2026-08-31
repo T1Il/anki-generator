@@ -2,7 +2,30 @@ import { Editor } from 'obsidian';
 import { Card } from '../types';
 import { normalizeNewlines } from '../utils';
 
-export const ANKI_BLOCK_REGEX = /^[\s>]*```anki-cards\s*\n([\s\S]*?)^[\s>]*```$/gm;
+/**
+ * Nur noch als Kompatibilitäts-Export vorhanden. Für neue Aufrufe bitte
+ * getAnkiBlocks() benutzen - das Regex hier kann weder CRLF noch verschachtelte
+ * Code-Fences und schluckt Leerzeilen oberhalb des Blocks.
+ */
+export const ANKI_BLOCK_REGEX = /^[ \t>]*```anki-cards[ \t]*\r?\n([\s\S]*?)^[ \t>]*```[ \t]*\r?$/gm;
+
+/** Öffnende Fence: beliebiger Blockquote-/Einrückungs-Prefix, 3 oder mehr Backticks. */
+const OPEN_FENCE = /^([ \t>]*)(`{3,})anki-cards[ \t]*\r?$/;
+
+export interface AnkiBlock {
+	/** Index der öffnenden Fence im Dateiinhalt. */
+	start: number;
+	/** Index direkt hinter der schließenden Fence (ohne deren Zeilenumbruch). */
+	end: number;
+	/** Zeilen-Prefix, z. B. "> " in einem Callout. */
+	prefix: string;
+	/** Die verwendeten Backticks (``` oder mehr). */
+	fence: string;
+	/** Roher Inhalt zwischen den Fences, unverändert. */
+	inner: string;
+	/** Inhalt ohne CRLF und ohne Blockquote-Prefixe - das, was geparst werden soll. */
+	innerClean: string;
+}
 
 export interface AnkiParsedInfo {
 	subdeck: string;
@@ -13,35 +36,229 @@ export interface AnkiParsedInfo {
 	status?: string;
 }
 
-// Helper: Entfernt Blockquote-Prefixe ("> " oder ">")
-function stripBlockquotePrefixes(text: string): string {
-    return text.replace(/^[ \t]*>[ \t]?/gm, '');
+// --- Textbereinigung ------------------------------------------------------
+
+/** Entfernt Blockquote-Prefixe ("> " oder ">") sowie führende Einrückung. */
+export function stripBlockquotePrefixes(text: string): string {
+	return text.replace(/^[ \t]*>[ \t]?/gm, '');
+}
+
+/** Der Inhalt, auf dem alle Vergleiche und das Karten-Parsing arbeiten. */
+export function cleanBlockInner(inner: string): string {
+	return stripBlockquotePrefixes(normalizeNewlines(inner));
 }
 
 // Helper to detect common line prefix (e.g. "> " or "   ") to preserve indentation/callouts
 export function detectBlockPrefix(text: string): string {
-    const lines = text.split('\n');
-    if (lines.length === 0) return '';
-    // Look at the first line (fence)
-    const match = lines[0].match(/^([\s>]*)/);
-    return match ? match[1] : '';
+	const lines = text.split('\n');
+	if (lines.length === 0) return '';
+	const match = lines[0].match(/^([\s>]*)/);
+	return match ? match[1] : '';
 }
 
 export function applyPrefixToBlock(blockContent: string, prefix: string): string {
-    if (!prefix) return blockContent;
-    const lines = blockContent.split('\n');
-    // Don't double prefix if already there? No, blockContent usually clean.
-    return lines.map(l => prefix + l).join('\n');
+	if (!prefix) return blockContent;
+	return blockContent.split('\n').map(l => prefix + l).join('\n');
 }
 
-// Helper: Formatiert eine einzelne Karte konsistent als Q:/A: Block
+// --- Blocksuche -----------------------------------------------------------
+
+/**
+ * Findet alle anki-cards-Blöcke inklusive exakter Zeichenpositionen.
+ *
+ * Bewusst zeilenbasiert statt per Regex, weil damit drei Fehlerquellen
+ * verschwinden: CRLF, Leerzeilen die vom Prefix mitgefressen werden, und
+ * Code-Fences innerhalb einer Antwort (eine mit ```` geöffnete Karte wird
+ * erst von ```` wieder geschlossen).
+ */
+export function getAnkiBlocks(content: string): AnkiBlock[] {
+	const blocks: AnkiBlock[] = [];
+	const lines = content.split('\n');
+
+	// Zeichen-Offset jeder Zeile vorberechnen.
+	const lineStarts: number[] = [];
+	let offset = 0;
+	for (const line of lines) {
+		lineStarts.push(offset);
+		offset += line.length + 1; // +1 für das entfernte '\n'
+	}
+
+	let i = 0;
+	while (i < lines.length) {
+		const open = lines[i].match(OPEN_FENCE);
+		if (!open) {
+			i++;
+			continue;
+		}
+
+		const prefix = open[1];
+		const fence = open[2];
+		// Geschlossen wird nur von mindestens genauso vielen Backticks.
+		const closeRe = new RegExp('^[ \\t>]*`{' + fence.length + ',}[ \\t]*\\r?$');
+
+		let j = i + 1;
+		while (j < lines.length && !closeRe.test(lines[j])) j++;
+
+		if (j >= lines.length) {
+			// Unabgeschlossener Block. Haeufigste Ursache: die schliessende Fence
+			// klebt an der letzten Inhaltszeile ("...Text```" statt eigener Zeile).
+			// Obsidian rendert den Block dann ebenfalls nicht - deshalb laut melden,
+			// statt still 0 Karten zu liefern.
+			console.warn(
+				`[AnkiParser] anki-cards-Block ab Zeile ${i + 1} hat keine schliessende Fence. ` +
+				`Steht das abschliessende ${fence} vielleicht am Ende einer Inhaltszeile?`
+			);
+			i++;
+			continue;
+		}
+
+		const inner = lines.slice(i + 1, j).join('\n');
+		blocks.push({
+			start: lineStarts[i],
+			end: lineStarts[j] + lines[j].length,
+			prefix,
+			fence,
+			inner,
+			innerClean: cleanBlockInner(inner)
+		});
+
+		i = j + 1;
+	}
+
+	return blocks;
+}
+
+/**
+ * Drop-in-Ersatz für `[...content.matchAll(ANKI_BLOCK_REGEX)]`.
+ * m[0] = vollständige Blockquelle, m[1] = BEREINIGTER Inhalt, m.index = Startindex.
+ * Dadurch funktionieren Blöcke in Callouts und CRLF-Dateien überall auf einen Schlag.
+ */
+export interface AnkiBlockMatch extends Array<string> {
+	index: number;
+	block: AnkiBlock;
+}
+
+export function getAnkiBlockMatches(content: string): AnkiBlockMatch[] {
+	return getAnkiBlocks(content).map(b => {
+		const arr = [content.substring(b.start, b.end), b.innerClean] as any as AnkiBlockMatch;
+		arr.index = b.start;
+		arr.block = b;
+		return arr;
+	});
+}
+
+/** Ersetzt den Inhalt eines Blocks positionsgenau. Kein String.replace - das würde `$&` interpretieren. */
+export function spliceBlock(content: string, block: AnkiBlock, newFullBlock: string): string {
+	return content.substring(0, block.start) + newFullBlock + content.substring(block.end);
+}
+
+/** Baut die vollständige Blockquelle (inkl. Fences und Prefix) neu auf. */
+export function buildFullBlock(block: AnkiBlock, newInner: string): string {
+	const lines = [block.fence + 'anki-cards']
+		.concat(newInner.split('\n'))
+		.concat([block.fence]);
+	return lines.map(l => (block.prefix ? block.prefix + l : l)).join('\n');
+}
+
+/**
+ * Sucht den Block, dessen Inhalt zu `originalSourceContent` passt.
+ * Gibt matchIndex -1 zurück, wenn nichts passt - früher wurde hier
+ * stillschweigend der letzte Block genommen, was fremde Blöcke überschrieben hat.
+ */
+export function findSpecificAnkiBlock(
+	fullContent: string,
+	originalSourceContent: string
+): { matchIndex: number, originalFullBlockSource: string, block: AnkiBlock | null } {
+	const blocks = getAnkiBlocks(fullContent);
+	const normalizedSource = cleanBlockInner(originalSourceContent);
+
+	const exact = blocks.find(b => b.innerClean === normalizedSource);
+	const hit = exact || blocks.find(b => b.innerClean.trim() === normalizedSource.trim());
+
+	if (!hit) {
+		return { matchIndex: -1, originalFullBlockSource: "", block: null };
+	}
+
+	return {
+		matchIndex: hit.start,
+		originalFullBlockSource: fullContent.substring(hit.start, hit.end),
+		block: hit
+	};
+}
+
+/** Findet den Block, der zu einem vom Markdown-Prozessor gelieferten `source` gehört. */
+export function findBlockBySource(content: string, source: string): AnkiBlock | null {
+	const blocks = getAnkiBlocks(content);
+	const target = cleanBlockInner(source);
+	return blocks.find(b => b.innerClean === target)
+		|| blocks.find(b => b.innerClean.trim() === target.trim())
+		|| null;
+}
+
+// --- Kartenformatierung ---------------------------------------------------
+
+/** Entfernt Cloze-Syntax {{c1::Text}} -> Text, klammersicher (LaTeX!). */
+export function stripClozeSyntax(text: string): string {
+	let out = '';
+	let i = 0;
+
+	while (i < text.length) {
+		const start = text.indexOf('{{c', i);
+		if (start === -1) {
+			out += text.substring(i);
+			break;
+		}
+
+		const header = text.substring(start).match(/^\{\{c\d+::/);
+		if (!header) {
+			out += text.substring(i, start + 3);
+			i = start + 3;
+			continue;
+		}
+
+		out += text.substring(i, start);
+
+		// Ab hier Klammern zählen, damit {{c1::\frac{a}{b}}} korrekt endet.
+		let depth = 1;
+		let k = start + header[0].length;
+		let inner = '';
+		while (k < text.length && depth > 0) {
+			if (text.startsWith('{{', k)) { depth++; inner += '{{'; k += 2; continue; }
+			if (text.startsWith('}}', k)) {
+				depth--;
+				if (depth === 0) { k += 2; break; }
+				inner += '}}';
+				k += 2;
+				continue;
+			}
+			inner += text[k];
+			k++;
+		}
+
+		// Optionalen Hinweis (::hint) abschneiden.
+		const hintIdx = inner.lastIndexOf('::');
+		if (hintIdx > -1 && !inner.substring(hintIdx + 2).includes('{')) {
+			inner = inner.substring(0, hintIdx);
+		}
+
+		out += inner;
+		i = k;
+	}
+
+	return out;
+}
+
+/** Enthält der Text echte Cloze-Lücken? `____` allein reicht nicht. */
+export function hasCloze(text: string): boolean {
+	return /\{\{c\d+::/.test(text);
+}
+
 function formatSingleCard(card: Card): string[] {
 	const lines: string[] = [];
 
-	const qPrefix = 'Q:';
 	const qLines = card.q.split('\n');
 	qLines.forEach((line, i) => {
-		lines.push(i === 0 ? `${qPrefix} ${line}` : line);
+		lines.push(i === 0 ? `Q: ${line}` : line);
 	});
 
 	if (card.a && card.a.trim().length > 0) {
@@ -73,9 +290,17 @@ export function formatCardsToExistingCardsString(cards: Card[]): string {
 	return allLines.join('\n');
 }
 
-export function formatCardsToString(deckLine: string, cards: Card[], instruction?: string, status?: string): string {
+export function formatCardsToString(
+	deckLine: string,
+	cards: Card[],
+	instruction?: string,
+	status?: string,
+	/** Weitere Instruction-Zeilen (inkl. deaktivierter "# INSTRUCTION:"), damit sie beim Sync nicht verloren gehen. */
+	extraHeaderLines?: string[]
+): string {
 	const newLines: string[] = [deckLine.trim()];
 	if (instruction) newLines.push(`INSTRUCTION: ${instruction.trim()}`);
+	if (extraHeaderLines) extraHeaderLines.forEach(l => newLines.push(l.trim()));
 	if (status) newLines.push(`STATUS: ${status.trim()}`);
 
 	if (cards.length > 0) newLines.push('');
@@ -89,53 +314,29 @@ export function formatCardsToString(deckLine: string, cards: Card[], instruction
 	return newLines.join('\n').trimEnd();
 }
 
-export function findSpecificAnkiBlock(fullContent: string, originalSourceContent: string): { matchIndex: number, originalFullBlockSource: string } {
-	ANKI_BLOCK_REGEX.lastIndex = 0;
-	const matches = [...fullContent.matchAll(ANKI_BLOCK_REGEX)];
-	let originalFullBlockSource = "";
-	let matchIndex = -1;
+// --- Kartenparser ---------------------------------------------------------
 
-	const normalizedSource = normalizeNewlines(originalSourceContent);
+const HEADER_LINE = /^(TARGET DECK|INSTRUCTION|STATUS)[ \t]*:/i;
+const DISABLED_INSTRUCTION_LINE = /^#[ \t]*INSTRUCTION[ \t]*:/i;
+const ID_LINE = /^ID:[ \t]*(\d+)[ \t]*$/;
+const LIST_ITEM = /^(?:[-•*]|\d+\.)[ \t]+/;
 
-	if (matches.length > 0) {
-        // Try exact match first (after stripping potential prefixes from file content)
-		const match = Array.from(matches).find(m => {
-            const cleanContent = stripBlockquotePrefixes(m[1]);
-            return normalizeNewlines(cleanContent) === normalizedSource
-        });
-
-		if (match) {
-			originalFullBlockSource = match[0];
-			matchIndex = match.index ?? -1;
-		} else {
-            // Fallback: Trimmed match
-			const normalizedSourceTrimmed = normalizedSource.trim();
-			const fallbackMatch = Array.from(matches).find(m => {
-                 const cleanContent = stripBlockquotePrefixes(m[1]);
-                 return normalizeNewlines(cleanContent).trim() === normalizedSourceTrimmed
-            });
-			if (fallbackMatch) {
-				originalFullBlockSource = fallbackMatch[0];
-				matchIndex = fallbackMatch.index ?? -1;
-			} else {
-                // Last ditch: just take the last block? 
-                // Maybe risky if multiple blocks. But consistent with previous logic.
-				const lastMatch = matches[matches.length - 1];
-				originalFullBlockSource = lastMatch[0];
-				matchIndex = lastMatch.index ?? -1;
-			}
-		}
-	}
-	return { matchIndex, originalFullBlockSource };
+function isHeaderLine(trimmed: string): boolean {
+	return HEADER_LINE.test(trimmed) || DISABLED_INSTRUCTION_LINE.test(trimmed);
 }
 
-// Helper zum Entfernen von Cloze-Syntax {{c1::Text}} -> Text
-function stripClozeSyntax(text: string): string {
-	return text.replace(/\{\{c\d+::(.*?)(?:::[^}]*)?\}\}/g, '$1');
+/** Beginnt hier eine neue Karte bzw. endet der aktuelle Abschnitt? */
+function isCardBoundary(trimmed: string): boolean {
+	return /^Q:/.test(trimmed)
+		|| ID_LINE.test(trimmed)
+		|| isHeaderLine(trimmed)
+		|| trimmed === 'xxx';
 }
 
 export function parseCardsFromBlockSource(source: string): Card[] {
-	const lines = source.trim().split('\n');
+	// Selbstverteidigung: der Aufrufer sollte innerClean liefern, aber ein roher
+	// Callout-Block darf nicht stillschweigend 0 Karten ergeben.
+	const lines = cleanBlockInner(source).trim().split('\n');
 	const cards: Card[] = [];
 	let i = 0;
 
@@ -143,174 +344,164 @@ export function parseCardsFromBlockSource(source: string): Card[] {
 		const line = lines[i];
 		const trimmedLine = line.trim();
 
-		if (trimmedLine.length === 0 ||
-			trimmedLine.startsWith('TARGET DECK:') ||
-			trimmedLine.startsWith('INSTRUCTION:') ||
-			trimmedLine.startsWith('STATUS:') ||
-			trimmedLine === 'xxx') {
+		if (trimmedLine.length === 0 || isHeaderLine(trimmedLine) || trimmedLine === 'xxx') {
 			i++;
 			continue;
 		}
-		// --- INTELLIGENTE LISTEN-ZUSAMMENFÜHRUNG ---
-		// Erkennt, ob die KI fälschlicherweise "Q: - Item" geschrieben hat, obwohl es eine Liste sein sollte.
-		// Wir prüfen auf "Q: -" oder "Q: 1." (mit Leerzeichen danach)
-		const isListFragment = trimmedLine.match(/^Q:\s*(?:(?:-|•|\*)\s|\d+\.\s)/);
 
-		if (isListFragment && cards.length > 0) {
-			// Wir haben ein Fragment gefunden! 
-			// 1. Inhalt extrahieren (alles nach "Q:")
-			let content = trimmedLine.substring(2).trim();
-
-			// 2. Cloze-Syntax entfernen (Listen in Basic-Karten haben keine Lücken)
-			content = stripClozeSyntax(content);
-
-			console.log(`[AnkiParser] Merging List Fragment: "${content}" into previous card.`);
-
-			// 3. An die Antwort der VORHERIGEN Karte anhängen
+		// --- LISTEN-ZUSAMMENFÜHRUNG ---
+		// Die KI splittet Listen manchmal fälschlich in mehrere "Q: - Item"-Zeilen.
+		// Sehr eng gefasst, weil sonst echte Fragen wie "Q: 1. Hilfe bei X"
+		// stillschweigend in der Vorkarte verschwinden.
+		const listFragment = trimmedLine.match(/^Q:[ \t]*((?:[-•*]|\d+\.)[ \t]+.*)$/);
+		if (listFragment && cards.length > 0) {
 			const lastCard = cards[cards.length - 1];
+			const lastAnswerLine = (lastCard.a || '').split('\n').pop() || '';
+			const previousIsList = LIST_ITEM.test(lastAnswerLine.trim());
+			const looksLikeQuestion = trimmedLine.includes('?');
 
-			// Als neue Zeile anhängen
-			if (lastCard.a) {
-				lastCard.a += '\n' + content;
-			} else {
-				lastCard.a = content;
+			if (previousIsList && !looksLikeQuestion) {
+				const content = stripClozeSyntax(listFragment[1].trim());
+				console.log(`[AnkiParser] Merging List Fragment: "${content}" into previous card.`);
+				lastCard.a = lastCard.a ? lastCard.a + '\n' + content : content;
+				i++;
+				continue;
 			}
-
-			// Wir konsumieren diese Zeile und springen zur nächsten
-			i++;
-			continue;
 		}
-		// ---------------------------------------------
 
-		const isQ = line.startsWith('Q:');
-		const isLegacyCloze = !isQ && (line.includes('{{c') || line.includes('____'));
+		const isQ = /^Q:/.test(trimmedLine);
+		const isLegacyCloze = !isQ && (hasCloze(trimmedLine) || trimmedLine.includes('____'));
 
 		if (isQ || isLegacyCloze) {
-			let q = '';
-			if (isQ) {
-				q = line.substring(2).trim();
-			} else {
-				q = line;
-			}
-
+			let q = isQ ? trimmedLine.substring(2).trim() : line;
 			let a = '';
 			let id: number | null = null;
 			let typeIn = false;
 			let currentLineIndex = i + 1;
 
-			// Lese Q (nur für Basic/Cloze, IO hat Q in einer Zeile)
+			// --- Frage (Folgezeilen) ---
 			while (currentLineIndex < lines.length) {
 				const nextLine = lines[currentLineIndex];
 				const trimmedNext = nextLine.trim();
 
-				if (nextLine.startsWith('A:') ||
-					nextLine.startsWith('A (type):') ||
-					nextLine.startsWith('ID:') ||
-					nextLine.startsWith('Q:') ||
-					trimmedNext === 'xxx') break;
-
-				if (isLegacyCloze && (nextLine.includes('{{c') || nextLine.includes('____'))) break;
+				if (/^A:/.test(trimmedNext) || /^A \(type\):/i.test(trimmedNext) || isCardBoundary(trimmedNext)) break;
+				// Legacy-Cloze-Blöcke: jede Zeile ist eine eigene Karte.
+				if (isLegacyCloze && (hasCloze(trimmedNext) || trimmedNext.includes('____'))) break;
 
 				q += '\n' + nextLine;
 				currentLineIndex++;
 			}
 
-			// Lese A
+			// --- Antwort ---
 			if (currentLineIndex < lines.length) {
-				const nextLine = lines[currentLineIndex];
-
-				let isAnswerStart = nextLine.startsWith('A:') || nextLine.startsWith('A (type):');
+				const trimmedNext = lines[currentLineIndex].trim();
+				const isAnswerStart = /^A:/.test(trimmedNext) || /^A \(type\):/i.test(trimmedNext);
 
 				if (isAnswerStart) {
-					// Robust prefix stripping to handle cases like "A: A: (type)"
-					let rawLine = nextLine;
-					while (true) {
+					// Robustes Prefix-Abtragen für Fälle wie "A: A: (type)".
+					let rawLine = trimmedNext;
+					for (;;) {
 						rawLine = rawLine.trim();
-						if (rawLine.startsWith('A (type):')) {
-							typeIn = true;
-							rawLine = rawLine.substring(9);
-						} else if (rawLine.startsWith('A:')) {
-							rawLine = rawLine.substring(2);
-						} else if (rawLine.startsWith('(type):')) {
-							typeIn = true;
-							rawLine = rawLine.substring(7);
-						} else {
-							break;
-						}
+						if (/^A \(type\):/i.test(rawLine)) { typeIn = true; rawLine = rawLine.substring(9); }
+						else if (/^\(type\):/i.test(rawLine)) { typeIn = true; rawLine = rawLine.substring(7); }
+						else if (/^A:/.test(rawLine)) { rawLine = rawLine.substring(2); }
+						else break;
 					}
 					a = rawLine;
-
 					currentLineIndex++;
 
+					// Antwort läuft bis zur nächsten Karte. Ein "{{c" oder "____"
+					// mitten in der Antwort beendet sie NICHT mehr - das erzeugte
+					// früher Geisterkarten.
 					while (currentLineIndex < lines.length) {
-						const aNextLine = lines[currentLineIndex];
-						if (aNextLine.startsWith('ID:') ||
-							aNextLine.startsWith('Q:') ||
-							aNextLine.startsWith('INSTRUCTION:') ||
-							aNextLine.startsWith('STATUS:') ||
-							aNextLine.trim() === 'xxx' ||
-							(aNextLine.includes('{{c') || aNextLine.includes('____'))) break;
-
-						a += '\n' + aNextLine;
+						if (isCardBoundary(lines[currentLineIndex].trim())) break;
+						a += '\n' + lines[currentLineIndex];
 						currentLineIndex++;
 					}
 				}
 			}
 
-			if (currentLineIndex < lines.length && lines[currentLineIndex].trim().startsWith('ID:')) {
-				id = parseInt(lines[currentLineIndex].trim().substring(3).trim(), 10) || null;
-				currentLineIndex++;
+			// --- ID ---
+			if (currentLineIndex < lines.length) {
+				const idMatch = lines[currentLineIndex].trim().match(ID_LINE);
+				if (idMatch) {
+					id = parseInt(idMatch[1], 10);
+					if (isNaN(id)) id = null;
+					currentLineIndex++;
+				}
 			}
 
-			let type: 'Basic' | 'Cloze' = 'Basic';
-			if (q.includes('{{c') || q.includes('____')) {
-				type = 'Cloze';
-			}
+			const type: 'Basic' | 'Cloze' = hasCloze(q) ? 'Cloze' : 'Basic';
 
-			// Bereinigung für Basic-Karten: Falls Cloze-Syntax in A: gelandet ist, entfernen
-			if (type === 'Basic' && a.includes('{{c')) {
+			// Cloze-Syntax gehört nicht in die Antwort einer Basic-Karte.
+			if (type === 'Basic' && hasCloze(a)) {
 				a = stripClozeSyntax(a);
 			}
 
 			const card: Card = { type, q: q.trim(), a: a.trim(), id, typeIn };
-			// Reconstruct original text roughly for manual mode
-			const originalLines = formatSingleCard(card);
-			card.originalText = originalLines.join('\n');
+			card.originalText = formatSingleCard(card).join('\n');
 			cards.push(card);
 			i = currentLineIndex;
 		} else {
 			i++;
 		}
 	}
+
 	return cards;
 }
 
+// --- Blockkopf ------------------------------------------------------------
+
+export interface AnkiHeaderInfo {
+	deckName: string | null;
+	instruction?: string;
+	disabledInstruction?: string;
+	status?: string;
+	/** Alle Instruction-Zeilen außer der ersten aktiven, im Originalwortlaut. */
+	extraHeaderLines: string[];
+}
+
+export function parseBlockHeader(innerClean: string): AnkiHeaderInfo {
+	const lines = innerClean.trim().split('\n');
+
+	const deckLine = lines.find(l => /^TARGET DECK[ \t]*:/i.test(l.trim()));
+	const instructionLines = lines.filter(l => /^INSTRUCTION[ \t]*:/i.test(l.trim()));
+	const disabledLines = lines.filter(l => DISABLED_INSTRUCTION_LINE.test(l.trim()));
+	const statusLine = lines.find(l => /^STATUS[ \t]*:/i.test(l.trim()));
+
+	const strip = (line: string | undefined, key: RegExp) =>
+		line ? line.trim().replace(key, '').trim() : undefined;
+
+	return {
+		deckName: strip(deckLine, /^TARGET DECK[ \t]*:/i) || null,
+		instruction: strip(instructionLines[0], /^INSTRUCTION[ \t]*:/i),
+		disabledInstruction: strip(disabledLines[0], /^#[ \t]*INSTRUCTION[ \t]*:/i),
+		status: strip(statusLine, /^STATUS[ \t]*:/i),
+		// Weitere aktive Instructions + alle deaktivierten unverändert erhalten.
+		extraHeaderLines: instructionLines.slice(1).map(l => l.trim()).concat(disabledLines.map(l => l.trim()))
+	};
+}
+
 export function parseAnkiSection(editor: Editor, mainDeck: string): AnkiParsedInfo | null {
-	const fileContent = editor.getValue();
-	const matches = [...fileContent.matchAll(ANKI_BLOCK_REGEX)];
+	const blocks = getAnkiBlocks(editor.getValue());
+	if (blocks.length === 0) return null;
 
-	if (matches.length === 0) return null;
+	const block = blocks[blocks.length - 1];
+	const header = parseBlockHeader(block.innerClean);
 
-	const lastMatch = matches[matches.length - 1];
-	const blockContent = lastMatch[1];
-	const lines = blockContent.trim().split('\n');
-
-	const deckLine = lines.find(l => l.trim().startsWith('TARGET DECK:'));
-	const instructionLine = lines.find(l => l.trim().startsWith('INSTRUCTION:'));
-	const disabledInstructionLine = lines.find(l => l.trim().startsWith('# INSTRUCTION:'));
-	const statusLine = lines.find(l => l.trim().startsWith('STATUS:'));
-
-	const fullDeckPath = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
-	const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : undefined;
-	const disabledInstruction = disabledInstructionLine ? disabledInstructionLine.replace('# INSTRUCTION:', '').trim() : undefined;
-	const status = statusLine ? statusLine.replace('STATUS:', '').trim() : undefined;
-
+	const fullDeckPath = header.deckName;
 	const subdeck = fullDeckPath && fullDeckPath.startsWith(mainDeck + '::')
 		? fullDeckPath.substring(mainDeck.length + 2)
 		: '';
 
-	const parsedCards = parseCardsFromBlockSource(blockContent);
-	const existingCardsText = formatCardsToExistingCardsString(parsedCards);
+	const parsedCards = parseCardsFromBlockSource(block.innerClean);
 
-	return { subdeck, existingCardsText, deckName: fullDeckPath, instruction, disabledInstruction, status };
+	return {
+		subdeck,
+		existingCardsText: formatCardsToExistingCardsString(parsedCards),
+		deckName: fullDeckPath,
+		instruction: header.instruction,
+		disabledInstruction: header.disabledInstruction,
+		status: header.status
+	};
 }

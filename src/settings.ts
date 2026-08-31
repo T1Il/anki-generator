@@ -1,7 +1,9 @@
-import { App, PluginSettingTab, Setting, DropdownComponent, TextAreaComponent, requestUrl, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, DropdownComponent, TextAreaComponent, Notice } from 'obsidian';
 import AnkiGeneratorPlugin from './main';
 import { t } from './lang/helpers';
 import { IconPickerModal } from './ui/IconPickerModal';
+import { PROVIDERS, PROVIDER_ORDER } from './providers';
+import { AiProvider } from './types';
 
 export interface AnkiGeneratorSettings {
 	vaultName: string;
@@ -11,6 +13,9 @@ export interface AnkiGeneratorSettings {
 	geminiModel: string;
 	openAiApiKey: string;
 	openAiModel: string;
+	claudeApiKey: string;
+	claudeModel: string;
+	claudeEffort: string;
 	ollamaEndpoint: string;
 	ollamaModel: string;
 	ollamaEnabled: boolean;
@@ -47,6 +52,9 @@ export const DEFAULT_SETTINGS: AnkiGeneratorSettings = {
 	geminiModel: 'gemini-1.5-flash',
 	openAiApiKey: '',
 	openAiModel: 'gpt-4o',
+	claudeApiKey: '',
+	claudeModel: 'claude-opus-5',
+	claudeEffort: 'low',
 	ollamaEndpoint: 'http://localhost:11434',
 	ollamaModel: 'llama3',
 	ollamaEnabled: false,
@@ -196,9 +204,10 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 			.setName('AI Provider')
 			.setDesc('Select the AI provider to use')
 			.addDropdown(dropdown => dropdown
-				.addOption('gemini', 'Google Gemini')
-				.addOption('openai', 'OpenAI')
-				.addOption('ollama', 'Ollama (Local)')
+				.addOptions(PROVIDER_ORDER.reduce((acc: Record<string, string>, id) => {
+					acc[id] = PROVIDERS[id].label;
+					return acc;
+				}, {}))
 				.setValue(this.plugin.settings.aiProvider)
 				.onChange(async (value) => {
 					this.plugin.settings.aiProvider = value;
@@ -222,7 +231,8 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				.setName(t('settings.geminiModel'))
 				.setDesc(t('settings.geminiModelDesc'))
 				.addDropdown(async (dropdown) => {
-					await this.updateGeminiModels(this.plugin.settings.geminiApiKey, dropdown);
+					await this.updateModelDropdown('gemini', dropdown, this.plugin.settings.geminiModel,
+						(v) => { this.plugin.settings.geminiModel = v; });
 					dropdown.onChange(async (value) => {
 						this.plugin.settings.geminiModel = value;
 						await this.plugin.saveSettings();
@@ -244,13 +254,60 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				.setName('OpenAI Model')
 				.setDesc('Select the OpenAI model')
 				.addDropdown(async (dropdown) => {
-					await this.updateOpenAiModels(this.plugin.settings.openAiApiKey, dropdown);
+					await this.updateModelDropdown('openai', dropdown, this.plugin.settings.openAiModel,
+						(v) => { this.plugin.settings.openAiModel = v; });
 					dropdown.onChange(async (value) => {
 						this.plugin.settings.openAiModel = value;
 						await this.plugin.saveSettings();
 					});
 				});
+		} else if (this.plugin.settings.aiProvider === 'claude') {
+			new Setting(containerEl)
+				.setName(t('settings.claudeApiKey'))
+				.setDesc(t('settings.claudeApiKeyDesc'))
+				.addText(text => text
+					.setPlaceholder('sk-ant-...')
+					.setValue(this.plugin.settings.claudeApiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.claudeApiKey = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(containerEl)
+				.setName(t('settings.claudeModel'))
+				.setDesc(t('settings.claudeModelDesc'))
+				.addDropdown(async (dropdown) => {
+					await this.updateModelDropdown('claude', dropdown, this.plugin.settings.claudeModel,
+						(v) => { this.plugin.settings.claudeModel = v; });
+					dropdown.onChange(async (value) => {
+						this.plugin.settings.claudeModel = value;
+						await this.plugin.saveSettings();
+					});
+				});
+
+			new Setting(containerEl)
+				.setName(t('settings.claudeEffort'))
+				.setDesc(t('settings.claudeEffortDesc'))
+				.addDropdown(dropdown => dropdown
+					.addOption('low', 'Niedrig')
+					.addOption('medium', 'Mittel')
+					.addOption('high', 'Hoch')
+					.setValue(this.plugin.settings.claudeEffort || 'low')
+					.onChange(async (value) => {
+						this.plugin.settings.claudeEffort = value;
+						await this.plugin.saveSettings();
+					}));
 		} else if (this.plugin.settings.aiProvider === 'ollama') {
+			new Setting(containerEl)
+				.setName(t('settings.ollamaEnable'))
+				.setDesc(t('settings.ollamaEnableDesc'))
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.ollamaEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.ollamaEnabled = value;
+						await this.plugin.saveSettings();
+					}));
+
 			new Setting(containerEl)
 				.setName('Ollama Endpoint')
 				.setDesc('Enter your Ollama endpoint (e.g. http://localhost:11434)')
@@ -266,7 +323,8 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				.setName('Ollama Model')
 				.setDesc('Select the Ollama model')
 				.addDropdown(async (dropdown) => {
-					await this.updateOllamaModels(this.plugin.settings.ollamaEndpoint, dropdown);
+					await this.updateModelDropdown('ollama', dropdown, this.plugin.settings.ollamaModel,
+						(v) => { this.plugin.settings.ollamaModel = v; });
 					dropdown.onChange(async (value) => {
 						this.plugin.settings.ollamaModel = value;
 						await this.plugin.saveSettings();
@@ -500,19 +558,63 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 		textArea.inputEl.style.minHeight = '100px';
 	}
 
-	async updateGeminiModels(apiKey: string, dropdown: DropdownComponent) {
-		if (!apiKey) { dropdown.addOption("", "Kein API Key"); dropdown.setDisabled(true); return; }
-		try { const r = await requestUrl({ url: `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, method: 'GET' }); const o: any = {}; r.json.models?.forEach((m: any) => { if (m.name.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent')) o[m.name.replace('models/', '')] = m.displayName || m.name; }); dropdown.selectEl.innerHTML = ''; dropdown.addOptions(o); dropdown.setDisabled(false); const c = this.plugin.settings.geminiModel; if (c && o[c]) dropdown.setValue(c); else { const f = Object.keys(o)[0]; if (f) { this.plugin.settings.geminiModel = f; dropdown.setValue(f); await this.plugin.saveSettings(); } } } catch (e) { dropdown.selectEl.innerHTML = ''; dropdown.addOption(this.plugin.settings.geminiModel, "Fehler"); }
+	/** Minimal nötige Konfiguration, um überhaupt eine Modell-Liste abrufen zu können. */
+	private canFetchModels(id: AiProvider): boolean {
+		const s = this.plugin.settings;
+		switch (id) {
+			case 'gemini': return !!s.geminiApiKey;
+			case 'openai': return !!s.openAiApiKey;
+			case 'claude': return !!s.claudeApiKey;
+			case 'ollama': return !!s.ollamaEndpoint;
+			default: return false;
+		}
 	}
 
-	async updateOllamaModels(endpoint: string, dropdown: DropdownComponent) {
-		if (!endpoint) { dropdown.addOption("", "Kein Endpunkt"); dropdown.setDisabled(true); return; }
-		try { let u = endpoint.endsWith("/api/generate") ? endpoint.replace("/api/generate", "/api/tags") : endpoint.replace(/\/$/, "") + "/api/tags"; const r = await requestUrl({ url: u, method: 'GET' }); const o: any = {}; r.json.models?.forEach((m: any) => o[m.name] = m.name); dropdown.selectEl.innerHTML = ''; dropdown.addOptions(o); dropdown.setDisabled(false); const c = this.plugin.settings.ollamaModel; if (c && o[c]) dropdown.setValue(c); else { const f = Object.keys(o)[0]; if (f) { this.plugin.settings.ollamaModel = f; dropdown.setValue(f); await this.plugin.saveSettings(); } } } catch (e) { dropdown.selectEl.innerHTML = ''; dropdown.addOption(this.plugin.settings.ollamaModel, "Fehler"); }
-	}
+	/**
+	 * Befüllt ein Modell-Dropdown aus der Provider-Registry.
+	 * Ersetzt die früheren drei fast identischen updateXModels-Methoden.
+	 */
+	async updateModelDropdown(
+		id: AiProvider,
+		dropdown: DropdownComponent,
+		current: string,
+		apply: (value: string) => void
+	) {
+		if (!this.canFetchModels(id)) {
+			dropdown.addOption(current || '', id === 'ollama' ? 'Kein Endpunkt' : 'Kein API Key');
+			dropdown.setDisabled(true);
+			return;
+		}
 
-	async updateOpenAiModels(apiKey: string, dropdown: DropdownComponent) {
-		if (!apiKey) { dropdown.addOption("", "Kein API Key"); dropdown.setDisabled(true); return; }
-		try { const r = await requestUrl({ url: 'https://api.openai.com/v1/models', method: 'GET', headers: { 'Authorization': `Bearer ${apiKey}` } }); const o: any = {}; r.json.data?.filter((m: any) => m.id.startsWith('gpt')).sort((a: any, b: any) => b.created - a.created).forEach((m: any) => o[m.id] = m.id); dropdown.selectEl.innerHTML = ''; dropdown.addOptions(o); dropdown.setDisabled(false); const c = this.plugin.settings.openAiModel; if (c && o[c]) dropdown.setValue(c); else { const d = 'gpt-4o'; if (o[d]) { this.plugin.settings.openAiModel = d; dropdown.setValue(d); } else { const f = Object.keys(o)[0]; if (f) { this.plugin.settings.openAiModel = f; dropdown.setValue(f); } } await this.plugin.saveSettings(); } } catch (e) { dropdown.selectEl.innerHTML = ''; dropdown.addOption(this.plugin.settings.openAiModel || 'gpt-4o', "Fehler"); }
+		try {
+			const options = await PROVIDERS[id].fetchModels(this.plugin.settings);
+			dropdown.selectEl.empty();
+
+			if (Object.keys(options).length === 0) {
+				dropdown.addOption(current || '', 'Keine Modelle gefunden');
+				dropdown.setDisabled(true);
+				return;
+			}
+
+			dropdown.addOptions(options);
+			dropdown.setDisabled(false);
+
+			if (current && options[current]) {
+				dropdown.setValue(current);
+			} else {
+				const first = Object.keys(options)[0];
+				if (first) {
+					apply(first);
+					dropdown.setValue(first);
+					await this.plugin.saveSettings();
+				}
+			}
+		} catch (e) {
+			console.error(`Modell-Liste für ${id} konnte nicht geladen werden:`, e);
+			dropdown.selectEl.empty();
+			dropdown.addOption(current || '', 'Fehler beim Laden');
+			dropdown.setDisabled(true);
+		}
 	}
 
 	addDecorationSettings(containerEl: HTMLElement) {

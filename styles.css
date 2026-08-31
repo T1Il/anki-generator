@@ -167,3 +167,354 @@
 	color: var(--text-normal);
 	background-color: var(--background-modifier-hover);
 }
+/* =========================================================================
+   AI Chat
+   Früher steckte all das als Inline-Styles im FeedbackRenderer (u. a.
+   rgba(255,255,255,.1) für AI-Blasen, was im hellen Theme unsichtbar war).
+   ========================================================================= */
+
+.anki-chat-panel {
+	display: flex;
+	flex-direction: column;
+	/* Volle Höhe des Leafs statt der alten 400px-Deckelung. */
+	height: 100%;
+	min-height: 0;
+	gap: 8px;
+}
+
+.anki-chat-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 0;
+	cursor: pointer;
+	user-select: none;
+	flex: 0 0 auto;
+}
+
+.anki-chat-header:hover {
+	color: var(--text-normal);
+}
+
+.anki-chat-header-title {
+	margin: 0;
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+}
+
+.anki-chat-header-controls {
+	margin-left: auto;
+	display: flex;
+	gap: 2px;
+}
+
+.anki-chat-header-controls button {
+	padding: 2px 6px;
+	height: 26px;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-muted);
+}
+
+.anki-chat-header-controls button:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.anki-chat-arrow {
+	display: inline-flex;
+	align-items: center;
+	transition: transform 0.15s ease;
+	color: var(--text-muted);
+}
+
+.anki-chat-panel.is-collapsed .anki-chat-arrow {
+	transform: rotate(-90deg);
+}
+
+.anki-chat-panel.is-collapsed .anki-chat-body {
+	display: none;
+}
+
+.anki-chat-body {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+	gap: 8px;
+}
+
+/* --- Nachrichtenliste --- */
+
+.anki-chat-log {
+	flex: 1 1 auto;
+	min-height: 120px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 4px 2px;
+	scrollbar-gutter: stable;
+}
+
+.anki-chat-empty {
+	margin: auto;
+	text-align: center;
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 24px 12px;
+	line-height: 1.5;
+}
+
+.anki-chat-message {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-width: 100%;
+}
+
+.anki-chat-bubble {
+	border-radius: var(--radius-m, 8px);
+	padding: 8px 10px;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+	border: 1px solid transparent;
+}
+
+.anki-chat-message.is-ai .anki-chat-bubble {
+	background-color: var(--background-secondary);
+	border-color: var(--background-modifier-border);
+}
+
+.anki-chat-message.is-user .anki-chat-bubble {
+	background-color: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border);
+	/* Nutzernachrichten leicht eingerückt, damit der Verlauf lesbar bleibt. */
+	margin-left: 16px;
+}
+
+.anki-chat-role {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.anki-chat-message.is-user .anki-chat-role {
+	margin-left: 16px;
+}
+
+.anki-chat-role .anki-chat-role-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.anki-chat-role .anki-chat-role-icon svg {
+	width: 13px;
+	height: 13px;
+}
+
+/* Markdown im Chat: kein pre-wrap erzwingen, sonst brechen Listen und Absätze. */
+.anki-chat-bubble p:first-child { margin-top: 0; }
+.anki-chat-bubble p:last-child { margin-bottom: 0; }
+.anki-chat-bubble ul,
+.anki-chat-bubble ol { margin: 4px 0; padding-left: 20px; }
+.anki-chat-bubble pre { overflow-x: auto; max-width: 100%; }
+.anki-chat-bubble blockquote { margin: 6px 0; }
+
+.anki-chat-message.is-error .anki-chat-bubble {
+	border-color: var(--text-error);
+	color: var(--text-error);
+}
+
+/* --- Tippen / Streaming --- */
+
+.anki-chat-typing {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	padding: 2px 0;
+}
+
+.anki-chat-typing span {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--text-muted);
+	animation: anki-chat-blink 1.2s infinite ease-in-out;
+}
+
+.anki-chat-typing span:nth-child(2) { animation-delay: 0.2s; }
+.anki-chat-typing span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes anki-chat-blink {
+	0%, 80%, 100% { opacity: 0.25; }
+	40% { opacity: 1; }
+}
+
+/* --- Vorschläge --- */
+
+.anki-suggestion {
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-m, 8px);
+	background: var(--background-primary);
+	margin-top: 8px;
+	overflow: hidden;
+}
+
+.anki-suggestion.is-missing {
+	border-left-color: var(--text-error);
+}
+
+.anki-suggestion.is-applied {
+	border-left-color: var(--text-success, var(--interactive-accent));
+	opacity: 0.7;
+}
+
+.anki-suggestion-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.anki-suggestion-diff {
+	margin: 0;
+	padding: 8px 10px;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.5;
+	white-space: pre-wrap;
+	overflow-x: auto;
+}
+
+.anki-diff-line {
+	display: block;
+	padding: 1px 4px;
+	border-radius: 3px;
+	overflow-wrap: anywhere;
+}
+
+.anki-diff-line.is-remove {
+	background: rgba(220, 70, 70, 0.14);
+	color: var(--text-error);
+}
+
+.anki-diff-line.is-add {
+	background: rgba(70, 180, 100, 0.14);
+	color: var(--text-success, var(--text-normal));
+}
+
+.anki-diff-line.is-meta {
+	color: var(--text-muted);
+}
+
+.anki-suggestion-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 6px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.anki-suggestion-actions button {
+	font-size: var(--font-ui-smaller);
+	padding: 3px 10px;
+	height: auto;
+}
+
+.anki-suggestion-note {
+	padding: 4px 10px 8px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-error);
+}
+
+/* --- Eingabe --- */
+
+.anki-chat-input-area {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: flex-end;
+	gap: 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	padding: 6px;
+	background: var(--background-primary);
+}
+
+.anki-chat-input-area:focus-within {
+	border-color: var(--interactive-accent);
+}
+
+.anki-chat-input-area textarea {
+	flex: 1 1 auto;
+	resize: none;
+	border: none;
+	outline: none;
+	box-shadow: none;
+	background: transparent;
+	padding: 2px 4px;
+	min-height: 32px;
+	max-height: 180px;
+	line-height: 1.45;
+	font-family: inherit;
+}
+
+.anki-chat-send {
+	flex: 0 0 auto;
+}
+
+.anki-chat-hint {
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	text-align: right;
+	padding-right: 4px;
+}
+
+/* Der Chat im Notiz-Block braucht eine feste Höhe, da er nicht in einem Leaf sitzt. */
+.anki-chat-panel.is-embedded {
+	height: auto;
+}
+
+.anki-chat-panel.is-embedded .anki-chat-log {
+	max-height: 320px;
+}
+
+/* Der Chat soll im Leaf die volle Höhe bekommen statt der alten 400px. */
+.workspace-leaf-content[data-type="anki-generator-feedback-view"] .view-content {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	padding: 8px 12px;
+	overflow: hidden;
+}
+
+.workspace-leaf-content[data-type="anki-generator-feedback-view"] .anki-actions-host {
+	flex: 0 0 auto;
+}
+
+.workspace-leaf-content[data-type="anki-generator-feedback-view"] .anki-chat-host {
+	flex: 1 1 auto;
+	min-height: 220px;
+	display: flex;
+	flex-direction: column;
+}
+
+.workspace-leaf-content[data-type="anki-generator-feedback-view"] .anki-preview-host {
+	flex: 0 0 auto;
+	overflow-y: auto;
+	max-height: 45%;
+}

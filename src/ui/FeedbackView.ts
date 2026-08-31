@@ -135,17 +135,32 @@ export class FeedbackView extends ItemView {
     }
 
     render(scrollBehavior: 'preserve' | 'new-message' | 'default' = 'default') {
-        const container = this.contentEl;
+        // Bewusst KEIN container.empty(): renderFeedback verwaltet seine
+        // Abschnitte selbst und haelt den Chat samt Scrollposition,
+        // Eingabetext und Fokus am Leben.
+        void renderFeedback(
+            this.contentEl,
+            this.history,
+            this.plugin,
+            this.sourcePath,
+            () => this.openInMainTab(),
+            this.cardPreviewState,
+            this.cards,
+            this.deckName,
+            true,
+            scrollBehavior
+        );
+    }
 
-        // Capture scroll position BEFORE emptying
-        let currentScroll = 0;
-        const contentArea = container.querySelector('.anki-feedback-content');
-        if (contentArea) {
-            currentScroll = contentArea.scrollTop;
-        }
-
-        container.empty();
-        renderFeedback(container, this.history, this.plugin, this.sourcePath, undefined, this.cardPreviewState, this.cards, this.deckName, true, scrollBehavior, currentScroll);
+    /** Chat als vollwertigen Tab im Hauptbereich oeffnen. */
+    async openInMainTab() {
+        const leaf = this.plugin.app.workspace.getLeaf('tab');
+        await leaf.setViewState({
+            type: FEEDBACK_VIEW_TYPE,
+            active: true,
+            state: { sourcePath: this.sourcePath, history: this.history }
+        });
+        this.plugin.app.workspace.revealLeaf(leaf);
     }
 
     async updateCards(file: TFile) {

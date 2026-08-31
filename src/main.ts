@@ -16,6 +16,7 @@ import { InsertCalloutLinkModal } from './ui/InsertCalloutLinkModal';
 import { legacyAnkiStateField } from './ui/LegacyAnkiDecorator';
 import { CancelGenerationModal } from './ui/CancelGenerationModal';
 import { FileSuggestModal } from './ui/FileSuggestModal';
+import { loadHistory, saveHistory } from './chat/chatHistory';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -26,6 +27,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		await loadHistory(this);
 
 		// console.log("!!! ANKI PLUGIN LOADED !!!");
 
@@ -130,6 +132,26 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		this.registerEditorExtension(legacyAnkiStateField);
 
 		// Command Registrierung
+
+		this.addCommand({
+			id: 'open-anki-chat',
+			name: 'AI Chat \u00f6ffnen (Seitenleiste)',
+			callback: () => {
+				const file = this.app.workspace.getActiveFile();
+				const path = file ? file.path : '';
+				void this.activateFeedbackView(this.feedbackCache.get(path) || [], path);
+			}
+		});
+
+		this.addCommand({
+			id: 'open-anki-chat-tab',
+			name: 'AI Chat in neuem Tab \u00f6ffnen',
+			callback: () => {
+				const file = this.app.workspace.getActiveFile();
+				const path = file ? file.path : '';
+				void this.activateFeedbackView(this.feedbackCache.get(path) || [], path, 'tab');
+			}
+		});
 
 		this.addCommand({
 			id: 'force-reload-anki-data',
@@ -362,6 +384,8 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		if (this.legacyFileDecorator) {
 			this.legacyFileDecorator.destroy();
 		}
+		// Ausstehenden Chat-Verlauf noch wegschreiben.
+		void saveHistory(this);
 	}
 
 	async loadSettings() {
@@ -401,13 +425,18 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	}
 
 	// ACTIVATE VIEW HELPER
-	async activateFeedbackView(history: ChatMessage[], sourcePath: string) {
+	async activateFeedbackView(history: ChatMessage[], sourcePath: string, location: 'sidebar' | 'tab' = 'sidebar') {
 		const { workspace } = this.app;
 
 		let leaf: WorkspaceLeaf | null = null;
 		const leaves = workspace.getLeavesOfType(FEEDBACK_VIEW_TYPE);
 
-		if (leaves.length > 0) {
+		if (location === 'tab') {
+			// Ausdruecklich ein Haupt-Tab: der Chat war bisher auf die schmale
+			// rechte Seitenleiste festgenagelt.
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({ type: FEEDBACK_VIEW_TYPE, active: true });
+		} else if (leaves.length > 0) {
 			// Use existing leaf
 			leaf = leaves[0];
 		} else {

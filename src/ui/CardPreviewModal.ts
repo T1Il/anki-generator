@@ -29,6 +29,11 @@ export class CardPreviewModal extends Modal {
 		this.modalEl.style.width = '90%';
 	}
 
+	/** Gezeichnete Karten-Elemente, damit einzelne ersetzt werden koennen. */
+	private cardEls: Map<number, HTMLElement> = new Map();
+	private cardsContainer: HTMLElement | null = null;
+	private cardsSourcePath = '';
+
 	onOpen() {
 		this.render();
 	}
@@ -268,9 +273,12 @@ export class CardPreviewModal extends Modal {
 		});
 
 		if (scrollTop) {
-			setTimeout(() => {
-				contentEl.scrollTop = scrollTop;
-			}, 0);
+			// Karteninhalte rendern asynchron; ein einzelnes setTimeout(0) setzt
+			// die Position, bevor die endgueltige Hoehe steht - dann klemmt der
+			// Browser sie auf 0. Deshalb mehrfach nachfassen.
+			const restore = () => { contentEl.scrollTop = scrollTop; };
+			requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
+			setTimeout(restore, 60);
 		}
 	}
 
@@ -282,18 +290,67 @@ export class CardPreviewModal extends Modal {
 			return;
 		}
 
+		// Container und Pfad merken, damit einzelne Karten spaeter gezielt
+		// neu gezeichnet werden koennen, ohne das ganze Modal neu aufzubauen.
+		this.cardsContainer = container;
+		this.cardsSourcePath = sourcePath;
+		this.cardEls.clear();
+
 		this.cards.forEach((card, index) => {
-			// Apply Filter
-			if (this.currentFilter === 'synced' && !card.id) return;
-			if (this.currentFilter === 'unsynced' && card.id) return;
+			if (!this.passesFilters(card)) return;
 
-			// Apply Search
-			if (this.searchQuery) {
-				const query = this.searchQuery;
-				if (!card.q.toLowerCase().includes(query) && !card.a.toLowerCase().includes(query)) return;
-			}
+			const cardEl = this.buildCardEl(card, index, sourcePath);
+			container.appendChild(cardEl);
+			this.cardEls.set(index, cardEl);
+		});
+	}
 
-			const cardEl = container.createDiv({ cls: 'anki-compact-card' });
+	/** Filter und Suche fuer eine einzelne Karte. */
+	private passesFilters(card: Card): boolean {
+		if (this.currentFilter === 'synced' && !card.id) return false;
+		if (this.currentFilter === 'unsynced' && card.id) return false;
+
+		if (this.searchQuery) {
+			const query = this.searchQuery;
+			if (!card.q.toLowerCase().includes(query) && !card.a.toLowerCase().includes(query)) return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Zeichnet genau eine Karte neu.
+	 *
+	 * Frueher rief jede Aenderung this.render() auf - das baute das komplette
+	 * Modal neu und warf den Nutzer an den Anfang zurueck, weil die
+	 * Scroll-Wiederherstellung lief, bevor die Karteninhalte (Markdown wird
+	 * asynchron gerendert) ihre endgueltige Hoehe hatten.
+	 */
+	refreshCard(index: number) {
+		const oldEl = this.cardEls.get(index);
+		if (!oldEl || !this.cardsContainer) {
+			// Karte war nicht sichtbar - dann hilft nur ein voller Aufbau.
+			this.render();
+			return;
+		}
+
+		const card = this.cards[index];
+
+		if (!card || !this.passesFilters(card)) {
+			// Faellt jetzt durch Filter/Suche: nur entfernen, nicht neu aufbauen.
+			oldEl.remove();
+			this.cardEls.delete(index);
+			return;
+		}
+
+		const newEl = this.buildCardEl(card, index, this.cardsSourcePath);
+		oldEl.replaceWith(newEl);
+		this.cardEls.set(index, newEl);
+	}
+
+	private buildCardEl(card: Card, index: number, sourcePath: string): HTMLElement {
+		{
+			// Losgeloest erzeugt: der Aufrufer haengt das Element selbst ein.
+			const cardEl = createDiv({ cls: 'anki-compact-card' });
 
 			// --- Card Styling based on Type ---
 			let typeText = 'Basic';
@@ -367,10 +424,10 @@ export class CardPreviewModal extends Modal {
 						const file = this.plugin.app.vault.getAbstractFileByPath(sourcePath);
 						if (file instanceof TFile) {
 							const content = await this.plugin.app.vault.read(file);
-							const { ANKI_BLOCK_REGEX, parseCardsFromBlockSource } = await import('../anki/ankiParser');
+							const { getAnkiBlockMatches, parseCardsFromBlockSource } = await import('../anki/ankiParser');
 							const { saveAnkiBlockChanges } = await import('../anki/syncManager');
 
-							const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+							const matches = getAnkiBlockMatches(content);
 							let foundBlockMatch = null;
 							let foundCardIndex = -1;
 
@@ -396,7 +453,7 @@ export class CardPreviewModal extends Modal {
 
 								// Update local list view
 								this.cards[index].id = null;
-								this.render(); // Re-render to show Sync button again?
+								this.refreshCard(index); // nur diese Karte neu zeichnen
 							}
 						}
 					}
@@ -414,10 +471,10 @@ export class CardPreviewModal extends Modal {
 					if (file instanceof TFile) {
 						new Notice(`Suche Block...`);
 						const content = await this.plugin.app.vault.read(file);
-						const { ANKI_BLOCK_REGEX, parseCardsFromBlockSource } = await import('../anki/ankiParser');
+						const { getAnkiBlockMatches, parseCardsFromBlockSource } = await import('../anki/ankiParser');
 						const { syncAnkiBlock } = await import('../anki/syncManager');
 
-						const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+						const matches = getAnkiBlockMatches(content);
 						let foundBlockMatch = null;
 						let foundCardIndex = -1;
 
@@ -446,7 +503,7 @@ export class CardPreviewModal extends Modal {
 							// RELOAD STATE FROM FILE TO CAPTURE THE NEW ID
 							// syncAnkiBlock has modified the file. We must re-read it to get the ID.
 							const freshContent = await this.plugin.app.vault.read(file);
-							const freshMatches = [...freshContent.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+							const freshMatches = getAnkiBlockMatches(freshContent);
 							// Re-find key is tricky if multiple blocks, but usually singular.
 							// We can use the SAME match index/logic if nothing shifted too much, 
 							// but safest is to re-find by content or assume block structure is stable-ish.
@@ -471,7 +528,7 @@ export class CardPreviewModal extends Modal {
 									break;
 								}
 							}
-							this.render(); // Re-render to show 'Unsync' button
+							this.refreshCard(index); // nur diese Karte neu zeichnen
 
 						} else {
 							new Notice("Konnte den Anki-Block nicht finden.");
@@ -509,7 +566,9 @@ export class CardPreviewModal extends Modal {
 			const aDiv = body.createDiv({ cls: 'anki-card-a' });
 			const highlightedA = this.highlightClozes(stripHybridObsidianLinks(card.a));
 			MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
-		});
+
+			return cardEl;
+		}
 	}
 
 	sortCards() {
@@ -527,7 +586,8 @@ export class CardPreviewModal extends Modal {
 	}
 
 	highlightClozes(text: string): string {
-		return text.replace(/\{\{c(\d+)::([^}]+)\}\}/g, (match, num, content) => {
+		// Eine Verschachtelungsebene erlauben, sonst zerbricht z.B. {{c1::\frac{a}{b}}}.
+		return text.replace(/\{\{c(\d+)::((?:[^{}]|\{[^{}]*\})+)\}\}/g, (match, num, content) => {
 			return `<span class="anki-cloze-highlight"><span class="anki-cloze-number">[c${num}]</span>${content}</span>`;
 		});
 	}
@@ -535,7 +595,9 @@ export class CardPreviewModal extends Modal {
 	openEditModal(card: Card, index: number) {
 		new CardEditModal(this.plugin.app, card, this.sourcePath, (updatedCard) => {
 			this.cards[index] = updatedCard;
-			this.render();
+			// Gezielt nur diese Karte aktualisieren - sonst springt das Modal
+			// bei jedem Speichern zurueck an den Anfang.
+			this.refreshCard(index);
 		}).open();
 	}
 

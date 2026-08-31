@@ -1,5 +1,5 @@
 import { App, Modal, TFile, MarkdownView } from 'obsidian';
-import { parseCardsFromBlockSource, ANKI_BLOCK_REGEX } from '../anki/ankiParser';
+import { parseCardsFromBlockSource, ANKI_BLOCK_REGEX, getAnkiBlockMatches } from '../anki/ankiParser';
 import { Card } from '../types';
 
 interface NoteWithCards {
@@ -136,7 +136,7 @@ export class QuestionSearchModal extends Modal {
         for (const file of files) {
             try {
                 const content = await this.app.vault.read(file);
-                const matches = [...content.matchAll(ANKI_BLOCK_REGEX)];
+                const matches = getAnkiBlockMatches(content);
 
                 if (matches.length > 0) {
                     // Collect cards from ALL blocks in the file

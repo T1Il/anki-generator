@@ -1,5 +1,6 @@
 import { App, TAbstractFile, TFile, TFolder } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
+import { getAnkiBlockMatches } from '../anki/ankiParser';
 
 // Polyfill types for older obsidian-typings
 export interface FileDecoration {
@@ -246,8 +247,9 @@ export class AnkiFileDecorationProvider implements FileDecorationProvider {
             }
 
             // Parse blocks
-            // Robust regex handling Windows \r\n and varying whitespace
-            const blockMatches = content.matchAll(/^```anki-cards[ \t]*\r?\n([\s\S]*?)\r?\n^```$/gm);
+            // Eigene Regex ersetzt durch die zentrale Blocksuche - sonst werden
+            // Bloecke in Callouts hier nicht gezaehlt und die Datei falsch dekoriert.
+            const blockMatches = getAnkiBlockMatches(content);
             
             let syncedCount = 0;
             let unsyncedCount = 0;

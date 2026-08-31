@@ -25,3 +25,6 @@ data.json
 .vs/slnx.sqlite
 .vs/t1il-anki-creator/v17/.wsuo
 /.vs
+
+# Claude Code local settings
+.claude/

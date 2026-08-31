@@ -102,8 +102,10 @@ export class CardEditModal extends Modal {
                 .setButtonText("Speichern")
                 .setCta()
                 .onClick(() => {
-                    const type = question.includes('{{c') || question.includes('____') ? 'Cloze' : 'Basic';
-                    this.onSubmit({ q: question, a: answer, id: this.card.id || null, type: this.card.type || type }, false);
+                    // Nur echte {{c1::}}-Luecken machen eine Cloze-Karte; ____ allein reicht nicht.
+                    const type = /\{\{c\d+::/.test(question) ? 'Cloze' : 'Basic';
+                    // typeIn muss mit: sonst wird aus einer Type-In-Karte beim Bearbeiten eine Basic-Karte.
+                    this.onSubmit({ q: question, a: answer, id: this.card.id || null, type: this.card.type || type, typeIn: this.card.typeIn }, false);
                     this.close();
                 }));
 
@@ -112,8 +114,10 @@ export class CardEditModal extends Modal {
             .setIcon("refresh-cw")
             .setTooltip("Speichern & Synchronisieren")
             .onClick(() => {
-                const type = question.includes('{{c') || question.includes('____') ? 'Cloze' : 'Basic';
-                this.onSubmit({ q: question, a: answer, id: this.card.id || null, type: this.card.type || type }, true);
+                // Nur echte {{c1::}}-Luecken machen eine Cloze-Karte; ____ allein reicht nicht.
+                    const type = /\{\{c\d+::/.test(question) ? 'Cloze' : 'Basic';
+                // typeIn muss mit: sonst wird aus einer Type-In-Karte beim Bearbeiten eine Basic-Karte.
+                    this.onSubmit({ q: question, a: answer, id: this.card.id || null, type: this.card.type || type, typeIn: this.card.typeIn }, true);
                 this.close();
             }));
     }

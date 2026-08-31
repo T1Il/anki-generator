@@ -2,7 +2,7 @@ import { MarkdownRenderer, ButtonComponent, TextAreaComponent, Notice, setIcon, 
 import AnkiGeneratorPlugin from '../main';
 import { ChatMessage, CardPreviewState, Card } from '../types';
 import { generateChatResponse, generateFeedbackOnly } from '../aiGenerator';
-import { parseCardsFromBlockSource, ANKI_BLOCK_REGEX } from '../anki/ankiParser';
+import { parseCardsFromBlockSource, ANKI_BLOCK_REGEX, getAnkiBlockMatches } from '../anki/ankiParser';
 import { CardEditModal } from './CardEditModal';
 import { saveAnkiBlockChanges, syncAnkiBlock } from '../anki/syncManager';
 // constructPrompt is likely not exported or named differently in generationManager. Checking that file first would be wise, but I will assume it's there or I need to import it properly.
@@ -17,6 +17,8 @@ import { DeckSelectionModal } from './DeckSelectionModal';
 import { RevisionInputModal } from './RevisionInputModal';
 import { getDeckNames, moveAnkiNotesToDeck, getCardCountForDeck, deleteAnkiDeck } from '../anki/AnkiConnect';
 import { stripHybridObsidianLinks } from '../utils';
+import { resolveProvider } from '../providers';
+import { ChatPanel } from './chat/ChatPanel';
 
 export async function renderFeedback(
     container: HTMLElement,
@@ -31,473 +33,53 @@ export async function renderFeedback(
     scrollBehavior: 'preserve' | 'new-message' | 'default' = 'default',
     initialScrollTop?: number
 ) {
-    // Capture previous scroll position (if validated from outside) or try to find it
-    let previousScrollTop = initialScrollTop !== undefined ? initialScrollTop : 0;
+    // scrollBehavior/initialScrollTop bleiben nur der Signatur wegen erhalten:
+    // der ChatPanel haelt seine Scrollposition jetzt selbst.
 
-    if (initialScrollTop === undefined) {
-        const oldContent = container.querySelector('.anki-feedback-content');
-        if (oldContent) previousScrollTop = oldContent.scrollTop;
+    // Stabile Wrapper: nur so kann der Chat zwischen Renders ueberleben.
+    // Frueher wurde bei jeder Nachricht der gesamte Chat-DOM neu gebaut -
+    // daher Flackern, Scroll-Spruenge und verlorener Eingabetext.
+    let actionsHost = container.querySelector('.anki-actions-host') as HTMLElement | null;
+    let chatHost = container.querySelector('.anki-chat-host') as HTMLElement | null;
+    let previewHost = container.querySelector('.anki-preview-host') as HTMLElement | null;
+
+    if (!actionsHost || !chatHost || !previewHost) {
+        container.empty();
+        actionsHost = container.createDiv({ cls: 'anki-actions-host' });
+        chatHost = container.createDiv({ cls: 'anki-chat-host' });
+        previewHost = container.createDiv({ cls: 'anki-preview-host' });
     }
-
-    // Cleanup existing elements to prevent duplication
-    const existingBox = container.querySelector('.anki-feedback-box');
-    if (existingBox) existingBox.remove();
-
-    const existingChat = container.querySelector('.anki-chat-section');
-    if (existingChat) existingChat.remove();
-
-    const existingPreview = container.querySelector('.anki-preview-wrapper');
-    if (existingPreview) existingPreview.remove();
-
-    const existingActions = container.querySelector('.anki-sidebar-actions');
-    if (existingActions) existingActions.remove();
 
     // --- SIDEBAR ACTIONS ---
-    renderSidebarControls(container, plugin, sourcePath, onOpenInAction, deckName, cards, showControls);
+    actionsHost.empty();
+    renderSidebarControls(actionsHost, plugin, sourcePath, onOpenInAction, deckName, cards, showControls);
 
-    // --- MAIN STYLES INJECTION (Ensure singular) ---
-    // We check if style exists, if not create. But since we clear container or sections, 
-    // we might need to be careful. The style ID 'anki-sidebar-styles' is good.
-    // --- MAIN STYLES INJECTION (Ensure singular) ---
-    // We check if style exists, if not create. But since we clear container or sections,
-    // we might need to be careful. The style ID 'anki-sidebar-styles' is good.
-    if (!container.ownerDocument.getElementById('anki-sidebar-styles')) {
-        const styleEl = container.createEl('style');
-        styleEl.id = 'anki-sidebar-styles';
-        styleEl.textContent = `
-            .anki-sidebar-header-row {
-                padding: 4px 0;
-            }
-            .anki-sidebar-header-row:hover {
-                 opacity: 0.8;
-            }
-            .anki-sidebar-section-arrow {
-                 transition: transform 0.2s;
-                 margin-right: 5px;
-                 cursor: pointer;
-                 font-size: 0.8em;
-                 width: 15px;
-                 display: inline-block;
-                 text-align: center;
-            }
-            .anki-sidebar-section-collapsed .anki-sidebar-section-arrow {
-                 transform: rotate(-90deg);
-            }
-            .anki-collapsed .anki-card-actions {
-                display: none;
-            }
-            .anki-chat-message {
-                font-size: 0.9em;
-                line-height: 1.4;
-            }
-            .anki-chat-input-area textarea {
-                font-size: 0.9em;
-            }
-        `;
+    // --- CHAT ---
+    const store = container as unknown as { __ankiChatPanel?: ChatPanel };
+    let panel = store.__ankiChatPanel;
+
+    if (panel && panel.path === sourcePath && chatHost.contains(panel.rootEl)) {
+        // Gleiche Notiz: nur neue Nachrichten anhaengen.
+        panel.syncHistoryRef(history);
     } else {
-        // If it exists but we need to update it (e.g. for the new CSS rule), we should?
-        // Simpler: Just append the specific fix dynamically if needed or assume styles are constant.
-        // For development/hot-reload, updating content is better.
-        const styleEl = container.ownerDocument.getElementById('anki-sidebar-styles');
-        if (styleEl && !styleEl.textContent?.includes('.anki-collapsed .anki-card-actions')) {
-            styleEl.textContent += `
-                .anki-collapsed .anki-card-actions {
-                    display: none;
-                }
-             `;
-        }
+        // Bewusst nicht plugin.addChild(): der Notiz-Block wird beim Tippen oft
+        // neu gerendert, jede Instanz bliebe sonst dauerhaft am Plugin haengen.
+        if (panel) panel.unload();
+        chatHost.empty();
+        panel = new ChatPanel(plugin, chatHost, history, sourcePath, {
+            embedded: !showControls,
+            onPopOut: onOpenInAction,
+            collapsible: true
+        });
+        panel.load();
+        panel.build();
+        store.__ankiChatPanel = panel;
     }
-    // feedbackBox.style.minHeight = '200px'; // Dynamic now
-
-    // --- CHAT SECTION ---
-    const chatSection = container.createDiv({ cls: 'anki-chat-section' });
-    chatSection.style.marginBottom = '20px';
-    chatSection.style.borderBottom = '1px solid var(--background-modifier-border)';
-    chatSection.style.paddingBottom = '10px';
-
-    // Chat Header
-    const chatHeader = chatSection.createDiv({ cls: 'anki-sidebar-header-row' });
-
-    chatHeader.style.display = 'flex';
-    chatHeader.style.alignItems = 'center';
-    chatHeader.style.cursor = 'pointer';
-    chatHeader.style.marginBottom = '10px';
-
-    if (!state?.isChatOpen) {
-        chatHeader.addClass('anki-sidebar-section-collapsed');
-    }
-
-    const chatArrow = chatHeader.createSpan({ cls: 'anki-sidebar-section-arrow', text: '🔽' });
-    const chatTitle = chatHeader.createEl('h4', { text: `🤖 AI Chat` });
-    chatTitle.style.margin = '0';
-
-    chatHeader.onclick = () => {
-        if (state) {
-            state.isChatOpen = !state.isChatOpen;
-            renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'preserve');
-        }
-    };
-
-    // Header Controls (Open in New Tab, Clear Chat)
-    const headerControls = chatHeader.createDiv({ cls: 'anki-sidebar-header-controls' });
-    headerControls.style.marginLeft = 'auto';
-    headerControls.style.display = 'flex';
-    headerControls.style.gap = '5px';
-
-    // Open in New Tab Button (only if callback provided)
-    if (onOpenInAction) {
-        const openBtn = new ButtonComponent(headerControls);
-        openBtn.setIcon('external-link');
-        openBtn.setTooltip("In neuem Tab öffnen");
-        openBtn.buttonEl.style.padding = '0 5px';
-        openBtn.buttonEl.style.height = '24px';
-        openBtn.onClick(onOpenInAction);
-    }
-
-    const clearBtn = new ButtonComponent(headerControls);
-    clearBtn.setIcon('trash');
-    clearBtn.setTooltip("Chat leeren");
-    clearBtn.buttonEl.style.padding = '0 5px';
-    clearBtn.buttonEl.style.height = '24px';
-    clearBtn.onClick((e) => {
-        e.stopPropagation(); // prevent toggle
-        history.length = 0; // Clear array
-        if (sourcePath) plugin.feedbackCache.delete(sourcePath);
-        renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'preserve');
-    });
-
-    // Chat Content Wrapper
-    const chatContentWrapper = chatSection.createDiv({ cls: 'anki-chat-content-wrapper' });
-    if (state && !state.isChatOpen) chatContentWrapper.style.display = 'none';
-
-    const contentArea = chatContentWrapper.createDiv({ cls: 'anki-feedback-content' });
-    contentArea.style.maxHeight = '400px'; // Limit height within section
-    contentArea.style.overflowY = 'auto';
-    contentArea.style.marginBottom = '10px';
-
-    // Render History
-    if (history.length === 0) {
-        const emptyMsg = contentArea.createDiv({ cls: 'anki-chat-empty' });
-        emptyMsg.setText("Noch keine Nachrichten. Starte eine Unterhaltung oder hole Feedback ein.");
-        emptyMsg.style.fontStyle = 'italic';
-        emptyMsg.style.color = '#888';
-        emptyMsg.style.textAlign = 'center';
-        emptyMsg.style.padding = '20px';
-    } else {
-        // Sequential rendering to ensure order and DOM stability
-        for (const msg of history) {
-            const msgDiv = contentArea.createDiv({ cls: `anki-chat-message ${msg.role}` });
-            msgDiv.style.marginBottom = '8px';
-            msgDiv.style.padding = '8px';
-            msgDiv.style.borderRadius = '5px';
-            msgDiv.style.backgroundColor = msg.role === 'ai' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(74, 144, 226, 0.2)';
-            msgDiv.style.alignSelf = msg.role === 'ai' ? 'flex-start' : 'flex-end';
-            msgDiv.style.width = '100%'; // Ensure full width usage
-
-            const roleLabel = msgDiv.createDiv({ cls: 'anki-chat-role' });
-            roleLabel.setText(msg.role === 'ai' ? '🤖 AI:' : '👤 Du:');
-            roleLabel.style.fontWeight = 'bold';
-            roleLabel.style.fontSize = '0.8em';
-            roleLabel.style.marginBottom = '4px';
-
-            const textDiv = msgDiv.createDiv({ cls: 'anki-chat-text' });
-            await MarkdownRenderer.render(plugin.app, msg.content, textDiv, sourcePath || '', plugin);
-
-            // --- CLICK-TO-EDIT LOGIC ---
-            if (msg.role === 'ai') {
-                // Select both standard blockquotes and callouts
-                const quoteElements = textDiv.querySelectorAll('blockquote, .callout');
-
-                // EXTRACT RAW QUOTES FROM SOURCE (msg.content)
-                const rawQuotes: string[] = [];
-                const lines = msg.content.split('\n');
-                let currentQuote: string[] = [];
-                let inQuote = false;
-
-                for (const line of lines) {
-                    if (line.trim().startsWith('>')) {
-                        inQuote = true;
-                        // Remove the leading '>' and space. 
-                        const cleanLine = line.replace(/^\s*>\s?/, '');
-                        currentQuote.push(cleanLine);
-                    } else {
-                        if (inQuote) {
-                            // Quote ended
-                            if (currentQuote.length > 0) {
-                                rawQuotes.push(currentQuote.join('\n'));
-                                currentQuote = [];
-                            }
-                            inQuote = false;
-                        }
-                    }
-                }
-                // Flush last quote if message ends with one
-                if (inQuote && currentQuote.length > 0) {
-                    rawQuotes.push(currentQuote.join('\n'));
-                }
-
-                // Map DOM elements to raw quotes by index
-                // Note: This relies on the assumption that markdown 'blocks' starting with > 
-                // match 1:1 with rendered blockquotes/callouts.
-                quoteElements.forEach((el, index) => {
-                    // Type assertion for title property
-                    (el as HTMLElement).title = "Klicken, um Textstelle im Editor zu suchen";
-
-                    // Assign raw content if available (fallback to textContent if mismatch)
-                    const rawContent = rawQuotes[index] ? rawQuotes[index].trim() : el.textContent?.trim() || "";
-
-                    el.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-
-                        // Clean the quote from AI artifacts like [...] or (omitted)
-                        const cleanQuote = (text: string) => {
-                            return text
-                                .replace(/\[\.\.\.\]/g, ' ')
-                                .replace(/\(omitted\)/g, ' ')
-                                .replace(/^\s*[\.\u2026]+\s*/, '')
-                                .replace(/\s*[\.\u2026]+\s*$/, '')
-                                .trim();
-                        };
-
-                        const searchText = cleanQuote(rawContent);
-
-                        if (searchText) {
-                            // Find correct view
-                            let view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-                            if (sourcePath) {
-                                const leaves = plugin.app.workspace.getLeavesOfType('markdown');
-                                const matchingLeaf = leaves.find(l => (l.view as MarkdownView).file?.path === sourcePath);
-                                if (matchingLeaf) view = matchingLeaf.view as MarkdownView;
-                            }
-
-                            if (view) {
-                                const editor = view.editor;
-                                const content = editor.getValue();
-
-                                console.log("AnkiGenerator: Searching for:", searchText);
-
-                                // Helper to find index
-                                const findIndex = (text: string, query: string): number => {
-                                    if (!query) return -1;
-
-                                    // 1. Exact match
-                                    let idx = text.indexOf(query);
-                                    if (idx !== -1) return idx;
-
-                                    // 2. Normalized match (ignore whitespace diffs AND blockquote markers >)
-                                    const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                    const pattern = escapeRegExp(query).replace(/\s+/g, '[\\s>]+');
-                                    try {
-                                        const regex = new RegExp(pattern);
-                                        const match = text.match(regex);
-                                        if (match && match.index !== undefined) return match.index;
-                                    } catch (e) { console.error("Regex error:", e); }
-
-                                    // 3. Fallback
-                                    if (query.length > 50) {
-                                        const stub = query.substring(0, 50);
-                                        const stubIdx = text.indexOf(stub);
-                                        if (stubIdx !== -1) return stubIdx;
-                                        const stubPattern = escapeRegExp(stub).replace(/\s+/g, '[\\s>]+');
-                                        try {
-                                            const match = text.match(new RegExp(stubPattern));
-                                            if (match && match.index !== undefined) return match.index;
-                                        } catch (e) { }
-                                    }
-
-                                    return -1;
-                                };
-
-                                const idx = findIndex(content, searchText);
-
-                                if (idx !== -1) {
-                                    const pos = editor.offsetToPos(idx);
-                                    const endPos = editor.offsetToPos(Math.min(content.length, idx + searchText.length));
-
-                                    editor.setCursor(pos);
-                                    editor.scrollIntoView({ from: pos, to: endPos }, true);
-                                    editor.setSelection(pos, endPos);
-                                    new Notice("Textstelle gefunden!");
-                                } else {
-                                    new Notice("Textstelle nicht gefunden.");
-                                }
-                            } else {
-                                new Notice("Editor nicht gefunden.");
-                            }
-                        }
-                    });
-                });
-            }
-        }
-    }
-
-    // Smart Scrolling Logic
-    setTimeout(() => {
-        if (scrollBehavior === 'preserve') {
-            contentArea.scrollTop = previousScrollTop;
-        } else if (scrollBehavior === 'new-message') {
-            const lastMsg = contentArea.lastElementChild as HTMLElement;
-            if (lastMsg) {
-                lastMsg.scrollIntoView({ block: 'start', behavior: 'smooth' });
-            }
-        } else {
-            // Let's scroll to bottom for initial load / default
-            contentArea.scrollTop = contentArea.scrollHeight;
-        }
-    }, 0);
-
-    // Input Area
-    const inputArea = chatContentWrapper.createDiv({ cls: 'anki-chat-input-area' });
-    inputArea.style.display = 'flex';
-    inputArea.style.gap = '5px';
-    inputArea.style.marginTop = 'auto'; // Push to bottom if flex container stretches
-
-    const input = new TextAreaComponent(inputArea);
-    input.setPlaceholder("Frage an die KI...");
-    input.inputEl.style.width = '100%';
-    input.inputEl.style.minHeight = '40px';
-    input.inputEl.style.resize = 'vertical';
-    input.inputEl.onkeydown = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            triggerGeneration();
-        }
-    };
-
-    const sendBtn = new ButtonComponent(inputArea)
-        .setIcon("send")
-        .setTooltip("Senden");
-    sendBtn.buttonEl.style.height = 'auto'; // Match textarea height roughly
-    sendBtn.onClick(async () => {
-        triggerGeneration();
-    });
-
-    const triggerGeneration = async () => {
-        const userText = input.getValue().trim();
-        if (!userText) return;
-
-        // Add user message to history
-        history.push({ role: 'user', content: userText });
-        input.setValue("");
-
-        // Re-render immediately to show user message
-        renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
-
-        // Call AI
-        const controller = new AbortController();
-        if (sourcePath) {
-            plugin.addActiveGeneration(sourcePath + "::chat", controller, "AI Chat", sourcePath);
-        }
-
-        try {
-            const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-            const noteContent = view ? view.editor.getValue() : "";
-
-            let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
-            if (plugin.settings.geminiApiKey) provider = 'gemini';
-            else if (plugin.settings.openAiApiKey) provider = 'openai';
-            else if (plugin.settings.ollamaEnabled) provider = 'ollama';
-
-            const aiResponse = await generateChatResponse(plugin.app, history, userText, noteContent, provider, plugin.settings, controller.signal);
-
-            history.push({ role: 'ai', content: aiResponse });
-            if (sourcePath) {
-                plugin.feedbackCache.set(sourcePath, history);
-                // Trigger Sync
-                plugin.app.workspace.trigger('anki:chat-update', sourcePath, history);
-            }
-
-            renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
-
-        } catch (e: any) {
-            if (e.name === 'AbortError' || e.message === "Aborted by user") {
-                history.push({ role: 'ai', content: "_(Abgebrochen)_" });
-            } else {
-                new Notice("Fehler bei der Antwort: " + e.message);
-                history.push({ role: 'ai', content: "Fehler: " + e.message });
-            }
-            renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
-        } finally {
-            if (sourcePath) {
-                plugin.removeActiveGeneration(sourcePath + "::chat");
-            }
-        }
-    };
-
-    // --- FEEDBACK BUTTON INSIDE CHAT ---
-    const feedbackBtnContainer = chatContentWrapper.createDiv();
-    feedbackBtnContainer.style.display = 'flex';
-    feedbackBtnContainer.style.justifyContent = 'flex-start';
-    feedbackBtnContainer.style.marginTop = '5px';
-
-    const getFeedbackBtn = new ButtonComponent(feedbackBtnContainer);
-    getFeedbackBtn.setButtonText("🔍 Feedback einholen");
-    getFeedbackBtn.setTooltip("Analysiert die Notiz und gibt Feedback");
-    getFeedbackBtn.onClick(async () => {
-        getFeedbackBtn.setDisabled(true);
-        getFeedbackBtn.setButtonText("⏳ Lade...");
-
-        const controller = new AbortController();
-        if (sourcePath) {
-            plugin.addActiveGeneration(sourcePath + "::feedback-ui", controller, "Feedback (Manuell)", sourcePath);
-        }
-
-        try {
-            // Find the correct view based on sourcePath
-            let view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-
-            // If we have a sourcePath, try to find the specific leaf for it
-            if (sourcePath) {
-                const leaves = plugin.app.workspace.getLeavesOfType('markdown');
-                const matchingLeaf = leaves.find(l => (l.view as MarkdownView).file?.path === sourcePath);
-                if (matchingLeaf) {
-                    view = matchingLeaf.view as MarkdownView;
-                } else {
-                    console.log("AnkiGenerator Debug: No matching leaf found for sourcePath:", sourcePath);
-                    console.log("Open leaves:", leaves.map(l => (l.view as MarkdownView).file?.path));
-                }
-            } else {
-                console.log("AnkiGenerator Debug: sourcePath is undefined in renderFeedback.");
-            }
-
-            if (!view) { new Notice("Konnte die zugehörige Notiz nicht finden (ist sie geöffnet?)."); return; }
-            const noteContent = view.editor.getValue();
-
-            let provider: 'gemini' | 'openai' | 'ollama' = 'gemini';
-            if (plugin.settings.geminiApiKey) provider = 'gemini';
-            else if (plugin.settings.openAiApiKey) provider = 'openai';
-            else if (plugin.settings.ollamaEnabled) provider = 'ollama';
-
-            const feedback = await generateFeedbackOnly(plugin.app, noteContent, provider, plugin.settings, controller.signal);
-
-            if (feedback) {
-                history.push({ role: 'ai', content: feedback });
-                if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
-                renderFeedback(container, history, plugin, sourcePath, onOpenInAction, state, cards, deckName, showControls, 'new-message');
-            } else {
-                new Notice("Kein Feedback erhalten.");
-            }
-        } catch (e: any) {
-            if (e.name === 'AbortError' || e.message === "Aborted by user") {
-                new Notice("Feedback abgebrochen.");
-            } else {
-                new Notice("Fehler beim Abrufen des Feedbacks: " + e.message);
-                console.error(e);
-            }
-        } finally {
-            if (sourcePath) {
-                plugin.removeActiveGeneration(sourcePath + "::feedback-ui");
-            }
-            getFeedbackBtn.setDisabled(false);
-            getFeedbackBtn.setButtonText("🔍 Feedback einholen");
-        }
-    });
 
     // --- CARD PREVIEW SECTION ---
+    previewHost.empty();
     if (sourcePath && state) {
-        // Create a wrapper for the preview section to isolate re-renders if needed
-        const previewWrapper = container.createDiv({ cls: 'anki-preview-wrapper' });
+        const previewWrapper = previewHost.createDiv({ cls: 'anki-preview-wrapper' });
         await renderCardPreviewSection(previewWrapper, sourcePath, plugin, state, cards, deckName);
     }
 }
@@ -519,7 +101,7 @@ async function renderCardPreviewSection(
         // Use imported regex (needs import) or just match locally for now to avoid circular deps if possible,
         // but we should reuse parser.
 
-        const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+        const matches = getAnkiBlockMatches(content);
         if (matches.length === 0) return;
 
         let cards: Card[] = [];
@@ -531,7 +113,7 @@ async function renderCardPreviewSection(
                 const content = await plugin.app.vault.read(file);
                 // Use imported regex (needs import) or just match locally for now to avoid circular deps if possible,
                 // but we should reuse parser.
-                const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                const matches = getAnkiBlockMatches(content);
                 if (matches.length > 0) {
                     // Aggregating all cards logic similar to getAllCardsForFile if we want full file preview?
                     // Original logic only took LAST match. 
@@ -968,10 +550,10 @@ async function renderCardPreviewSection(
                         if (file instanceof TFile) {
                             const content = await plugin.app.vault.read(file);
                             // Need regex and parser
-                            const { ANKI_BLOCK_REGEX, parseCardsFromBlockSource, formatCardsToString } = await import('../anki/ankiParser');
+                            const { getAnkiBlockMatches, parseCardsFromBlockSource, formatCardsToString } = await import('../anki/ankiParser');
                             const { findSpecificAnkiBlock } = await import('../anki/ankiParser');
 
-                            const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                            const matches = getAnkiBlockMatches(content);
                             let foundBlockMatch = null;
                             let foundCardIndex = -1;
 
@@ -1050,7 +632,7 @@ async function renderCardPreviewSection(
 
                         // Simple approach: Iterate blocks, parse matching block, find card.
                         // IMPORTANT: We need correct index logic.
-                        const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                        const matches = getAnkiBlockMatches(content);
                         let foundBlockMatch = null;
                         let foundCardIndex = -1;
 
@@ -1106,7 +688,7 @@ async function renderCardPreviewSection(
                         if (file instanceof TFile) {
                             setTimeout(async () => { // Wait for file update to propagate?
                                 const content = await plugin.app.vault.read(file);
-                                const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                                const matches = getAnkiBlockMatches(content);
                                 let foundBlockMatch = null;
                                 let foundCardIndex = -1;
 
@@ -1251,9 +833,7 @@ function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlug
         const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
         if (!view || view.file?.path !== sourcePath) { new Notice("Bitte die entsprechende Datei öffnen."); return; }
 
-        const provider = plugin.settings.geminiApiKey ? 'gemini' :
-            (plugin.settings.openAiApiKey ? 'openai' :
-                (plugin.settings.ollamaEnabled ? 'ollama' : null));
+        const provider = resolveProvider(plugin.settings);
 
         if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
         await runGenerationProcess(plugin, view.editor, provider, "", "");
@@ -1267,7 +847,7 @@ function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlug
         if (!(file instanceof TFile)) return;
 
         const content = await plugin.app.vault.read(file);
-        const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+        const matches = getAnkiBlockMatches(content);
         if (matches.length > 0) {
             let syncedCount = 0;
             for (const m of matches) {
@@ -1314,7 +894,7 @@ function renderSidebarControls(container: HTMLElement, plugin: AnkiGeneratorPlug
                 new ManualGenerationModal(plugin.app, prompt, async (response) => {
                     if (!response) return;
                     const cleaned = cleanAiGeneratedText(response);
-                    const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+                    const matches = getAnkiBlockMatches(content);
 
                     if (matches.length > 0) {
                         const lastMatch = matches[matches.length - 1];
@@ -1342,7 +922,7 @@ async function updateCardInFile(plugin: AnkiGeneratorPlugin, sourcePath: string,
 
     // Use imported regex (matches all) or local ref if needed. 
     // ANKI_BLOCK_REGEX is imported from parser.
-    const matches = [...content.matchAll(ANKI_BLOCK_REGEX as RegExp)];
+    const matches = getAnkiBlockMatches(content);
 
     for (const match of matches) {
         const fullBlock = match[0];

@@ -1,19 +1,16 @@
 import { App, Modal, Setting } from 'obsidian';
+import { AiProvider } from '../types';
+import { PROVIDERS } from '../providers';
 
-// Provider Typ erweitert
-type ModelSelectionCallback = (provider: 'gemini' | 'ollama' | 'openai') => void;
+type ModelSelectionCallback = (provider: AiProvider) => void;
 
 export class ModelSelectionModal extends Modal {
 	onSubmit: ModelSelectionCallback;
-	geminiAvailable: boolean;
-	ollamaAvailable: boolean;
-	openAiAvailable: boolean; // NEU
+	providers: AiProvider[];
 
-	constructor(app: App, geminiAvailable: boolean, ollamaAvailable: boolean, openAiAvailable: boolean, onSubmit: ModelSelectionCallback) {
+	constructor(app: App, providers: AiProvider[], onSubmit: ModelSelectionCallback) {
 		super(app);
-		this.geminiAvailable = geminiAvailable;
-		this.ollamaAvailable = ollamaAvailable;
-		this.openAiAvailable = openAiAvailable;
+		this.providers = providers;
 		this.onSubmit = onSubmit;
 	}
 
@@ -23,43 +20,23 @@ export class ModelSelectionModal extends Modal {
 		contentEl.createEl("h2", { text: "KI-Modell auswählen" });
 		contentEl.createEl("p", { text: "Wähle das Modell, das für die Kartengenerierung verwendet werden soll:" });
 
-		// Button für Gemini
-		if (this.geminiAvailable) {
-			new Setting(contentEl)
-				.addButton(btn => btn
-					.setButtonText("Google Gemini (Online)")
-					.setCta()
-					.onClick(() => {
-						this.close();
-						this.onSubmit('gemini');
-					}));
-		}
-
-		// NEU: Button für OpenAI
-		if (this.openAiAvailable) {
-			new Setting(contentEl)
-				.addButton(btn => btn
-					.setButtonText("OpenAI (ChatGPT)")
-					.onClick(() => {
-						this.close();
-						this.onSubmit('openai');
-					}));
-		}
-
-		// Button für Ollama
-		if (this.ollamaAvailable) {
-			new Setting(contentEl)
-				.addButton(btn => btn
-					.setButtonText("Ollama (Lokal)")
-					.onClick(() => {
-						this.close();
-						this.onSubmit('ollama');
-					}));
-		}
-
-		if (!this.geminiAvailable && !this.ollamaAvailable && !this.openAiAvailable) {
+		if (this.providers.length === 0) {
 			contentEl.createEl("p", { text: "Kein KI-Modell konfiguriert oder verfügbar." });
+			return;
 		}
+
+		this.providers.forEach((id, index) => {
+			new Setting(contentEl)
+				.addButton(btn => {
+					btn.setButtonText(PROVIDERS[id].label);
+					// Der erste Eintrag ist der bevorzugte Provider.
+					if (index === 0) btn.setCta();
+					btn.onClick(() => {
+						this.close();
+						this.onSubmit(id);
+					});
+				});
+		});
 	}
 
 	onClose() {

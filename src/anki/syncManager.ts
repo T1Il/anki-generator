@@ -4,7 +4,7 @@ import { Card } from '../types';
 import { deleteAnkiNotes, createAnkiDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './AnkiConnect';
 import { arrayBufferToBase64, basicMarkdownToHtml, convertObsidianLatexToAnki, convertObsidianLinks } from '../utils';
 import { containsMermaid, processMermaidBlocks } from '../mermaidRenderer';
-import { findSpecificAnkiBlock, formatCardsToString } from './ankiParser';
+import { findSpecificAnkiBlock, formatCardsToString, buildFullBlock, hasCloze, parseBlockHeader, cleanBlockInner } from './ankiParser';
 
 export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent: string, deckName: string | null, cards: Card[], file: TFile, targetIndex?: number) {
     const notice = new Notice('Synchronisiere mit Anki...', 0);
@@ -173,9 +173,21 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
 
             if (card.type === 'Cloze') {
                 const clozeRegex = /(?<!\w)____(?!\w)/;
-                ankiClozeTextField = clozeRegex.test(htmlQ)
-                    ? htmlQ.replace(clozeRegex, `{{c1::${htmlA}}}`)
-                    : `${htmlQ} {{c1::${htmlA}}}`;
+                if (hasCloze(htmlQ)) {
+                    // Frage enthaelt bereits echte {{c1::...}}-Luecken.
+                    // Frueher lief dieser Normalfall in den else-Zweig und haengte
+                    // ein leeres {{c1::}} an JEDE dieser Karten.
+                    ankiClozeTextField = htmlQ;
+                } else if (clozeRegex.test(htmlQ)) {
+                    // Altformat: ____ wird zur Luecke mit der Antwort.
+                    ankiClozeTextField = htmlQ.replace(clozeRegex, `{{c1::${htmlA}}}`);
+                } else if (htmlA && htmlA.trim().length > 0) {
+                    ankiClozeTextField = `${htmlQ} {{c1::${htmlA}}}`;
+                } else {
+                    // Weder Luecke noch Antwort - daraus laesst sich keine Cloze-Karte bauen.
+                    console.warn('Cloze-Karte ohne Luecke und ohne Antwort uebersprungen:', card.q);
+                    continue;
+                }
                 // Clear others
                 ankiFieldQ = ""; ankiFieldA = "";
             } else {
@@ -464,15 +476,16 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         // compared to complexity of re-parsing.
 
         // Re-extract metadata from original source to be safe
-        const lines = originalSourceContent.split('\n');
-        const instructionLine = lines.find(l => l.trim().startsWith('INSTRUCTION:'));
-        const statusLine = lines.find(l => l.trim().startsWith('STATUS:'));
-        const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : undefined;
-        const status = statusLine ? statusLine.replace('STATUS:', '').trim() : undefined;
+        // parseBlockHeader behaelt weitere INSTRUCTION- und alle deaktivierten
+        // '# INSTRUCTION:'-Zeilen; frueher ueberlebte nur die erste.
+        const header = parseBlockHeader(cleanBlockInner(originalSourceContent));
+        const instruction = header.instruction;
+        const status = header.status;
         const deckLine = `TARGET DECK: ${deckName}`;
 
-        const newBlockContent = formatCardsToString(deckLine, updatedCardsWithIds, instruction, status);
-        const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
+        const newBlockContent = formatCardsToString(deckLine, updatedCardsWithIds, instruction, status, header.extraHeaderLines);
+        // finalBlockSource wird pro Versuch aus dem GEFUNDENEN Block gebaut,
+        // damit Callout-Prefix und Backtick-Anzahl erhalten bleiben.
 
         // RETRY LOOP for File Save to handle race conditions (e.g. OneDrive)
         const MAX_RETRIES = 3;
@@ -487,10 +500,15 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
 
                 if (searchResult.matchIndex === -1) {
                     console.warn(`[SyncManager] Attempt ${attempt}: Block not found for replacement. Retrying...`);
+                    // Ohne Pause waren alle drei Versuche in Mikrosekunden aufgebraucht.
+                    await new Promise(r => setTimeout(r, 300 * attempt));
                     continue; // Block might have moved?
                 }
 
                 const { matchIndex, originalFullBlockSource: currentBlockSource } = searchResult;
+                const finalBlockSource = searchResult.block
+                    ? buildFullBlock(searchResult.block, newBlockContent)
+                    : `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
 
                 // Re-generate the NEW block content
                 // We use the same 'updatedCardsWithIds' because the Anki side is done and valid.
@@ -545,26 +563,28 @@ export async function saveAnkiBlockChanges(plugin: AnkiGeneratorPlugin, original
         if (!file) throw new Error("Keine aktive Datei.");
         const currentFileContent = await plugin.app.vault.read(file);
 
-        const { matchIndex, originalFullBlockSource } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
+        const { matchIndex, originalFullBlockSource, block } = findSpecificAnkiBlock(currentFileContent, originalSourceContent);
 
         if (matchIndex === -1) {
             throw new Error("Konnte den zu speichernden Anki-Block nicht finden.");
         }
 
-        const lines = originalFullBlockSource.split('\n');
-        let deckLine = lines.find(l => l.trim().startsWith('TARGET DECK:')) || `TARGET DECK: ${plugin.settings.mainDeck}::Standard`;
-        const instructionLine = lines.find(l => l.trim().startsWith('INSTRUCTION:'));
-        const statusLine = lines.find(l => l.trim().startsWith('STATUS:'));
-        const instruction = instructionLine ? instructionLine.replace('INSTRUCTION:', '').trim() : undefined;
-        const status = statusLine ? statusLine.replace('STATUS:', '').trim() : undefined;
+        const header = parseBlockHeader(cleanBlockInner(originalFullBlockSource));
+        let deckLine = header.deckName
+            ? `TARGET DECK: ${header.deckName}`
+            : `TARGET DECK: ${plugin.settings.mainDeck}::Standard`;
+        const instruction = header.instruction;
+        const status = header.status;
 
         if (newDeckName) {
             deckLine = `TARGET DECK: ${newDeckName}`;
         }
 
-        const newBlockContent = formatCardsToString(deckLine, updatedCards, instruction, status);
+        const newBlockContent = formatCardsToString(deckLine, updatedCards, instruction, status, header.extraHeaderLines);
 
-        const finalBlockSource = `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
+        const finalBlockSource = block
+            ? buildFullBlock(block, newBlockContent)
+            : `\`\`\`anki-cards\n${newBlockContent}\n\`\`\``;
         const updatedFileContent = currentFileContent.substring(0, matchIndex) + finalBlockSource + currentFileContent.substring(matchIndex + originalFullBlockSource.length);
 
         await plugin.app.vault.modify(file, updatedFileContent);

@@ -5,23 +5,25 @@ import AnkiGeneratorPlugin from './main';
 import { SubdeckModal } from './ui/SubdeckModal';
 import { ModelSelectionModal } from './ui/ModelSelectionModal';
 // DebugModal wird in aiGenerator verwendet
-import { parseAnkiSection, parseCardsFromBlockSource, ANKI_BLOCK_REGEX } from './anki/ankiParser';
+import { parseAnkiSection, parseCardsFromBlockSource, ANKI_BLOCK_REGEX, getAnkiBlockMatches } from './anki/ankiParser';
 import { getDeckNames } from './anki/AnkiConnect';
 import { generateCardsWithAI } from './aiGenerator';
 import { ImageInput, ChatMessage } from './types';
 import { arrayBufferToBase64, getMimeType, ensureBlockIdsForCallouts } from './utils';
 import { t } from './lang/helpers';
 import { RevisionDiffModal } from './ui/RevisionDiffModal';
+import { AiProvider } from './types';
+import { getAvailableProviders, resolveProvider } from './providers';
+import { appendFeedbackToCache } from './chat/chatHistory';
 
 export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor: Editor) {
 	const initialAnkiInfo = parseAnkiSection(editor, plugin.settings.mainDeck);
 	const initialSubdeck = initialAnkiInfo ? initialAnkiInfo.subdeck : '';
 
-	const geminiAvailable = !!plugin.settings.geminiApiKey;
-	const openAiAvailable = !!plugin.settings.openAiApiKey;
-	const ollamaAvailable = plugin.settings.ollamaEnabled && !!plugin.settings.ollamaEndpoint && !!plugin.settings.ollamaModel;
+	const availableProviders = getAvailableProviders(plugin.settings);
+	const preferred = resolveProvider(plugin.settings);
 
-	const startGen = (provider: 'gemini' | 'ollama' | 'openai') => {
+	const startGen = (provider: AiProvider) => {
 		let subdeckToUse = initialSubdeck;
 		if (!subdeckToUse) {
 			const activeFile = plugin.app.workspace.getActiveFile();
@@ -40,26 +42,24 @@ export async function triggerCardGeneration(plugin: AnkiGeneratorPlugin, editor:
 		startGenerationProcess(plugin, editor, provider, subdeckToUse);
 	};
 
-	// Prüfen wie viele Provider verfügbar sind
-	const availableProviders = [geminiAvailable, openAiAvailable, ollamaAvailable].filter(Boolean).length;
-
-	if (availableProviders > 1) {
-		new ModelSelectionModal(plugin.app, geminiAvailable, ollamaAvailable, openAiAvailable, startGen).open();
-	} else if (geminiAvailable) {
-		startGen('gemini');
-	} else if (openAiAvailable) {
-		startGen('openai');
-	} else if (ollamaAvailable) {
-		startGen('ollama');
-	} else {
+	if (!preferred) {
 		new Notice(t('notice.noAiModel'), 7000);
+		return;
+	}
+
+	if (availableProviders.length > 1) {
+		// Bevorzugten Provider (settings.aiProvider) nach vorne sortieren.
+		const ordered = [preferred].concat(availableProviders.filter(id => id !== preferred));
+		new ModelSelectionModal(plugin.app, ordered, startGen).open();
+	} else {
+		startGen(preferred);
 	}
 }
 
 async function startGenerationProcess(
 	plugin: AnkiGeneratorPlugin,
 	editor: Editor,
-	provider: 'gemini' | 'ollama' | 'openai',
+	provider: AiProvider,
 	initialSubdeck: string
 ) {
 	// Fetch deck names for suggestions
@@ -84,7 +84,7 @@ async function startGenerationProcess(
 export async function runGenerationProcess(
 	plugin: AnkiGeneratorPlugin,
 	editor: Editor,
-	provider: 'gemini' | 'ollama' | 'openai',
+	provider: AiProvider,
 	subdeck: string,
 	additionalInstructions: string = '',
 	isRevision: boolean = false,
@@ -172,16 +172,16 @@ export async function runGenerationProcess(
 		}
 
 		// Handle Feedback Asynchronously
+		// Den Pfad VOR dem await festhalten: sonst landet das Feedback unter der
+		// Notiz, die zufaellig gerade aktiv ist, wenn die Antwort eintrifft.
+		const feedbackTargetPath = activeFile ? activeFile.path : null;
+
 		feedbackPromise.then(feedback => {
-            if (feedback) {
-                const fActiveFile = plugin.app.workspace.getActiveFile();
-                if (fActiveFile) {
-                    console.log("Caching feedback for:", fActiveFile.path);
-                    const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
-                    plugin.feedbackCache.set(fActiveFile.path, history);
-                    // Trigger custom event for UI updates
-                    plugin.app.workspace.trigger('anki:feedback-updated', fActiveFile.path);
-                }
+            if (feedback && feedbackTargetPath) {
+                console.log("Caching feedback for:", feedbackTargetPath);
+                appendFeedbackToCache(plugin, feedbackTargetPath, feedback);
+                // Trigger custom event for UI updates
+                plugin.app.workspace.trigger('anki:feedback-updated', feedbackTargetPath);
             }
         }).catch(err => {
             console.error("Async feedback generation failed:", err);
@@ -403,8 +403,7 @@ export async function extractImagesAndPrepareContent(plugin: AnkiGeneratorPlugin
 // Stellt sicher, dass ein Anki-Block existiert und aktualisiert Header-Daten (Deck, Instruction, Status)
 async function ensureAnkiBlock(editor: Editor, fullDeckPath: string, instruction?: string, status?: string | null): Promise<{ blockStartIndex: number, blockEndIndex: number, insertionPoint: CodeMirror.Position }> {
 	let fileContent = editor.getValue();
-	ANKI_BLOCK_REGEX.lastIndex = 0;
-	let matches = [...fileContent.matchAll(ANKI_BLOCK_REGEX)];
+	let matches = getAnkiBlockMatches(fileContent);
 	let blockStartIndex = -1;
 	let blockEndIndex = -1;
 	let blockSourceLength = 0;
@@ -525,8 +524,7 @@ async function ensureAnkiBlock(editor: Editor, fullDeckPath: string, instruction
 		editor.replaceRange(output, endOfDocument);
 
 		fileContent = editor.getValue();
-		ANKI_BLOCK_REGEX.lastIndex = 0;
-		matches = [...fileContent.matchAll(ANKI_BLOCK_REGEX)];
+		matches = getAnkiBlockMatches(fileContent);
 		if (matches.length > 0) {
 			const newMatch = matches[matches.length - 1];
 			if (newMatch.index !== undefined) {

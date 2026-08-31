@@ -4,7 +4,7 @@ import AnkiGeneratorPlugin from './main';
 import { Card, ChatMessage } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
 import { getCardCountForDeck, moveAnkiNotesToDeck, deleteAnkiDeck, getDeckNames } from './anki/AnkiConnect';
-import { AnkiParsedInfo, parseAnkiSection, parseCardsFromBlockSource, formatCardsToString, ANKI_BLOCK_REGEX } from './anki/ankiParser';
+import { AnkiParsedInfo, parseAnkiSection, parseCardsFromBlockSource, formatCardsToString, ANKI_BLOCK_REGEX, getAnkiBlockMatches, getAnkiBlocks, buildFullBlock, spliceBlock } from './anki/ankiParser';
 import { runGenerationProcess, cleanAiGeneratedText, extractImagesAndPrepareContent } from './generationManager';
 import { syncAnkiBlock, saveAnkiBlockChanges } from './anki/syncManager';
 import { generateFeedbackOnly, generateChatResponse, constructPrompt } from './aiGenerator';
@@ -15,6 +15,9 @@ import { RevisionInputModal } from './ui/RevisionInputModal';
 import { RevisionOptionsModal } from './ui/RevisionOptionsModal';
 
 import { DeckSelectionModal } from './ui/DeckSelectionModal';
+import { resolveProvider } from './providers';
+import { getAvailableProviders, PROVIDERS } from './providers';
+import { appendFeedbackToCache } from './chat/chatHistory';
 
 
 
@@ -67,8 +70,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 			if (file instanceof TFile) {
 				const content = await plugin.app.vault.read(file);
 				let newContent = content;
-				const blockRegex = ANKI_BLOCK_REGEX;
-				const matches = [...content.matchAll(blockRegex)];
+				const matches = getAnkiBlockMatches(content);
 				const match = matches.find(m => m[1].trim() === source.trim());
 
 				if (match) {
@@ -76,7 +78,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 					const newBlock = fullBlock.replace(`STATUS: ${status}`, ''); // Remove status line
 					// Remove empty lines left behind? Regex replace might leave a blank line.
 					// Simple replace is safe enough.
-					newContent = content.replace(fullBlock, newBlock);
+					newContent = spliceBlock(content, match.block, newBlock);
 					await plugin.app.vault.modify(file, newContent);
 				}
 			}
@@ -187,13 +189,22 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	actionContainer.style.marginBottom = '10px';
 
 	// --- GENERATE BUTTONS (Row 1) ---
-	let hasAnyProvider = false;
+	// Ein Button je konfiguriertem Provider, aus der Registry statt hartcodiert.
+	const providerIcons: Record<string, string> = {
+		gemini: '\u2728',
+		claude: '\u25c6',
+		openai: '\u{1F916}',
+		ollama: '\u{1F4BB}'
+	};
 
-	if (plugin.settings.geminiApiKey) {
-		hasAnyProvider = true;
-		const genGeminiBtn = genContainer.createEl('button', { text: '✨ Gemini generieren' });
-		genGeminiBtn.style.flex = '1';
-		genGeminiBtn.onclick = async () => {
+	const configuredProviders = getAvailableProviders(plugin.settings);
+	const hasAnyProvider = configuredProviders.length > 0;
+
+	configuredProviders.forEach((providerId) => {
+		const label = `${providerIcons[providerId] || ''} ${PROVIDERS[providerId].label} generieren`.trim();
+		const genBtn = genContainer.createEl('button', { text: label });
+		genBtn.style.flex = '1';
+		genBtn.onclick = async () => {
 			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
 
@@ -202,59 +213,14 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
 			}
 
-            // Combine active instructions
-            const activeInstrText = instructions.filter(i => i.isActive).map(i => i.text).join('\n');
-			const feedback = await runGenerationProcess(plugin, view.editor, 'gemini', subdeck, activeInstrText);
+			const activeInstrText = instructions.filter(i => i.isActive).map(i => i.text).join('\n');
+			const feedback = await runGenerationProcess(plugin, view.editor, providerId, subdeck, activeInstrText);
 			if (feedback) {
-				const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
-				if (ctx.sourcePath) plugin.feedbackCache.set(ctx.sourcePath, history);
+				const history = appendFeedbackToCache(plugin, ctx.sourcePath, feedback);
 				renderFeedback(el, history, plugin, ctx.sourcePath, undefined, undefined, undefined, null, false);
 			}
 		};
-	}
-
-	if (plugin.settings.openAiApiKey) {
-		hasAnyProvider = true;
-		const genOpenAiBtn = genContainer.createEl('button', { text: '🤖 OpenAI generieren' });
-		genOpenAiBtn.style.flex = '1';
-		genOpenAiBtn.onclick = async () => {
-			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
-
-			let subdeck = "";
-			if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
-				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
-			}
-
-            // Combine active instructions
-            const activeInstrText = instructions.filter(i => i.isActive).map(i => i.text).join('\n');
-			const feedback = await runGenerationProcess(plugin, view.editor, 'openai', subdeck, activeInstrText);
-			if (feedback) {
-				const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
-				if (ctx.sourcePath) plugin.feedbackCache.set(ctx.sourcePath, history);
-				renderFeedback(el, history, plugin, ctx.sourcePath, undefined, undefined, undefined, null, false);
-			}
-		};
-	}
-
-	if (plugin.settings.ollamaEnabled) {
-		hasAnyProvider = true;
-		const genOllamaBtn = genContainer.createEl('button', { text: '💻 Ollama generieren' });
-		genOllamaBtn.style.flex = '1';
-		genOllamaBtn.onclick = async () => {
-			const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!view) { new Notice("Konnte keinen aktiven Editor finden."); return; }
-
-			let subdeck = "";
-			if (deckName && deckName.startsWith(plugin.settings.mainDeck + "::")) {
-				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
-			}
-
-            // Combine active instructions
-            const activeInstrText = instructions.filter(i => i.isActive).map(i => i.text).join('\n');
-			await runGenerationProcess(plugin, view.editor, 'ollama', subdeck, activeInstrText);
-		};
-	}
+	});
 
 	if (hasAnyProvider) {
 		const quickGenButton = genContainer.createEl('button', { text: '⚡ Auto generieren' });
@@ -269,9 +235,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 				subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
 			}
 
-			const provider = plugin.settings.geminiApiKey ? 'gemini' :
-				(plugin.settings.openAiApiKey ? 'openai' :
-					(plugin.settings.ollamaEnabled ? 'ollama' : null));
+			const provider = resolveProvider(plugin.settings);
 
 			if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
 
@@ -319,8 +283,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 				const currentFileContent = await plugin.app.vault.read(file);
 				
 				// Find the block. We look for the block that contains the exact source text.
-				const blockRegex = ANKI_BLOCK_REGEX;
-				const matches = [...currentFileContent.matchAll(blockRegex)];
+				const matches = getAnkiBlockMatches(currentFileContent);
 				const match = matches.find(m => m[1].trim() === source.trim());
 
 				if (match) {
@@ -329,9 +292,9 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 					
 					// Append new cards
 					const newBlockContent = `${blockContent.trim()}\n\n${cleanedResponse.trim()}\n`;
-					const newBlock = `\`\`\`anki-cards\n${newBlockContent}\`\`\``;
+					const newBlock = buildFullBlock(match.block, newBlockContent.trimEnd());
 					
-					const newFileContent = currentFileContent.replace(fullBlock, newBlock);
+					const newFileContent = spliceBlock(currentFileContent, match.block, newBlock);
 					await plugin.app.vault.modify(file, newFileContent);
 					new Notice("Manuell generierte Karten hinzugefügt.");
 
@@ -434,8 +397,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 					const content = editor.getValue();
 					
                     // Find the Correct Block
-					const blockRegex = ANKI_BLOCK_REGEX;
-					const matches = [...content.matchAll(blockRegex)];
+					const matches = getAnkiBlockMatches(content);
 					const match = matches.find(m => m[1].trim() === source.trim());
 
 					if (match) {
@@ -451,10 +413,10 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
                         }
 
                         // Reconstruct Block
-                        const newBlock = `\`\`\`anki-cards\n${blockContent}\n\`\`\``;
+                        const newBlock = buildFullBlock(match.block, blockContent.trimEnd());
                         
                         // Replace in file
-                        const updatedContent = content.replace(fullBlock, newBlock);
+                        const updatedContent = spliceBlock(content, match.block, newBlock);
 						editor.setValue(updatedContent);
                         new Notice(`Deck geändert zu: ${newDeckName}`);
 					} else {
@@ -484,9 +446,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 					subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
 				}
 	
-				const provider = plugin.settings.geminiApiKey ? 'gemini' :
-					(plugin.settings.openAiApiKey ? 'openai' :
-						(plugin.settings.ollamaEnabled ? 'ollama' : null));
+				const provider = resolveProvider(plugin.settings);
 	
 				if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
 	
@@ -495,8 +455,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 	
 				const feedback = await runGenerationProcess(plugin, view.editor, provider, subdeck, revisionInstruction, true); // isRevision = true
 				if (feedback) {
-					const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
-					if (ctx.sourcePath) plugin.feedbackCache.set(ctx.sourcePath, history);
+					const history = appendFeedbackToCache(plugin, ctx.sourcePath, feedback);
 					renderFeedback(el, history, plugin, ctx.sourcePath, undefined, undefined, undefined, null, false);
 				}
 			}, activeInstrText, "Karten überarbeiten (Anweisung)").open();
@@ -533,8 +492,7 @@ async function updateInstructionInBlock(plugin: AnkiGeneratorPlugin, sourcePath:
     if (file instanceof TFile) {
         const content = await plugin.app.vault.read(file);
         // Find block
-        const blockRegex = ANKI_BLOCK_REGEX;
-        const matches = [...content.matchAll(blockRegex)];
+        const matches = getAnkiBlockMatches(content);
         const match = matches.find(m => m[1].trim() === blockSource.trim());
 
         if (match) {
@@ -545,8 +503,8 @@ async function updateInstructionInBlock(plugin: AnkiGeneratorPlugin, sourcePath:
             const lines = match[1].split('\n');
 			const newLines = lines.map(l => l.trim() === oldLine.trim() ? newLine : l);
 			const newBlockContent = newLines.join('\n');
-            const newBlock = `\`\`\`anki-cards\n${newBlockContent.trimEnd()}\n\`\`\``;
-            const newContent = content.replace(fullBlock, newBlock);
+            const newBlock = buildFullBlock(match.block, newBlockContent.trimEnd());
+            const newContent = spliceBlock(content, match.block, newBlock);
             await plugin.app.vault.modify(file, newContent);
         } else {
              new Notice("Konnte den Block nicht finden.");
@@ -558,8 +516,7 @@ async function addInstructionToBlock(plugin: AnkiGeneratorPlugin, sourcePath: st
     const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
     if (file instanceof TFile) {
         const content = await plugin.app.vault.read(file);
-        const blockRegex = ANKI_BLOCK_REGEX;
-        const matches = [...content.matchAll(blockRegex)];
+        const matches = getAnkiBlockMatches(content);
         const match = matches.find(m => m[1].trim() === blockSource.trim());
 
         if (match) {
@@ -583,8 +540,8 @@ async function addInstructionToBlock(plugin: AnkiGeneratorPlugin, sourcePath: st
              
              lines.splice(insertIndex, 0, instructionLine);
              const newBlockContent = lines.join('\n');
-             const newBlockReconstructed = `\`\`\`anki-cards\n${newBlockContent.trimEnd()}\n\`\`\``;
-             const newContent = content.replace(fullBlock, newBlockReconstructed);
+             const newBlockReconstructed = buildFullBlock(match.block, newBlockContent.trimEnd());
+             const newContent = spliceBlock(content, match.block, newBlockReconstructed);
              await plugin.app.vault.modify(file, newContent);
         }
     }
@@ -594,8 +551,7 @@ async function deleteInstructionFromBlock(plugin: AnkiGeneratorPlugin, sourcePat
      const file = plugin.app.vault.getAbstractFileByPath(sourcePath);
     if (file instanceof TFile) {
         const content = await plugin.app.vault.read(file);
-        const blockRegex = ANKI_BLOCK_REGEX;
-        const matches = [...content.matchAll(blockRegex)];
+        const matches = getAnkiBlockMatches(content);
         const match = matches.find(m => m[1].trim() === blockSource.trim());
 
         if (match) {
@@ -604,8 +560,8 @@ async function deleteInstructionFromBlock(plugin: AnkiGeneratorPlugin, sourcePat
              const newLines = lines.filter(l => l.trim() !== lineToDelete.trim());
              const newBlockContent = newLines.join('\n');
              
-             const newBlock = `\`\`\`anki-cards\n${newBlockContent.trimEnd()}\n\`\`\``;
-             const newContent = content.replace(fullBlock, newBlock);
+             const newBlock = buildFullBlock(match.block, newBlockContent.trimEnd());
+             const newContent = spliceBlock(content, match.block, newBlock);
              await plugin.app.vault.modify(file, newContent);
         }
     }
@@ -619,7 +575,7 @@ export async function getAllCardsForFile(app: ObsidianApp, file: TFile): Promise
     try {
         const content = await app.vault.read(file);
         const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
-        const matches = [...content.matchAll(blockRegex)];
+        const matches = getAnkiBlockMatches(content);
         
         let allCards: Card[] = [];
         let firstDeckName: string | null = null;
@@ -650,9 +606,7 @@ export async function startRevisionProcess(plugin: AnkiGeneratorPlugin, editor: 
             subdeck = deckName.substring(plugin.settings.mainDeck.length + 2);
         }
 
-        const provider = plugin.settings.geminiApiKey ? 'gemini' :
-            (plugin.settings.openAiApiKey ? 'openai' :
-                (plugin.settings.ollamaEnabled ? 'ollama' : null));
+        const provider = resolveProvider(plugin.settings);
 
         if (!provider) { new Notice("Kein KI-Modell konfiguriert."); return; }
 
@@ -661,8 +615,7 @@ export async function startRevisionProcess(plugin: AnkiGeneratorPlugin, editor: 
 
         const feedback = await runGenerationProcess(plugin, editor, provider, subdeck, revisionInstruction, true); // isRevision = true
         if (feedback) {
-            const history: ChatMessage[] = [{ role: 'ai', content: feedback }];
-            if (sourcePath) plugin.feedbackCache.set(sourcePath, history);
+            const history = appendFeedbackToCache(plugin, sourcePath, feedback);
             onFeedback(history);
         }
     }, "", "Karten überarbeiten").open();
@@ -674,32 +627,32 @@ function insertGeneratedText(editor: Editor, blockStartIndex: number, insertionP
 }
 
 export async function updateFirstBlockDeck(app: ObsidianApp, file: TFile, newDeckName: string) {
-    const content = await app.vault.read(file);
-    const blockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
-    const match = content.match(blockRegex);
+    let changed = false;
 
-    if (match) {
-        const fullBlock = match[0];
-        let blockContent = match[1];
-        
-        // Check if TARGET DECK line exists
-        if (blockContent.includes('TARGET DECK:')) {
-            blockContent = blockContent.replace(/TARGET DECK: .*$/m, `TARGET DECK: ${newDeckName}`);
+    // vault.process ist atomar: lesen und schreiben koennen nicht auseinanderlaufen.
+    await app.vault.process(file, (content) => {
+        const blocks = getAnkiBlocks(content);
+        if (blocks.length === 0) return content;
+
+        const block = blocks[0];
+        let blockContent = block.innerClean;
+
+        if (/^TARGET DECK[ 	]*:/im.test(blockContent)) {
+            blockContent = blockContent.replace(/^TARGET DECK[ 	]*:.*$/im, "TARGET DECK: " + newDeckName);
         } else {
-            // Insert at top
-            blockContent = `TARGET DECK: ${newDeckName}\n` + blockContent;
+            blockContent = "TARGET DECK: " + newDeckName + "\n" + blockContent;
         }
 
-        // Reconstruct Block
-        const newBlock = `\`\`\`anki-cards\n${blockContent}\n\`\`\``;
-        
-        // Replace in file
-        const updatedContent = content.replace(fullBlock, newBlock);
-        await app.vault.modify(file, updatedContent);
+        changed = true;
+        return spliceBlock(content, block, buildFullBlock(block, blockContent.trimEnd()));
+    });
+
+    if (changed) {
         new Notice(`Deck geändert zu: ${newDeckName}`);
     } else {
         new Notice("Konnte keinen Anki-Block finden.");
     }
 }
+
 
 
