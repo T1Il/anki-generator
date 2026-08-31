@@ -284,34 +284,67 @@ export class DriftReviewModal extends Modal {
 		if (items.length === 0) return;
 
 		this.syncBtn.setDisabled(true);
-		const notice = new Notice(`Übertrage 0/${items.length}...`, 0);
 
+		// Nach Datei gruppieren: syncAnkiBlock erledigt einen ganzen Block in
+		// einem Durchgang (gebuendelter Medien-Upload, ein Sammel-Request fuer
+		// die Feld-Updates, ein Schreibvorgang in die Notiz). Pro Karte
+		// aufzurufen hiesse, das alles hundertfach zu wiederholen.
+		const byFile = new Map<string, DriftItem[]>();
+		items.forEach((item) => {
+			const key = item.file.path;
+			if (!byFile.has(key)) byFile.set(key, []);
+			(byFile.get(key) as DriftItem[]).push(item);
+		});
+
+		const notice = new Notice(`Übertrage 0/${items.length}...`, 0);
 		const synced = new Set<DriftItem>();
 		let failed = 0;
+		let filesDone = 0;
 
-		for (const item of items) {
+		for (const [path, fileItems] of byFile) {
+			filesDone++;
+			notice.setMessage(
+				`Übertrage ${synced.size}/${items.length} - Datei ${filesDone}/${byFile.size}: ${fileItems[0].file.basename}`
+			);
+
 			try {
-				notice.setMessage(`Übertrage ${synced.size + 1}/${items.length}: ${item.file.basename}`);
-
-				if (!(await this.refreshItem(item))) {
-					throw new Error(`Karte mit ID ${item.noteId} nicht mehr in ${item.file.path} gefunden.`);
+				// Frisch aus der Datei lesen: Indizes und Blockquelle koennen
+				// sich seit der Pruefung verschoben haben.
+				const resolved: DriftItem[] = [];
+				for (const item of fileItems) {
+					if (await this.refreshItem(item)) resolved.push(item);
+					else {
+						failed++;
+						console.error('[DriftReview] Karte nicht mehr gefunden:', path, item.noteId);
+					}
 				}
+				if (resolved.length === 0) continue;
 
-				// targetIndex sorgt dafür, dass nur diese eine Karte angefasst wird.
-				await syncAnkiBlock(
-					this.plugin,
-					item.blockSource,
-					item.deckName,
-					item.blockCards,
-					item.file,
-					item.cardIndex
-				);
+				// Karten desselben Blocks zusammenfassen.
+				const byBlock = new Map<string, DriftItem[]>();
+				resolved.forEach((item) => {
+					if (!byBlock.has(item.blockSource)) byBlock.set(item.blockSource, []);
+					(byBlock.get(item.blockSource) as DriftItem[]).push(item);
+				});
 
-				synced.add(item);
-				this.selected.delete(item);
+				for (const [blockSource, blockItems] of byBlock) {
+					const indices = blockItems.map((i) => i.cardIndex);
+					await syncAnkiBlock(
+						this.plugin,
+						blockSource,
+						blockItems[0].deckName,
+						blockItems[0].blockCards,
+						blockItems[0].file,
+						indices
+					);
+					blockItems.forEach((item) => {
+						synced.add(item);
+						this.selected.delete(item);
+					});
+				}
 			} catch (e: any) {
-				failed++;
-				console.error('[DriftReview] Sync fehlgeschlagen für', item.file.path, item.noteId, e);
+				failed += fileItems.filter((i) => !synced.has(i)).length;
+				console.error('[DriftReview] Sync fehlgeschlagen für', path, e);
 			}
 		}
 

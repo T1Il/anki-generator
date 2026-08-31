@@ -334,6 +334,40 @@ export async function addAnkiClozeNote(deckName: string, modelName: string, text
 	return result;
 }
 
+export interface NoteFieldUpdate {
+	noteId: number;
+	fields: Record<string, string>;
+}
+
+/**
+ * Aktualisiert mehrere Notizen in EINEM HTTP-Request.
+ *
+ * AnkiConnect kann per 'multi' beliebige Aktionen buendeln. Ohne das wird
+ * pro Karte einzeln angefragt - bei einem Abgleich ueber hunderte Karten
+ * ist das der Flaschenhals.
+ *
+ * Gibt die Fehler je Eintrag zurueck (null = erfolgreich), damit der
+ * Aufrufer weiss, welche Karte gescheitert ist.
+ */
+export async function updateNoteFieldsBatch(updates: NoteFieldUpdate[]): Promise<(string | null)[]> {
+	if (updates.length === 0) return [];
+
+	const actions = updates.map((u) => ({
+		action: 'updateNoteFields',
+		version: 6,
+		params: { note: { id: u.noteId, fields: u.fields } }
+	}));
+
+	const results = await ankiConnectRequest('multi', { actions });
+
+	return updates.map((_, i) => {
+		const r = results?.[i];
+		// Erfolgreiche Teilaktionen liefern { result: null, error: null }.
+		if (r && typeof r === 'object' && 'error' in r && r.error) return String(r.error);
+		return null;
+	});
+}
+
 export async function updateAnkiNoteFields(noteId: number, frontField: string, backField: string, front: string, back: string): Promise<void> {
 	const fields: any = {};
 	fields[frontField] = front;

@@ -6,10 +6,14 @@ import { arrayBufferToBase64, basicMarkdownToHtml, convertObsidianLatexToAnki, c
 import { containsMermaid, processMermaidBlocks } from '../mermaidRenderer';
 import { findSpecificAnkiBlock, formatCardsToString, buildFullBlock, hasCloze, parseBlockHeader, cleanBlockInner } from './ankiParser';
 
-export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent: string, deckName: string | null, cards: Card[], file: TFile, targetIndex?: number) {
+export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceContent: string, deckName: string | null, cards: Card[], file: TFile, targetIndex?: number | number[]) {
     const notice = new Notice('Synchronisiere mit Anki...', 0);
     try {
-        const isSingleSync = typeof targetIndex === 'number';
+        // targetIndex darf eine einzelne Karte oder eine Auswahl sein.
+        const targetSet: Set<number> | null = typeof targetIndex === 'number'
+            ? new Set([targetIndex])
+            : Array.isArray(targetIndex) ? new Set(targetIndex) : null;
+        const isSingleSync = targetSet !== null;
         console.log(`[SyncManager] Starting sync. Single Mode: ${isSingleSync} (Index: ${targetIndex})`);
 
         if (!deckName) throw new Error("Kein 'TARGET DECK' im anki-cards Block gefunden.");
@@ -63,7 +67,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         };
 
         for (let i = 0; i < cards.length; i++) {
-            if (isSingleSync && i !== targetIndex) continue;
+            if (targetSet && !targetSet.has(i)) continue;
             extractImages(cards[i].q);
             extractImages(cards[i].a);
         }
@@ -142,7 +146,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         // Pre-process One Loop
         for (let i = 0; i < cards.length; i++) {
             const card = cards[i];
-            if (isSingleSync && i !== targetIndex) continue;
+            if (targetSet && !targetSet.has(i)) continue;
 
             if (!card.q || card.q.trim().length === 0) continue;
 
@@ -420,49 +424,63 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                 console.error("Failed to batch fetch info", e);
             }
 
-            const CONCURRENCY = 5;
-            const chunks = [];
-            for (let i = 0; i < cardsToUpdate.length; i += CONCURRENCY) {
-                chunks.push(cardsToUpdate.slice(i, i + CONCURRENCY));
+            // Feldnamen je Karte aufloesen und ALLE Updates in einem
+            // einzigen AnkiConnect-Request buendeln. Vorher lief pro Karte
+            // eine eigene Anfrage - bei hunderten Karten der Flaschenhals.
+            const resolveFor = (fields: string[], conf: string, alts: string[]) => {
+                if (fields.includes(conf)) return conf;
+                for (const alt of alts) if (fields.includes(alt)) return alt;
+                return conf;
+            };
+
+            const payload: { noteId: number, fields: Record<string, string> }[] = [];
+            const payloadItems: typeof cardsToUpdate = [];
+
+            for (const cItem of cardsToUpdate) {
+                const noteInfo = noteInfoMap.get(cItem.noteId);
+                const availableFields = noteInfo?.fields ? Object.keys(noteInfo.fields) : [];
+
+                let fields: Record<string, string>;
+
+                if (cItem.card.type === 'Basic') {
+                    const confFront = cItem.card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
+                    const confBack = cItem.card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
+                    const realFront = resolveFor(availableFields, confFront, ['Vorderseite', 'Question', 'Frage', 'Front']);
+                    const realBack = resolveFor(availableFields, confBack, ['R\u00fcckseite', 'Answer', 'Antwort', 'Back']);
+                    fields = { [realFront]: cItem.front, [realBack]: cItem.back };
+                } else {
+                    const realText = resolveFor(availableFields, plugin.settings.clozeText, ['Text', 'Inhalt', 'Cloze']);
+                    fields = { [realText]: cItem.clozeText };
+                }
+
+                payload.push({ noteId: cItem.noteId, fields });
+                payloadItems.push(cItem);
             }
 
-            for (const chunk of chunks) {
-                await Promise.all(chunk.map(async (cItem) => {
-                    const noteInfo = noteInfoMap.get(cItem.noteId);
+            // In Haeppchen, damit ein einzelner Request nicht zu gross wird.
+            const BATCH = 100;
+            for (let i = 0; i < payload.length; i += BATCH) {
+                const slice = payload.slice(i, i + BATCH);
+                const sliceItems = payloadItems.slice(i, i + BATCH);
+                notice.setMessage(`Aktualisiere Karten ${i + 1}-${i + slice.length} von ${payload.length}...`);
 
-                    // Field Resolution Logic
-                    const availableFields = noteInfo?.fields ? Object.keys(noteInfo.fields) : [];
-                    const resolve = (conf: string, alts: string[]) => {
-                        if (availableFields.includes(conf)) return conf;
-                        for (const alt of alts) if (availableFields.includes(alt)) return alt;
-                        return conf;
-                    };
+                let errors: (string | null)[];
+                try {
+                    errors = await import('./AnkiConnect').then(m => m.updateNoteFieldsBatch(slice));
+                } catch (e) {
+                    console.error('Sammel-Update fehlgeschlagen:', e);
+                    errors = slice.map(() => (e as Error).message || 'Unbekannter Fehler');
+                }
 
-                    try {
-                        if (cItem.card.type === 'Basic') {
-                            const confFront = cItem.card.typeIn ? plugin.settings.typeInFront : plugin.settings.basicFront;
-                            const confBack = cItem.card.typeIn ? plugin.settings.typeInBack : plugin.settings.basicBack;
-
-                            const realFront = resolve(confFront, ['Vorderseite', 'Question', 'Frage', 'Front']);
-                            const realBack = resolve(confBack, ['Rückseite', 'Answer', 'Antwort', 'Back']);
-
-                            await updateAnkiNoteFields(cItem.noteId, realFront, realBack, cItem.front, cItem.back);
-                        } else {
-                            const confText = plugin.settings.clozeText;
-                            const realText = resolve(confText, ['Text', 'Inhalt', 'Cloze']);
-
-                            await updateAnkiClozeNoteFields(cItem.noteId, realText, cItem.clozeText);
-                        }
-                    } catch (e) {
-                        console.error(`Failed to update note ${cItem.noteId}`, e);
-                        // If note not found, ID became invalid?
-                        if (e.message?.includes("Note was not found")) {
-                            // Handle re-creation? For now just log. Requires re-run to create new.
-                            new Notice(`Karte ${cItem.noteId} nicht in Anki gefunden. Beim nächsten Mal wird sie neu erstellt.`);
-                            updatedCardsWithIds[cItem.index] = { ...cItem.card, id: null }; // Reset ID
-                        }
+                errors.forEach((err, k) => {
+                    if (!err) return;
+                    const cItem = sliceItems[k];
+                    console.error(`Failed to update note ${cItem.noteId}: ${err}`);
+                    if (err.includes('Note was not found') || err.includes('not found')) {
+                        new Notice(`Karte ${cItem.noteId} nicht in Anki gefunden. Beim n\u00e4chsten Mal wird sie neu erstellt.`);
+                        updatedCardsWithIds[cItem.index] = { ...cItem.card, id: null };
                     }
-                }));
+                });
             }
         }
 
