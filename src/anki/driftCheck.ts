@@ -16,8 +16,13 @@ import { normalizeText } from '../chat/textLocator';
 
 export interface DriftField {
 	label: string;
+	/** Rohwert aus der Notiz (Markdown). */
 	noteValue: string;
+	/** Rohwert aus Anki (HTML). */
 	ankiValue: string;
+	/** Verglichene Fassung - das ist es, was ueber differs entscheidet. */
+	noteNorm: string;
+	ankiNorm: string;
 	differs: boolean;
 }
 
@@ -144,11 +149,15 @@ function compareCard(card: Card, note: any, settings: AnkiGeneratorSettings): Dr
 	if (card.type === 'Cloze') {
 		const noteValue = expectedClozeText(card);
 		const ankiValue = fieldValue(note, settings.clozeText, 0);
+		const noteNorm = noteToPlain(noteValue);
+		const ankiNorm = htmlToPlain(ankiValue);
 		return [{
 			label: 'Lückentext',
 			noteValue,
 			ankiValue,
-			differs: noteToPlain(noteValue) !== htmlToPlain(ankiValue)
+			noteNorm,
+			ankiNorm,
+			differs: noteNorm !== ankiNorm
 		}];
 	}
 
@@ -158,19 +167,15 @@ function compareCard(card: Card, note: any, settings: AnkiGeneratorSettings): Dr
 	const ankiFront = fieldValue(note, frontField, 0);
 	const ankiBack = fieldValue(note, backField, 1);
 
+	const build = (label: string, noteValue: string, ankiValue: string): DriftField => {
+		const noteNorm = noteToPlain(noteValue);
+		const ankiNorm = htmlToPlain(ankiValue);
+		return { label, noteValue, ankiValue, noteNorm, ankiNorm, differs: noteNorm !== ankiNorm };
+	};
+
 	return [
-		{
-			label: 'Frage',
-			noteValue: card.q,
-			ankiValue: ankiFront,
-			differs: noteToPlain(card.q) !== htmlToPlain(ankiFront)
-		},
-		{
-			label: 'Antwort',
-			noteValue: card.a,
-			ankiValue: ankiBack,
-			differs: noteToPlain(card.a) !== htmlToPlain(ankiBack)
-		}
+		build('Frage', card.q, ankiFront),
+		build('Antwort', card.a, ankiBack)
 	];
 }
 

@@ -6,6 +6,58 @@ import { syncAnkiBlock } from '../anki/syncManager';
 import { CardEditModal } from './CardEditModal';
 import { getAnkiBlocks, parseCardsFromBlockSource, formatCardsToString, parseBlockHeader, buildFullBlock, spliceBlock } from '../anki/ankiParser';
 
+
+interface DiffPart {
+	text: string;
+	changed: boolean;
+}
+
+/**
+ * Wortweiser Vergleich ueber gemeinsamen Anfang und gemeinsames Ende.
+ * Reicht voellig, um zu zeigen WAS sich geaendert hat - ein vollstaendiger
+ * Diff-Algorithmus waere hier Overkill.
+ */
+function wordDiff(a: string, b: string): [DiffPart[], DiffPart[]] {
+	const aw = a.split(' ');
+	const bw = b.split(' ');
+
+	let start = 0;
+	while (start < aw.length && start < bw.length && aw[start] === bw[start]) start++;
+
+	let end = 0;
+	while (
+		end < aw.length - start &&
+		end < bw.length - start &&
+		aw[aw.length - 1 - end] === bw[bw.length - 1 - end]
+	) end++;
+
+	const build = (words: string[]): DiffPart[] => {
+		const parts: DiffPart[] = [];
+		const head = words.slice(0, start).join(' ');
+		const mid = words.slice(start, words.length - end).join(' ');
+		const tail = words.slice(words.length - end).join(' ');
+		if (head) parts.push({ text: head, changed: false });
+		if (mid) parts.push({ text: mid, changed: true });
+		if (tail) parts.push({ text: tail, changed: false });
+		return parts;
+	};
+
+	return [build(aw), build(bw)];
+}
+
+function renderParts(parent: HTMLElement, parts: DiffPart[], fallback: string) {
+	if (parts.length === 0) {
+		parent.createSpan({ text: fallback || '(leer)' });
+		return;
+	}
+	const wrap = parent.createSpan({ cls: 'anki-drift-text' });
+	parts.forEach((part, i) => {
+		const span = wrap.createSpan({ text: part.text });
+		if (part.changed) span.addClass('anki-drift-changed');
+		if (i < parts.length - 1) wrap.createSpan({ text: ' ' });
+	});
+}
+
 /**
  * Zeigt Karten, die in der Notiz anders aussehen als in Anki, und lässt
  * auswählen, welche davon nach Anki übertragen werden sollen.
@@ -157,13 +209,28 @@ export class DriftReviewModal extends Modal {
 				const diff = row.createDiv({ cls: 'anki-drift-diff' });
 				diff.createDiv({ cls: 'anki-drift-field-label', text: field.label });
 
+				// Die VERGLICHENE Fassung zeigen, nicht das Roh-HTML: sonst sieht
+				// ein blosser Wikilink wie ein riesiger Unterschied aus, obwohl er
+				// gar nicht zur Meldung gefuehrt hat.
+				const [ankiParts, noteParts] = wordDiff(field.ankiNorm, field.noteNorm);
+
 				const anki = diff.createDiv({ cls: 'anki-drift-line is-anki' });
 				anki.createSpan({ cls: 'anki-drift-tag', text: 'Anki' });
-				anki.createSpan({ text: field.ankiValue || '(leer)' });
+				renderParts(anki, ankiParts, field.ankiNorm);
 
 				const note = diff.createDiv({ cls: 'anki-drift-line is-note' });
 				note.createSpan({ cls: 'anki-drift-tag', text: 'Notiz' });
-				note.createSpan({ text: field.noteValue || '(leer)' });
+				renderParts(note, noteParts, field.noteNorm);
+
+				// Rohwerte auf Wunsch, fuer den Fall dass das HTML interessiert.
+				const details = diff.createEl('details', { cls: 'anki-drift-raw' });
+				details.createEl('summary', { text: 'Rohwerte anzeigen' });
+				const rawAnki = details.createDiv({ cls: 'anki-drift-raw-line' });
+				rawAnki.createSpan({ cls: 'anki-drift-tag', text: 'Anki' });
+				rawAnki.createSpan({ text: field.ankiValue || '(leer)' });
+				const rawNote = details.createDiv({ cls: 'anki-drift-raw-line' });
+				rawNote.createSpan({ cls: 'anki-drift-tag', text: 'Notiz' });
+				rawNote.createSpan({ text: field.noteValue || '(leer)' });
 			});
 		}
 

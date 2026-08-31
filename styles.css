@@ -720,3 +720,47 @@
 	padding: 3px 10px;
 	height: auto;
 }
+
+/* Der geänderte Teil im Vergleich, damit man nicht selbst suchen muss. */
+.anki-drift-text {
+	flex: 1 1 auto;
+}
+
+.anki-drift-changed {
+	font-weight: 700;
+	border-radius: 3px;
+	padding: 0 3px;
+	background: rgba(255, 200, 0, 0.35);
+}
+
+.anki-drift-line.is-anki .anki-drift-changed {
+	background: rgba(220, 70, 70, 0.32);
+}
+
+.anki-drift-line.is-note .anki-drift-changed {
+	background: rgba(70, 180, 100, 0.32);
+}
+
+.anki-drift-raw {
+	margin-top: 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.anki-drift-raw summary {
+	cursor: pointer;
+	user-select: none;
+	padding: 2px 0;
+}
+
+.anki-drift-raw-line {
+	display: flex;
+	gap: 8px;
+	padding: 3px 6px;
+	font-family: var(--font-monospace);
+	font-size: 0.85em;
+	overflow-wrap: anywhere;
+	background: var(--background-secondary);
+	border-radius: 3px;
+	margin-top: 2px;
+}
