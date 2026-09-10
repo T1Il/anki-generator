@@ -3,6 +3,7 @@ import AnkiGeneratorPlugin from '../main';
 import { Card } from '../types';
 import { deleteAnkiNotes, createAnkiDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './AnkiConnect';
 import { arrayBufferToBase64, basicMarkdownToHtml, convertObsidianLatexToAnki, convertObsidianLinks } from '../utils';
+import { latexZuKlartext } from '../latexPlain';
 import { containsMermaid, processMermaidBlocks } from '../mermaidRenderer';
 import { findSpecificAnkiBlock, formatCardsToString, buildFullBlock, hasCloze, parseBlockHeader, cleanBlockInner } from './ankiParser';
 
@@ -168,7 +169,26 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
             }
 
             processedQ = convertObsidianLatexToAnki(processedQ);
-            processedA = convertObsidianLatexToAnki(processedA);
+            // DIE ANTWORT EINER TIPPKARTE BEKOMMT UNICODE, NICHT MATHJAX.
+            //
+            // Anki zeigt sie woertlich und in Monospace, weil sie zeichenweise
+            // mit der Eingabe verglichen wird — MathJax laeuft in diesem
+            // Vergleich nicht. `\(\leq\) 65 mmHg` blieb deshalb als Klartext
+            // stehen (10.09.2026, Sepsis.md). Und getippt haette man es
+            // ohnehin nie.
+            //
+            // Die FRAGE einer Tippkarte wird normal gerendert; nur das
+            // Antwortfeld ist betroffen.
+            if (card.typeIn) {
+                const klartext = latexZuKlartext(processedA);
+                processedA = klartext.text;
+                if (klartext.ungeloest.length) {
+                    console.warn('[LaTeX] Tippkarte mit nicht uebersetzbarem LaTeX:',
+                        klartext.ungeloest.join(', '), '|', card.q.substring(0, 60));
+                }
+            } else {
+                processedA = convertObsidianLatexToAnki(processedA);
+            }
             processedQ = convertObsidianLinks(processedQ, vaultName, file.path, plugin.app);
             processedA = convertObsidianLinks(processedA, vaultName, file.path, plugin.app);
 

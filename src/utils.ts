@@ -48,7 +48,11 @@ export function getMimeType(extension: string): string {
 export function convertObsidianLatexToAnki(text: string): string {
     if (!text) return text;
     let converted = text.replace(/\$\$([\s\S]*?)\$\$/g, '\\[$1\\]');
-    converted = converted.replace(/(?<!\\)\$(.+?)(?<!\\)\$/g, '\\($1\\)');
+    // Kein Leerzeichen hinter dem oeffnenden und vor dem schliessenden Dollar.
+    // Ohne diese TeX-Regel wird aus „Kostet 5 $ und 3 $ extra" ein
+    // `\( und 3 \)`, und MathJax zeigt einen roten Fehler auf einer Karte,
+    // in der es nie um Mathematik ging.
+    converted = converted.replace(/(?<!\\)\$(?!\s)((?:[^$\\]|\\.)+?)(?<![\s\\])\$/g, '\\($1\\)');
     return converted;
 }
 
