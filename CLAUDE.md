@@ -12,15 +12,16 @@ Obsidian plugin that generates Anki flashcards from note content using LLMs (Ant
 npm install          # Install dependencies
 npm run dev          # esbuild watch mode (rebuilds on changes)
 npm run build        # TypeScript type-check + production bundle
-npm test             # Fixture tests (parser, chat, Anki comparison)
+npm test             # Fixture tests (parser, chat, apply, Anki comparison)
 npm run version      # Bump version in manifest.json & versions.json
 eslint ./src/        # Lint (requires global eslint: npm install -g eslint)
 ```
 
-`npm test` runs three standalone scripts under `scripts/`. They bundle the
+`npm test` runs four standalone scripts under `scripts/`. They bundle the
 relevant module with esbuild (stubbing `obsidian`, whose imports are types
 only) and run fixtures against it — no test framework needed. Run them after
-any change to the parser, the chat suggestion format, or the Anki comparison.
+any change to the parser, the chat suggestion format, the suggestion apply
+path, or the Anki comparison.
 
 Beyond that, testing is manual: `npm run build` writes `main.js` next to
 `manifest.json`, so if the repo lives inside a vault's plugin folder, just

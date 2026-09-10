@@ -243,6 +243,17 @@ export class ChatPanel extends Component {
 		const line = (text: string, cls: string) =>
 			diff.createSpan({ cls: `anki-diff-line ${cls}`, text });
 
+		// Nicht anwendbar: trotzdem zeigen. stripSuggestionBlocks entfernt den
+		// Block aus dem Fließtext, vorher war an dieser Stelle einfach nichts.
+		if (suggestion.kind === 'invalid') {
+			setIcon(titleIcon, 'alert-triangle');
+			title.createSpan({ text: 'Vorschlag nicht anwendbar' });
+			suggestion.raw.split('\n').forEach(l => line('  ' + l, 'is-meta'));
+			box.addClass('is-missing');
+			box.createDiv({ cls: 'anki-suggestion-note', text: suggestion.reason });
+			return;
+		}
+
 		if (suggestion.kind === 'edit') {
 			setIcon(titleIcon, 'pencil');
 			title.createSpan({ text: 'Textänderung' });
@@ -254,6 +265,7 @@ export class ChatPanel extends Component {
 				: suggestion.op === 'delete' ? 'Karte löschen' : 'Karte ändern';
 			title.createSpan({ text: opLabel });
 
+			if (suggestion.ref !== null) line(`CARD: ${suggestion.ref}`, 'is-meta');
 			if (suggestion.id !== null) line(`ID: ${suggestion.id}`, 'is-meta');
 			if (suggestion.op !== 'delete') {
 				suggestion.q.split('\n').forEach(l => line('Q: ' + l, 'is-add'));

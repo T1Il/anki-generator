@@ -95,8 +95,35 @@ console.log('\nVorschlags-Parser:');
 }
 
 {
-	const md = [F + 'anki-card', 'OP: update', 'Q: Ohne ID', F].join('\n');
-	check('update ohne ID wird verworfen', C.parseSuggestions(md).length === 0);
+	// Frisch generierte Karten haben keine ID - CARD: ist dann der Handle.
+	const md = [F + 'anki-card', 'OP: update', 'CARD: 3', 'Q: Neue Frage', F].join('\n');
+	const list = C.parseSuggestions(md);
+	check('update ueber CARD: ohne ID wird erkannt',
+		list.length === 1 && list[0].kind === 'card' && list[0].ref === 3 && list[0].id === null, list[0]);
+}
+
+{
+	const md = [F + 'anki-card', 'OP: delete', 'CARD: 2', F].join('\n');
+	const list = C.parseSuggestions(md);
+	check('delete ueber CARD: ohne ID wird erkannt',
+		list.length === 1 && list[0].op === 'delete' && list[0].ref === 2, list[0]);
+}
+
+{
+	const md = [F + 'anki-card', 'OP: update', 'KARTE: 4', 'Q: X', F].join('\n');
+	check('deutsche Schreibweise KARTE: zaehlt auch',
+		C.parseSuggestions(md)[0]?.ref === 4);
+}
+
+{
+	// Weder CARD: noch ID: - der Block darf NICHT stillschweigend verschwinden.
+	const md = [F + 'anki-card', 'OP: update', 'Q: Ohne Handle', F].join('\n');
+	const list = C.parseSuggestions(md);
+	check('update ohne Handle wird als invalid gemeldet',
+		list.length === 1 && list[0].kind === 'invalid', list);
+	check('invalid nennt einen Grund', !!(list[0] && list[0].reason), list[0]);
+	check('invalid behaelt den Rohinhalt',
+		!!(list[0] && list[0].raw.includes('Q: Ohne Handle')), list[0]);
 }
 
 {

@@ -17,12 +17,33 @@ export interface CardSuggestion {
 	kind: 'card';
 	op: 'add' | 'update' | 'delete';
 	id: number | null;
+	/**
+	 * Kartennummer aus der Prompt-Liste (1-basiert, über alle Blöcke der Notiz).
+	 * Frisch generierte Karten haben noch keine `ID:` - ohne diesen Handle waren
+	 * sie für `update` und `delete` unerreichbar.
+	 */
+	ref: number | null;
 	q: string;
 	a: string;
 	typeIn: boolean;
 }
 
-export type Suggestion = EditSuggestion | CardSuggestion;
+/**
+ * Ein Block, den die KI zwar als Vorschlag markiert hat, der sich aber nicht
+ * anwenden lässt. Wird bewusst mitgeliefert: vorher verschwand so ein Block
+ * spurlos, weil parseSuggestions ihn verwarf und stripSuggestionBlocks ihn
+ * trotzdem aus dem Fließtext entfernte.
+ */
+export interface InvalidSuggestion {
+	kind: 'invalid';
+	raw: string;
+	reason: string;
+}
+
+export type Suggestion = EditSuggestion | CardSuggestion | InvalidSuggestion;
+
+/** Ergebnis eines Blockparsers - bei Fehlschlag mit Begründung für die UI. */
+type ParseOutcome<T> = { ok: true; value: T } | { ok: false; reason: string };
 
 /**
  * Wird an Chat- und Feedback-Prompts angehängt. Bewusst deutsch, weil alle
@@ -54,15 +75,18 @@ Regeln für FIND:
 
 \`\`\`anki-card
 OP: update
-ID: 12345
+CARD: 3
 Q: Die neue Frage
 A: Die neue Antwort
 \`\`\`
 
 - \`OP:\` ist \`update\`, \`add\` oder \`delete\`.
-- \`ID:\` ist bei \`update\` und \`delete\` Pflicht und muss eine existierende
-  Karten-ID sein. Bei \`add\` weglassen.
-- Bei \`delete\` genügen \`OP:\` und \`ID:\`.
+- \`CARD:\` ist die Nummer aus der Kartenliste oben. Bei \`update\` und
+  \`delete\` Pflicht, bei \`add\` weglassen.
+- \`ID:\` darfst du zusätzlich angeben, wenn die Karte eine hat. Karten ohne
+  \`ID:\` sind nur noch nicht mit Anki synchronisiert - über \`CARD:\` kannst
+  du sie genauso ändern und löschen.
+- Bei \`delete\` genügen \`OP:\` und \`CARD:\`.
 - Für Lückentext schreibst du die Lücken mit \`{{c1::...}}\` in \`Q:\` und lässt
   \`A:\` weg. Für Type-In-Karten benutze \`A (type):\` statt \`A:\`.
 
@@ -74,7 +98,10 @@ Textsuche. Benutze \`anki-edit\` nur für den Fließtext der Notiz.
 const FENCE = /^[ \t]*`{3,}(anki-edit|anki-card)[ \t]*$/;
 const CLOSE_FENCE = /^[ \t]*`{3,}[ \t]*$/;
 
-/** Zerlegt eine KI-Antwort in Vorschläge. Unbekannte oder kaputte Blöcke werden übersprungen. */
+/**
+ * Zerlegt eine KI-Antwort in Vorschläge. Kaputte Blöcke werden als
+ * 'invalid' mitgeliefert, damit sie in der UI sichtbar bleiben.
+ */
 export function parseSuggestions(markdown: string): Suggestion[] {
 	const out: Suggestion[] = [];
 	const lines = markdown.replace(/\r\n/g, '\n').split('\n');
@@ -96,14 +123,19 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 		}
 		i++; // schließende Fence überspringen
 
-		const parsed = kind === 'anki-edit' ? parseEditBlock(body) : parseCardBlock(body);
-		if (parsed) out.push(parsed);
+		const parsed: ParseOutcome<Suggestion> = kind === 'anki-edit'
+			? parseEditBlock(body)
+			: parseCardBlock(body);
+
+		out.push(parsed.ok
+			? parsed.value
+			: { kind: 'invalid', raw: body.join('\n').trim(), reason: parsed.reason });
 	}
 
 	return out;
 }
 
-function parseEditBlock(body: string[]): EditSuggestion | null {
+function parseEditBlock(body: string[]): ParseOutcome<EditSuggestion> {
 	const findIdx = body.findIndex((l) => l.trim() === 'FIND:');
 	const replaceIdx = body.findIndex((l) => l.trim() === 'REPLACE:');
 
@@ -111,22 +143,25 @@ function parseEditBlock(body: string[]): EditSuggestion | null {
 	if (findIdx === -1 || replaceIdx === -1 || replaceIdx < findIdx) {
 		const findLine = body.find((l) => l.trim().startsWith('FIND:'));
 		const replaceLine = body.find((l) => l.trim().startsWith('REPLACE:'));
-		if (!findLine || !replaceLine) return null;
+		if (!findLine || !replaceLine) {
+			return { ok: false, reason: 'Der Block braucht eine FIND:- und eine REPLACE:-Zeile.' };
+		}
 		const find = findLine.trim().substring(5).trim();
 		const replace = replaceLine.trim().substring(8).trim();
-		if (!find) return null;
-		return { kind: 'edit', find, replace };
+		if (!find) return { ok: false, reason: 'FIND: ist leer.' };
+		return { ok: true, value: { kind: 'edit', find, replace } };
 	}
 
 	const find = body.slice(findIdx + 1, replaceIdx).join('\n').trim();
 	const replace = body.slice(replaceIdx + 1).join('\n').trim();
-	if (!find) return null;
-	return { kind: 'edit', find, replace };
+	if (!find) return { ok: false, reason: 'FIND: ist leer.' };
+	return { ok: true, value: { kind: 'edit', find, replace } };
 }
 
-function parseCardBlock(body: string[]): CardSuggestion | null {
+function parseCardBlock(body: string[]): ParseOutcome<CardSuggestion> {
 	let op: 'add' | 'update' | 'delete' | null = null;
 	let id: number | null = null;
+	let ref: number | null = null;
 	let q = '';
 	let a = '';
 	let typeIn = false;
@@ -147,6 +182,15 @@ function parseCardBlock(body: string[]): CardSuggestion | null {
 		const idMatch = trimmed.match(/^ID:\s*(\d+)\s*$/);
 		if (idMatch) {
 			id = parseInt(idMatch[1], 10);
+			current = null;
+			continue;
+		}
+
+		// "CARD: 3" - die Nummer aus der Kartenliste im Prompt. Auch "KARTE:",
+		// weil der Rest der Anweisungen deutsch ist und Modelle das mischen.
+		const refMatch = trimmed.match(/^(?:CARD|KARTE):\s*(\d+)\s*$/i);
+		if (refMatch) {
+			ref = parseInt(refMatch[1], 10);
 			current = null;
 			continue;
 		}
@@ -174,11 +218,17 @@ function parseCardBlock(body: string[]): CardSuggestion | null {
 		else if (current === 'a') a += '\n' + line;
 	}
 
-	if (!op) return null;
-	if ((op === 'update' || op === 'delete') && id === null) return null;
-	if (op !== 'delete' && !q.trim()) return null;
+	if (!op) {
+		return { ok: false, reason: 'Kein OP: add, update oder delete im Block.' };
+	}
+	if ((op === 'update' || op === 'delete') && id === null && ref === null) {
+		return { ok: false, reason: `OP: ${op} braucht eine CARD:- oder ID:-Zeile.` };
+	}
+	if (op !== 'delete' && !q.trim()) {
+		return { ok: false, reason: 'Kein Q: im Block.' };
+	}
 
-	return { kind: 'card', op, id, q: q.trim(), a: a.trim(), typeIn };
+	return { ok: true, value: { kind: 'card', op, id, ref, q: q.trim(), a: a.trim(), typeIn } };
 }
 
 /** Entfernt die Vorschlagsblöcke, damit der Fließtext separat gerendert werden kann. */

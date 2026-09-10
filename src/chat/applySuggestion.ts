@@ -73,32 +73,14 @@ export async function applyCardSuggestion(
 		const blocks = getAnkiBlocks(content);
 		if (blocks.length === 0) return content;
 
-		// Den Block nehmen, der die Karte enthält; sonst den letzten.
-		let target = blocks[blocks.length - 1];
-		if (suggestion.id !== null) {
-			const owner = blocks.find(b =>
-				parseCardsFromBlockSource(b.innerClean).some(c => c.id === suggestion.id));
-			if (owner) {
-				target = owner;
-			} else if (suggestion.op !== 'add') {
-				result = { ok: false, message: `Karte mit ID ${suggestion.id} nicht gefunden.` };
-				return content;
-			}
-		}
-
-		const cards = parseCardsFromBlockSource(target.innerClean);
-		const header = parseBlockHeader(target.innerClean);
-
-		if (suggestion.op === 'delete') {
-			const before = cards.length;
-			const kept = cards.filter(c => c.id !== suggestion.id);
-			if (kept.length === before) {
-				result = { ok: false, message: `Karte mit ID ${suggestion.id} nicht gefunden.` };
-				return content;
-			}
-			result = { ok: true, message: 'Karte gelöscht.' };
-			return writeBack(content, target, header, kept);
-		}
+		// Gleiche Reihenfolge wie im Prompt: alle Blöcke, alle Karten. Die
+		// CARD-Nummer aus dem Vorschlag zählt 1-basiert über diese Liste.
+		const parsed = blocks.map(b => ({
+			block: b,
+			cards: parseCardsFromBlockSource(b.innerClean)
+		}));
+		const flat: { bi: number; ci: number }[] = [];
+		parsed.forEach((p, bi) => p.cards.forEach((_, ci) => flat.push({ bi, ci })));
 
 		const newCard: Card = {
 			type: /\{\{c\d+::/.test(suggestion.q) ? 'Cloze' : 'Basic',
@@ -109,28 +91,67 @@ export async function applyCardSuggestion(
 		};
 
 		if (suggestion.op === 'add') {
-			cards.push(newCard);
+			// In den Block, auf den sich CARD: bezieht; sonst in den letzten.
+			const pos = suggestion.ref !== null ? flat[suggestion.ref - 1] : undefined;
+			const bi = pos ? pos.bi : parsed.length - 1;
+			parsed[bi].cards.push(newCard);
 			result = { ok: true, message: 'Karte hinzugefügt.' };
-			return writeBack(content, target, header, cards);
+			return writeBack(content, parsed[bi].block,
+				parseBlockHeader(parsed[bi].block.innerClean), parsed[bi].cards);
 		}
 
-		// update
-		const index = cards.findIndex(c => c.id === suggestion.id);
-		if (index === -1) {
-			result = { ok: false, message: `Karte mit ID ${suggestion.id} nicht gefunden.` };
+		// update/delete: erst über die Anki-ID, dann über die CARD-Nummer.
+		// Der ID-Weg bleibt vorn, weil er auch nach Umsortieren noch stimmt.
+		let hit: { bi: number; ci: number } | null = null;
+
+		if (suggestion.id !== null) {
+			for (let bi = 0; bi < parsed.length && !hit; bi++) {
+				const ci = parsed[bi].cards.findIndex(c => c.id === suggestion.id);
+				if (ci >= 0) hit = { bi, ci };
+			}
+		}
+
+		if (!hit && suggestion.ref !== null) {
+			const pos = flat[suggestion.ref - 1];
+			if (!pos) {
+				result = {
+					ok: false,
+					message: `CARD: ${suggestion.ref} gibt es nicht — die Notiz hat ${flat.length} Karten.`
+				};
+				return content;
+			}
+			hit = pos;
+		}
+
+		if (!hit) {
+			result = {
+				ok: false,
+				message: suggestion.id !== null
+					? `Karte mit ID ${suggestion.id} nicht gefunden.`
+					: 'Der Vorschlag nennt weder CARD: noch ID:.'
+			};
 			return content;
 		}
 
+		const { block, cards } = parsed[hit.bi];
+		const header = parseBlockHeader(block.innerClean);
+
+		if (suggestion.op === 'delete') {
+			cards.splice(hit.ci, 1);
+			result = { ok: true, message: 'Karte gelöscht.' };
+			return writeBack(content, block, header, cards);
+		}
+
 		// typeIn nur überschreiben, wenn der Vorschlag es explizit setzt.
-		cards[index] = {
-			...cards[index],
+		cards[hit.ci] = {
+			...cards[hit.ci],
 			q: newCard.q,
 			a: newCard.a,
 			type: newCard.type,
-			typeIn: suggestion.typeIn || cards[index].typeIn
+			typeIn: suggestion.typeIn || cards[hit.ci].typeIn
 		};
 		result = { ok: true, message: 'Karte aktualisiert.' };
-		return writeBack(content, target, header, cards);
+		return writeBack(content, block, header, cards);
 	});
 
 	return result;
@@ -152,6 +173,12 @@ export async function applySuggestion(
 	sourcePath: string | undefined,
 	suggestion: Suggestion
 ): Promise<ApplyResult> {
+	if (suggestion.kind === 'invalid') {
+		const result = { ok: false, message: suggestion.reason };
+		new Notice(result.message, 6000);
+		return result;
+	}
+
 	const result = suggestion.kind === 'edit'
 		? await applyEditSuggestion(app, sourcePath, suggestion)
 		: await applyCardSuggestion(app, sourcePath, suggestion);

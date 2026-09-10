@@ -180,7 +180,7 @@ ${noteContent}
 	if (existingCards && existingCards.trim() && existingCards.trim() !== 'Keine.') {
 		system += `
 
-Diese Anki-Karten existieren bereits zu dieser Notiz:
+Diese Anki-Karten existieren bereits zu dieser Notiz. Die Zeile "CARD: n" davor ist die Nummer, ueber die du dich auf eine Karte beziehst:
 """
 ${existingCards}
 """`;

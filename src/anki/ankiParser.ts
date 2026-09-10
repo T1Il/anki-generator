@@ -308,12 +308,21 @@ function formatSingleCard(card: Card): string[] {
 	return lines;
 }
 
+/**
+ * Kartenliste fuer Prompts. Jede Karte bekommt ein `CARD: n` vorangestellt,
+ * damit die KI sich auch auf noch nicht synchronisierte Karten beziehen kann -
+ * die haben keine `ID:` und waren fuer update/delete sonst unerreichbar.
+ *
+ * Bewusst NICHT in formatSingleCard: was in die Datei geschrieben wird, baut
+ * formatCardsToString, und dort hat `CARD:` nichts zu suchen.
+ */
 export function formatCardsToExistingCardsString(cards: Card[]): string {
 	if (!cards || cards.length === 0) {
 		return 'Keine.';
 	}
 	const allLines: string[] = [];
 	cards.forEach((card, index) => {
+		allLines.push(`CARD: ${index + 1}`);
 		allLines.push(...formatSingleCard(card));
 		if (index < cards.length - 1) allLines.push('');
 	});
