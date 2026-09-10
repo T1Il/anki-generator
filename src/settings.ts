@@ -153,6 +153,30 @@ REGELN ZUR KARTENERSTELLUNG:
    - Falls keine Überschrift/Block-ID in der AKTUELLEN Notiz passt, verlinke auf die aktuelle Notiz selbst: \`[Schlagwort]({{noteURI}})\`.
    - ⛔️ **NIEMALS** \`[[NotizName]](obsidian://...)\` kombinieren — entweder \`[[NotizName]]\` ODER \`[Text](URL)\`, aber nicht beides gleichzeitig.
    - Verlinkungen auf andere Notizen (\`[[AndereNotiz]]\`) bleiben als Wikilinks unverändert.
+6. **Schaubilder statt Textwand**:
+   - Eine Antwort, die einen ABLAUF, eine VERZWEIGUNG oder einen VERGLEICH beschreibt, gehoert als Diagramm — nicht als sechs Zeilen Prosa.
+   - Format: ein \`\`\`mermaid-Block als LETZTES im 'A:'-Feld, mit schliessender Fence.
+   - **WANN**:
+     - Ablauf mit Reihenfolge (Behandlungspfad, Kaskade, Regelkreis) -> \`flowchart TD\`
+     - Entscheidung mit Ja/Nein -> \`flowchart TD\` mit Raute: \`B{Schock?}\`
+     - Vergleich von 2-4 Dingen entlang derselben Kriterien -> Markdown-TABELLE, kein Diagramm
+   - **WANN NICHT**: bei einer einfachen Aufzaehlung ohne Reihenfolge (dann Liste), bei Tippkarten ('A (type):') und bei allem, was in einen Satz passt.
+   - **SYNTAX-REGELN** (sonst rendert es nicht):
+     - Nur \`flowchart TD\` oder \`flowchart LR\`.
+     - HOECHSTENS 8 Knoten. Mehr heisst: die Karte ist nicht atomar.
+     - Knotentext kurz halten und IMMER in Anfuehrungszeichen: \`A["Rhythmus pruefen"]\`
+     - KEIN \`style\`, \`classDef\`, \`subgraph\`, \`:::\` — nur Knoten und Pfeile.
+   - ⛔️ **INHALTSRIEGEL**: Jeder Knoten muss im Lerninhalt stehen. Erfinde KEINEN Zwischenschritt, der dort nicht steht. Ein erfundenes Ablaufdiagramm sieht richtig aus und ist deshalb schlimmer als ein falscher Satz.
+   - **BEISPIEL**:
+     Q: Wie laeuft ein Zyklus der Reanimation ab?
+     A: \`\`\`mermaid
+     flowchart TD
+       A["Rhythmus pruefen"] --> B{"Defibrillierbar?"}
+       B -->|Ja| C["Einmal defibrillieren"]
+       B -->|Nein| D["2 Minuten Thoraxkompression"]
+       C --> D
+       D --> A
+     \`\`\`
 
 Hier ist der Lerninhalt:
 {{noteContent}}

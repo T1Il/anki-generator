@@ -183,10 +183,33 @@ export function spliceBlock(content: string, block: AnkiBlock, newFullBlock: str
 }
 
 /** Baut die vollständige Blockquelle (inkl. Fences und Prefix) neu auf. */
+/**
+ * Die aeussere Fence muss laenger sein als jede Fence im Inhalt.
+ *
+ * Ein Schaubild in einer Antwort steht als ```mermaid-Block da — und dessen
+ * schliessende ``` haette den anki-cards-Block beendet, mitten in der Karte.
+ * Genau deshalb trug der Mermaid-Renderer bisher einen Sonderfall fuer
+ * Bloecke ohne schliessende Fence.
+ *
+ * Mit vier Backticks aussen schliesst die innere Fence nur sich selbst.
+ * getAnkiBlocks() akzeptiert das seit jeher (`{3,}`), Obsidian auch.
+ */
+function aeussereFence(inner: string, vorhanden: string): string {
+	let laengste = 0;
+	for (const zeile of inner.split('\n')) {
+		const ohnePrefix = zeile.replace(/^[ \t>]+/, '');
+		let n = 0;
+		while (ohnePrefix[n] === '`') n++;
+		if (n >= 3 && n > laengste) laengste = n;
+	}
+	return laengste >= vorhanden.length ? '`'.repeat(laengste + 1) : vorhanden;
+}
+
 export function buildFullBlock(block: AnkiBlock, newInner: string): string {
-	const lines = [block.fence + 'anki-cards']
+	const fence = aeussereFence(newInner, block.fence);
+	const lines = [fence + 'anki-cards']
 		.concat(newInner.split('\n'))
-		.concat([block.fence]);
+		.concat([fence]);
 	return lines.map(l => (block.prefix ? block.prefix + l : l)).join('\n');
 }
 
