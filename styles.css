@@ -864,3 +864,93 @@
 	justify-content: flex-end;
 	gap: 8px;
 }
+
+/* --- Schema-Tabellen ---------------------------------------------------- */
+
+.schema-modal {
+	max-width: 720px;
+}
+
+.schema-warnung {
+	margin-bottom: 12px;
+	padding: 8px 10px;
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-error-hover);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+}
+
+.schema-setting-breit {
+	border-bottom: none;
+	padding-bottom: 4px;
+}
+
+textarea.schema-zeilen {
+	width: 100%;
+	min-height: 140px;
+	margin-bottom: 12px;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+	resize: vertical;
+}
+
+.schema-vorschau-titel {
+	margin: 16px 0 8px;
+	font-size: var(--font-ui-medium);
+}
+
+.schema-vorschau {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	padding: 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background-color: var(--background-secondary);
+}
+
+.schema-vorschau-leer {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.schema-vorschau-kachel {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+}
+
+canvas.schema-vorschau-bild {
+	width: 56px;
+	height: 56px;
+	border-radius: var(--radius-s);
+	/* Die Kacheln bringen ihre Farbe selbst mit; der Rahmen haelt sie im
+	   hellen Theme voneinander getrennt. */
+	border: 1px solid var(--background-modifier-border);
+}
+
+.schema-vorschau-name,
+.schema-vorschau-hex {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+}
+
+.schema-aktionen {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-top: 16px;
+}
+
+.schema-ordner-anzeige {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+}

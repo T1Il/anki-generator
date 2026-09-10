@@ -1,13 +1,13 @@
 {
 	"name": "t1il-anki-creator",
-	"version": "1.13.0",
+	"version": "1.14.0",
 	"description": "This obsidian automatically generates anki cards using Google Gemini",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
-		"test": "node scripts/parser-check.mjs && node scripts/chat-check.mjs && node scripts/apply-check.mjs && node scripts/drift-check.mjs && node scripts/latex-check.mjs && node scripts/mermaid-check.mjs"
+		"test": "node scripts/parser-check.mjs && node scripts/chat-check.mjs && node scripts/apply-check.mjs && node scripts/drift-check.mjs && node scripts/latex-check.mjs && node scripts/mermaid-check.mjs && node scripts/schema-check.mjs"
 	},
 	"keywords": [],
 	"author": "",

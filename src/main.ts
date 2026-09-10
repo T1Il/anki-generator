@@ -19,6 +19,11 @@ import { FileSuggestModal } from './ui/FileSuggestModal';
 import { loadHistory, saveHistory } from './chat/chatHistory';
 import { checkDrift } from './anki/driftCheck';
 import { DriftReviewModal } from './ui/DriftReviewModal';
+import {
+	schemaNotizErstellen,
+	schemaTabelleAktualisieren,
+	schemaTabelleEinfuegen
+} from './schema/schemaBefehle';
 
 export default class AnkiGeneratorPlugin extends Plugin {
 	settings: AnkiGeneratorSettings;
@@ -291,6 +296,30 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				removeAllBlockIds(editor);
 				new Notice("All block IDs removed.");
+			}
+		});
+
+		this.addCommand({
+			id: 'insert-schema-note',
+			name: 'Schema-Notiz erstellen (Callout, Tabelle, Anki-Block)',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				schemaNotizErstellen(this, editor, view);
+			}
+		});
+
+		this.addCommand({
+			id: 'insert-schema-table',
+			name: 'Schema-Tabelle einfügen',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				schemaTabelleEinfuegen(this, editor, view);
+			}
+		});
+
+		this.addCommand({
+			id: 'refresh-schema-table',
+			name: 'Schema-Tabelle neu einfärben',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				schemaTabelleAktualisieren(this, editor, view);
 			}
 		});
 
