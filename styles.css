@@ -783,3 +783,84 @@
 	text-transform: none;
 	letter-spacing: 0;
 }
+
+/* --- Sync-Review (Vault-weiter Sync) --- */
+.anki-sync-summary {
+	font-weight: var(--font-semibold);
+	margin-bottom: 8px;
+}
+
+.anki-sync-decks {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	margin-bottom: 12px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.anki-sync-deck-count {
+	display: inline-block;
+	min-width: 2em;
+	text-align: right;
+	margin-right: 6px;
+	color: var(--text-normal);
+	font-variant-numeric: tabular-nums;
+}
+
+.anki-sync-list {
+	max-height: 300px;
+	overflow-y: auto;
+	margin: 0 0 16px;
+	padding: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+
+.anki-sync-list-muted {
+	opacity: 0.7;
+}
+
+.anki-sync-list-item {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 5px 4px;
+	border-bottom: 1px solid var(--background-modifier-border-hover);
+	cursor: pointer;
+}
+
+.anki-sync-list-item:last-child {
+	border-bottom: none;
+}
+
+.anki-sync-list-item:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.anki-sync-blockno,
+.anki-sync-details {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+}
+
+.anki-sync-blocked-heading {
+	margin: 0 0 8px;
+	font-size: var(--font-ui-small);
+	color: var(--text-warning);
+}
+
+.anki-sync-warning {
+	margin-bottom: 8px;
+	padding: 8px 10px;
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-error-hover);
+	color: var(--text-normal);
+}
+
+.anki-sync-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}

@@ -41,8 +41,12 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         }
         if (!vaultName) vaultName = "Obsidian";
 
-        console.log(`[SyncManager] Starting optimized sync for ${cards.length} cards.`);
-        notice.setMessage(`Vorbereiten von ${cards.length} Karten...`);
+        // cards.length ist die GESAMTE Blockgroesse. Ohne die Auswahl daneben las
+        // sich "sync for 48 cards" wie 48 neue Karten, obwohl 43 davon nur
+        // aktualisiert wurden.
+        const selectedCount = targetSet ? targetSet.size : cards.length;
+        console.log(`[SyncManager] Starting optimized sync for ${selectedCount} of ${cards.length} cards.`);
+        notice.setMessage(`Vorbereiten von ${selectedCount} Karten...`);
 
         const updatedCardsWithIds: Card[] = [...cards]; // Copy to mutate
         const imageRegex = /!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]|!\[[^\]]*\]\(([^)]+)\)/g;
@@ -336,9 +340,32 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                 newIds = await import('./AnkiConnect').then(m => m.addAnkiNotes(notesPayload));
             } catch (e) {
                 console.warn("addAnkiNotes batch failed, potentially due to duplicates. Falling back to individual checks.", e);
-                // If the batch failed completely (e.g. strict duplicate handling), we pretend we got all nulls
-                // so the fallback logic below kicks in for EACH card.
+                // addNotes weist den GANZEN Batch ab, sobald eine einzige Notiz ein
+                // Duplikat ist. Frueher landeten dadurch alle Karten im Einzel-Fallback
+                // unten - bei grossen Bloecken hunderte Extra-Requests.
+                // Also erst fragen, welche Notizen anlegbar sind, und nur die erneut
+                // als Batch schicken. Der Rest geht gezielt in die Recovery.
                 newIds = new Array(cardsToAdd.length).fill(null);
+                try {
+                    const AnkiConnect = await import('./AnkiConnect');
+                    const addable = await AnkiConnect.canAddAnkiNotes(notesPayload);
+                    const retryIdx = addable
+                        .map((ok, i) => (ok ? i : -1))
+                        .filter(i => i >= 0);
+                    console.log(`[SyncManager] canAddNotes: ${retryIdx.length}/${notesPayload.length} anlegbar, ${notesPayload.length - retryIdx.length} Duplikat(e).`);
+                    if (retryIdx.length > 0) {
+                        const retryIds = await AnkiConnect.addAnkiNotes(retryIdx.map(i => notesPayload[i]));
+                        retryIdx.forEach((origIdx, k) => {
+                            newIds[origIdx] = retryIds?.[k] ?? null;
+                        });
+                    }
+                } catch (e2) {
+                    // Auch der zweite Versuch ist gescheitert (z. B. zwei identische
+                    // Karten im selben Block). Alles auf null lassen, dann greift der
+                    // bestehende Einzel-Fallback unten wie bisher.
+                    console.warn("[SyncManager] canAddNotes-Retry fehlgeschlagen, nutze Einzel-Fallback.", e2);
+                    newIds = new Array(cardsToAdd.length).fill(null);
+                }
             }
 
             // Process results

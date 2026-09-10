@@ -455,6 +455,19 @@ export async function addAnkiNotes(notes: any[]): Promise<(number | null)[]> {
 	return ankiConnectRequest('addNotes', { notes });
 }
 
+/**
+ * Fragt fuer jede Notiz einzeln, ob Anki sie anlegen wuerde.
+ *
+ * Noetig, weil `addNotes` den GANZEN Batch abweist, sobald eine einzige Notiz
+ * ein Duplikat ist - die uebrigen wuerden sonst faelschlich als "nicht
+ * anlegbar" behandelt.
+ */
+export async function canAddAnkiNotes(notes: any[]): Promise<boolean[]> {
+	if (notes.length === 0) return [];
+	const result = await ankiConnectRequest('canAddNotes', { notes });
+	return Array.isArray(result) ? result.map(Boolean) : notes.map(() => false);
+}
+
 export async function storeAnkiMediaFiles(files: { filename: string, data: string }[]): Promise<string[]> {
 	// Parallelize uploads with a concurrency limit to avoid overwhelming Anki
 	const CONCURRENCY_LIMIT = 5;

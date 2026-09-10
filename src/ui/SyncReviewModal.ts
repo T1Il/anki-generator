@@ -1,20 +1,33 @@
-import { App, Modal, Setting, TFile, Notice } from 'obsidian';
+import { App, Modal, TFile, Notice } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
-import { parseAnkiSection } from '../anki/ankiParser';
+import { getAnkiBlocks, parseBlockHeader, parseCardsFromBlockSource } from '../anki/ankiParser';
 import { syncAnkiBlock } from '../anki/syncManager';
-import { parseCardsFromBlockSource } from '../anki/ankiParser';
+import { t } from '../lang/helpers';
 
-interface UnsyncedFile {
+/** Ab dieser Kartenzahl verlangt "Alle synchronisieren" einen zweiten Klick. */
+const CONFIRM_THRESHOLD = 25;
+
+interface UnsyncedBlock {
     file: TFile;
-    deckName: string;
-    unsyncedCount: number;
-    blockSource: string;
+    /** 1-basiert, wird nur angezeigt wenn eine Datei mehrere Blöcke hat. */
+    blockNo: number;
+    blockCount: number;
+    deckName: string | null;
+    /** Normalisierter Blockinhalt — darüber findet syncAnkiBlock den Block wieder. */
+    source: string;
+    /** Indizes der Karten ohne ID, bezogen auf den geparsten Block. */
+    unsyncedIndices: number[];
 }
 
 export class SyncReviewModal extends Modal {
     plugin: AnkiGeneratorPlugin;
-    unsyncedFiles: UnsyncedFile[] = [];
-    isScanning: boolean = true;
+    /** Blöcke mit TARGET DECK — nur die lassen sich synchronisieren. */
+    blocks: UnsyncedBlock[] = [];
+    /** Blöcke ohne TARGET DECK. Die liefen früher erst beim Sync in einen Fehler. */
+    blocked: UnsyncedBlock[] = [];
+    isScanning = true;
+    /** Der Bestätigungsklick steht noch aus. */
+    armed = false;
 
     constructor(app: App, plugin: AnkiGeneratorPlugin) {
         super(app);
@@ -26,110 +39,43 @@ export class SyncReviewModal extends Modal {
         await this.scanVault();
     }
 
-    render() {
-        const { contentEl } = this;
-        contentEl.empty();
-        contentEl.createEl("h2", { text: "Nicht synchronisierte Anki-Karten" });
-
-        if (this.isScanning) {
-            contentEl.createDiv({ text: "Scanne Vault...", cls: "anki-sync-scanning" });
-            return;
-        }
-
-        if (this.unsyncedFiles.length === 0) {
-            contentEl.createDiv({ text: "Alle Anki-Karten sind synchronisiert! 🎉" });
-            return;
-        }
-
-        contentEl.createDiv({ text: `Gefunden: ${this.unsyncedFiles.length} Dateien mit unsynchronisierten Karten.` });
-
-        const listContainer = contentEl.createDiv({ cls: 'anki-sync-list-container' });
-        listContainer.style.maxHeight = '300px';
-        listContainer.style.overflowY = 'auto';
-        listContainer.style.margin = '20px 0';
-        listContainer.style.border = '1px solid var(--background-modifier-border)';
-        listContainer.style.padding = '10px';
-
-        this.unsyncedFiles.forEach(item => {
-            const row = listContainer.createDiv({ cls: 'anki-sync-list-item' });
-            row.style.display = 'flex';
-            row.style.justifyContent = 'space-between';
-            row.style.padding = '5px 0';
-            row.style.borderBottom = '1px solid var(--background-modifier-border-hover)';
-            row.style.cursor = 'pointer'; // Make it look clickable
-
-            // Hover effect
-            row.addEventListener('mouseenter', () => {
-                row.style.backgroundColor = 'var(--background-modifier-hover)';
-            });
-            row.addEventListener('mouseleave', () => {
-                row.style.backgroundColor = 'transparent';
-            });
-
-            // Click handler to open file
-            row.onclick = async () => {
-                const leaf = this.app.workspace.getLeaf(false);
-                await leaf.openFile(item.file);
-                this.close(); // Optional: close modal after clicking? User might want to keep it open. Let's keep it open for now or close? 
-                // User request: "bei der Übersicht der nicht-synchronisierten Karten die Aufschriebe anklickbar machen"
-                // Usually navigation closes modals, but let's see. 
-                // If I open in background, modal stays. If I open in active leaf, modal might obscure it.
-                // Let's close it to be safe and standard behavior.
-                this.close();
-            };
-
-            row.createSpan({ text: item.file.basename, cls: 'anki-sync-filename' });
-            row.createSpan({ text: `${item.unsyncedCount} Karten (${item.deckName})`, cls: 'anki-sync-details' });
-        });
-
-        const btnContainer = contentEl.createDiv({ cls: 'anki-sync-actions' });
-        btnContainer.style.display = 'flex';
-        btnContainer.style.justifyContent = 'flex-end';
-        btnContainer.style.marginTop = '20px';
-
-        const syncAllBtn = btnContainer.createEl('button', { text: '🔄 Alle synchronisieren', cls: 'mod-cta' });
-        syncAllBtn.onclick = async () => {
-            await this.syncAll();
-        };
+    private get totalCards(): number {
+        return this.blocks.reduce((n, b) => n + b.unsyncedIndices.length, 0);
     }
 
     async scanVault() {
-        this.unsyncedFiles = [];
-        const files = this.app.vault.getMarkdownFiles();
+        this.blocks = [];
+        this.blocked = [];
 
-        for (const file of files) {
+        for (const file of this.app.vault.getMarkdownFiles()) {
             try {
-                const content = await this.app.vault.read(file);
-                // Wir nutzen hier eine vereinfachte Suche, da parseAnkiSection nur den letzten Block findet.
-                // Für Global Sync sollten wir idealerweise alle Blöcke finden, aber vorerst bleiben wir beim letzten Block Logik oder erweitern es.
-                // Um konsistent mit dem Rest zu bleiben, nutzen wir parseAnkiSection, was derzeit nur EINEN Block pro Datei unterstützt.
+                // cachedRead: hier wird nur gelesen, geschrieben erst beim Sync.
+                const content = await this.app.vault.cachedRead(file);
 
-                // Wir müssen den Editor nicht haben, also simulieren wir oder nutzen direkt Regex auf Content.
-                // Da parseAnkiSection Editor braucht, nutzen wir hier eigene Logik basierend auf ankiParser helpers.
+                // Blocksuche ausschließlich über getAnkiBlocks. Hier stand früher
+                // eine eigene Regex, die Callouts, CRLF und verschachtelte Fences
+                // übersehen hat — und nur den letzten Block pro Datei ansah.
+                const found = getAnkiBlocks(content);
 
-                const ankiBlockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
-                const matches = [...content.matchAll(ankiBlockRegex)];
+                found.forEach((block, i) => {
+                    const cards = parseCardsFromBlockSource(block.innerClean);
+                    const unsyncedIndices = cards
+                        .map((c, idx) => (!c.id && c.q && c.q.trim() ? idx : -1))
+                        .filter(idx => idx >= 0);
 
-                if (matches.length > 0) {
-                    // Nimm den letzten Block wie im Rest des Plugins
-                    const lastMatch = matches[matches.length - 1];
-                    const blockSource = lastMatch[1];
-                    const cards = parseCardsFromBlockSource(blockSource);
+                    if (unsyncedIndices.length === 0) return;
 
-                    const unsyncedCards = cards.filter(c => !c.id);
+                    const entry: UnsyncedBlock = {
+                        file,
+                        blockNo: i + 1,
+                        blockCount: found.length,
+                        deckName: parseBlockHeader(block.innerClean).deckName,
+                        source: block.innerClean,
+                        unsyncedIndices
+                    };
 
-                    if (unsyncedCards.length > 0) {
-                        const deckLine = blockSource.split('\n').find(l => l.trim().startsWith('TARGET DECK:'));
-                        const deckName = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : "Unbekannt";
-
-                        this.unsyncedFiles.push({
-                            file,
-                            deckName,
-                            unsyncedCount: unsyncedCards.length,
-                            blockSource: lastMatch[0] // Der ganze Block inkl. Backticks für syncAnkiBlock
-                        });
-                    }
-                }
+                    (entry.deckName ? this.blocks : this.blocked).push(entry);
+                });
             } catch (e) {
                 console.error(`Fehler beim Scannen von ${file.path}:`, e);
             }
@@ -139,63 +85,192 @@ export class SyncReviewModal extends Modal {
         this.render();
     }
 
+    render() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl('h2', { text: t('syncReview.title') });
+
+        if (this.isScanning) {
+            contentEl.createDiv({ text: t('syncReview.scanning'), cls: 'anki-sync-scanning' });
+            return;
+        }
+
+        if (this.blocks.length === 0 && this.blocked.length === 0) {
+            contentEl.createDiv({ text: t('syncReview.allSynced') });
+            return;
+        }
+
+        const fileCount = new Set(this.blocks.map(b => b.file.path)).size;
+        contentEl.createDiv({
+            cls: 'anki-sync-summary',
+            text: t('syncReview.summary', {
+                cards: this.totalCards,
+                blocks: this.blocks.length,
+                files: fileCount
+            })
+        });
+
+        this.renderDeckBreakdown(contentEl);
+        this.renderList(contentEl, this.blocks);
+
+        if (this.blocked.length > 0) {
+            contentEl.createEl('h3', {
+                cls: 'anki-sync-blocked-heading',
+                text: t('syncReview.noDeck', { count: this.blocked.length })
+            });
+            this.renderList(contentEl, this.blocked, true);
+        }
+
+        this.renderActions(contentEl);
+    }
+
+    /** Wohin die Karten gehen — bei einem Vault-weiten Sync die wichtigste Info. */
+    private renderDeckBreakdown(parent: HTMLElement) {
+        if (this.blocks.length === 0) return;
+
+        const perDeck = new Map<string, number>();
+        for (const b of this.blocks) {
+            const deck = b.deckName as string;
+            perDeck.set(deck, (perDeck.get(deck) || 0) + b.unsyncedIndices.length);
+        }
+
+        const list = parent.createDiv({ cls: 'anki-sync-decks' });
+        [...perDeck.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([deck, count]) => {
+                const row = list.createDiv({ cls: 'anki-sync-deck-row' });
+                row.createSpan({ cls: 'anki-sync-deck-count', text: String(count) });
+                row.createSpan({ cls: 'anki-sync-deck-name', text: deck });
+            });
+    }
+
+    private renderList(parent: HTMLElement, items: UnsyncedBlock[], muted = false) {
+        const container = parent.createDiv({
+            cls: muted ? 'anki-sync-list anki-sync-list-muted' : 'anki-sync-list'
+        });
+
+        items.forEach(item => {
+            const row = container.createDiv({ cls: 'anki-sync-list-item' });
+            row.onclick = async () => {
+                await this.app.workspace.getLeaf(false).openFile(item.file);
+                this.close();
+            };
+
+            const name = row.createSpan({ cls: 'anki-sync-filename', text: item.file.basename });
+            if (item.blockCount > 1) {
+                name.createSpan({
+                    cls: 'anki-sync-blockno',
+                    text: ' ' + t('syncReview.blockLabel', { n: item.blockNo, total: item.blockCount })
+                });
+            }
+
+            row.createSpan({
+                cls: 'anki-sync-details',
+                text: item.deckName
+                    ? t('syncReview.cardsInDeck', { count: item.unsyncedIndices.length, deck: item.deckName })
+                    : String(item.unsyncedIndices.length)
+            });
+        });
+    }
+
+    private renderActions(parent: HTMLElement) {
+        const total = this.totalCards;
+        if (total === 0) return;
+
+        if (this.armed) {
+            parent.createDiv({
+                cls: 'anki-sync-warning',
+                text: t('syncReview.confirmWarn', { count: total })
+            });
+        }
+
+        const actions = parent.createDiv({ cls: 'anki-sync-actions' });
+
+        if (this.armed) {
+            const cancel = actions.createEl('button', { text: t('syncReview.cancel') });
+            cancel.onclick = () => {
+                this.armed = false;
+                this.render();
+            };
+
+            const confirm = actions.createEl('button', {
+                cls: 'mod-warning',
+                text: t('syncReview.confirmBtn', { count: total })
+            });
+            confirm.onclick = () => this.syncAll();
+            return;
+        }
+
+        const syncBtn = actions.createEl('button', {
+            cls: 'mod-cta',
+            text: t('syncReview.syncAll', { count: total })
+        });
+        syncBtn.onclick = () => {
+            // Erst nachfragen, wenn es viele sind: an einer reinen Dateizahl war
+            // nicht zu erkennen, dass 12 Dateien 130 Karten bedeuten.
+            if (total >= CONFIRM_THRESHOLD) {
+                this.armed = true;
+                this.render();
+                return;
+            }
+            this.syncAll();
+        };
+    }
+
     async syncAll() {
-        this.close(); // Modal schließen
-        const notice = new Notice(`Starte Synchronisation von ${this.unsyncedFiles.length} Dateien...`, 0);
+        const items = this.blocks;
+        const blockedCount = this.blocked.length;
+        this.close();
 
-        let successCount = 0;
-        let failCount = 0;
+        const notice = new Notice(t('syncReview.scanning'), 0);
 
-        for (const item of this.unsyncedFiles) {
+        let processed = 0;
+        let failed = 0;
+        let skipped = blockedCount;
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            notice.setMessage(t('syncReview.progress', {
+                file: item.file.basename,
+                current: i + 1,
+                total: items.length
+            }));
+
             try {
-                notice.setMessage(`Synchronisiere ${item.file.basename}...`);
-                // Lese Datei neu, falls sich was geändert hat (unwahrscheinlich in der kurzen Zeit, aber sicher ist sicher)
+                // Datei frisch lesen und den Block neu lokalisieren: zwischen Scan
+                // und Klick kann die Datei sich geändert haben, und die Indizes
+                // gelten nur für genau diesen Blockinhalt.
                 const content = await this.app.vault.read(item.file);
+                const block = getAnkiBlocks(content).find(b => b.innerClean === item.source);
 
-                // Extrahiere Karten erneut
-                // Wir müssen vorsichtig sein: syncAnkiBlock erwartet den "originalSourceContent" des BLOCKS (mit Backticks? Nein, processAnkiCardsBlock übergibt 'source' was der INHALT ist, aber syncAnkiBlock nutzt findSpecificAnkiBlock welches Backticks erwartet... 
-                // Moment, schauen wir syncManager.ts an.
-                // findSpecificAnkiBlock sucht nach ANKI_BLOCK_REGEX.
-                // processAnkiCardsBlock übergibt 'source' was der Inhalt des Codeblocks ist (ohne Backticks).
-                // ABER syncAnkiBlock ruft findSpecificAnkiBlock auf.
-                // findSpecificAnkiBlock normalisiert newlines von originalSourceContent.
-                // Wenn originalSourceContent NUR der Inhalt ist, matcht es nicht auf den vollen Block mit Backticks im File.
-
-                // KORREKTUR: processAnkiCardsBlock übergibt 'source' = Inhalt.
-                // findSpecificAnkiBlock: const matches = [...fullContent.matchAll(ANKI_BLOCK_REGEX)];
-                // match[1] ist der Inhalt.
-                // Es vergleicht normalizeNewlines(match[1]) === normalizedSource.
-                // Also ja, wir müssen den INHALT übergeben.
-
-                const blockContentOnly = item.blockSource.replace(/^```anki-cards\s*\n/, '').replace(/\n^```$/gm, ''); // Grob entfernen, besser regex match nutzen
-
-                // Sauberer Weg:
-                const ankiBlockRegex = /^```anki-cards\s*\n([\s\S]*?)\n^```$/gm;
-                const matches = [...item.blockSource.matchAll(ankiBlockRegex)];
-                let sourceContent = "";
-                if (matches.length > 0 && matches[0][1]) {
-                    sourceContent = matches[0][1];
-                } else {
-                    // Fallback
-                    sourceContent = item.blockSource.replace('```anki-cards', '').replace('```', '').trim();
+                if (!block) {
+                    console.warn(`[SyncReview] Block nicht mehr auffindbar: ${item.file.path}`);
+                    new Notice(t('syncReview.blockGone', { file: item.file.basename }));
+                    skipped++;
+                    continue;
                 }
 
-                const cards = parseCardsFromBlockSource(sourceContent);
+                const cards = parseCardsFromBlockSource(block.innerClean);
 
-                // Deckname extrahieren
-                const deckLine = sourceContent.split('\n').find(l => l.trim().startsWith('TARGET DECK:'));
-                const deckName = deckLine ? deckLine.replace('TARGET DECK:', '').trim() : null;
-
-                await syncAnkiBlock(this.plugin, sourceContent, deckName, cards, item.file);
-                successCount++;
+                await syncAnkiBlock(
+                    this.plugin,
+                    block.innerClean,
+                    item.deckName,
+                    cards,
+                    item.file,
+                    // Nur die Karten ohne ID anfassen. Vorher lief der ganze Block
+                    // durch, also auch hunderte Updates an bereits synchronen Karten.
+                    item.unsyncedIndices
+                );
+                processed += item.unsyncedIndices.length;
             } catch (e) {
                 console.error(`Fehler beim Sync von ${item.file.path}:`, e);
-                failCount++;
+                failed++;
             }
         }
 
         notice.hide();
-        new Notice(`Sync abgeschlossen. Erfolgreich: ${successCount}, Fehler: ${failCount}`, 5000);
+        new Notice(t('syncReview.done', { created: processed, failed, skipped }), 8000);
     }
 
     onClose() {
