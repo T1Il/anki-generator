@@ -256,7 +256,7 @@ export function baueNotizGeruest(o: NotizGeruestOptionen): string {
 	const verweis = `[[#^${id}|${o.schemaName}]]`;
 
 	const teile: string[] = [];
-	teile.push(`>[!definition] Hintergrund ${o.schemaName}`);
+	teile.push(`>[!definition] Hintergrund *${o.schemaName}*`);
 	teile.push(`>${hintergrund} ^${id}`);
 	teile.push('');
 	teile.push(o.tabelle);

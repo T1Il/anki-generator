@@ -954,3 +954,16 @@ canvas.schema-vorschau-bild {
 	color: var(--text-muted);
 	font-family: var(--font-monospace);
 }
+
+textarea.schema-hintergrund {
+	/* Ein Satz Fliesstext, kein Einzeiler: das Feld stand vorher auf der
+	   Standardgroesse von zwei Zeilen und war zu klein zum Lesen. */
+	width: 100%;
+	min-width: 320px;
+	min-height: 90px;
+	resize: vertical;
+}
+
+.schema-modal .setting-item-control textarea.schema-hintergrund {
+	flex: 1;
+}

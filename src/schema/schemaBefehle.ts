@@ -1,5 +1,5 @@
 import { App, Editor, MarkdownView, Notice, TFile, normalizePath } from 'obsidian';
-import { farbenFuer } from './farbleiter';
+import { farbenFuer, findeLeiter } from './farbleiter';
 import { Kachel, dateinamenFuer, schreibeKacheln } from './kachelRenderer';
 import {
 	SchemaTabelle,
@@ -65,7 +65,7 @@ async function erzeugeKacheln(
 	eingabe: SchemaEingabe
 ): Promise<{ pfade: string[] }> {
 	const zeichen = eingabe.zeilen.map(z => z[0]);
-	const farben = farbenFuer(zeichen.length, eingabe.leiterId, eingabe.verteilung);
+	const farben = farbenFuer(zeichen.length, eingabe.leiter, eingabe.verteilung);
 	const namen = dateinamenFuer(zeichen);
 
 	const kacheln: Kachel[] = zeichen.map((z, i) => ({
@@ -127,7 +127,7 @@ export function schemaNotizErstellen(
 		schemaName: name,
 		kopf: [...STANDARD_KOPF],
 		zeilen: [],
-		leiterId: 'regenbogen',
+		leiter: findeLeiter('regenbogen'),
 		verteilung: 'gespreizt',
 		breite: STANDARD_BREITE,
 		ordnerBasis: ordnerBasis(file),
@@ -169,7 +169,7 @@ export function schemaTabelleEinfuegen(
 		schemaName: '',
 		kopf: [...STANDARD_KOPF],
 		zeilen: [],
-		leiterId: 'regenbogen',
+		leiter: findeLeiter('regenbogen'),
 		verteilung: 'gespreizt',
 		breite: STANDARD_BREITE,
 		ordnerBasis: ordnerBasis(file),
@@ -223,7 +223,7 @@ export function schemaTabelleAktualisieren(
 		schemaName: name,
 		kopf: tabelle.kopf,
 		zeilen: tabelle.zeilen.map(z => [z.zeichen, ...z.spalten]),
-		leiterId: 'regenbogen',
+		leiter: findeLeiter('regenbogen'),
 		verteilung: 'gespreizt',
 		breite: tabelle.breite,
 		ordnerBasis: ordnerBasis(file),

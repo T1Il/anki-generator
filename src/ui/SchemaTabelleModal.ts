@@ -1,6 +1,6 @@
-import { App, Modal, Setting, ButtonComponent, TextAreaComponent, TextComponent, Notice } from 'obsidian';
+import { App, Modal, Setting, ButtonComponent, DropdownComponent, TextAreaComponent, TextComponent, Notice } from 'obsidian';
 import {
-	FARBLEITERN, LeiterVerteilung, farbenFuer, findeLeiter
+	FARBLEITERN, Farbleiter, LeiterVerteilung, farbenFuer, findeLeiter, zufallsLeiter
 } from '../schema/farbleiter';
 import {
 	KACHEL_GROESSE, bahnschriftVerfuegbar, dateinamenFuer, gemeinsameSchriftgroesse, zeichneKachel
@@ -14,7 +14,11 @@ export interface SchemaEingabe {
 	kopf: string[];
 	/** Je Zeile: [Buchstabe, Spalte2, Spalte3, ...]. */
 	zeilen: string[][];
-	leiterId: string;
+	/**
+	 * Die Leiter selbst, nicht nur ihre Id: eine gewuerfelte Leiter steht in
+	 * keiner Liste, unter der man sie wiederfinden koennte.
+	 */
+	leiter: Farbleiter;
 	verteilung: LeiterVerteilung;
 	breite: number;
 	/** Elternordner der Kachelordner, z.B. "Taktik/Schemata/Bilder". */
@@ -64,7 +68,7 @@ export class SchemaTabelleModal extends Modal {
 			schemaName: vorgabe.schemaName,
 			kopf: [...vorgabe.kopf],
 			zeilen: vorgabe.zeilen.map(z => [...z]),
-			leiterId: vorgabe.leiterId,
+			leiter: vorgabe.leiter,
 			verteilung: vorgabe.verteilung,
 			breite: vorgabe.breite,
 			ordnerBasis: vorgabe.ordnerBasis,
@@ -173,16 +177,32 @@ export class SchemaTabelleModal extends Modal {
 		// --- Farben ---------------------------------------------------------
 		const leiterSetting = new Setting(contentEl)
 			.setName('Farbleiter')
-			.setDesc(findeLeiter(this.daten.leiterId).beschreibung);
+			.setDesc(this.daten.leiter.beschreibung);
+
+		let leiterAuswahl: DropdownComponent | null = null;
+		const leiterUebernehmen = (leiter: Farbleiter) => {
+			this.daten.leiter = leiter;
+			leiterSetting.setName(leiter.id === 'zufall' ? leiter.name : 'Farbleiter');
+			leiterSetting.setDesc(leiter.beschreibung);
+			// Die Auswahl zeigt weiter, woher die Leiter kommt – bei einer
+			// gewuerfelten steht das eigene Listenfeld darauf.
+			leiterAuswahl?.setValue(leiter.id);
+			this.zeichneVorschau();
+		};
+
 		leiterSetting.addDropdown(dd => {
+			leiterAuswahl = dd;
 			FARBLEITERN.forEach(l => dd.addOption(l.id, l.name));
-			dd.setValue(this.daten.leiterId);
+			dd.addOption('zufall', 'Zufall …');
+			dd.setValue(this.daten.leiter.id);
 			dd.onChange(wert => {
-				this.daten.leiterId = wert;
-				leiterSetting.setDesc(findeLeiter(wert).beschreibung);
-				this.zeichneVorschau();
+				leiterUebernehmen(wert === 'zufall' ? zufallsLeiter() : findeLeiter(wert));
 			});
 		});
+		leiterSetting.addExtraButton(btn => btn
+			.setIcon('dice')
+			.setTooltip('Neue Leiter würfeln')
+			.onClick(() => leiterUebernehmen(zufallsLeiter())));
 
 		new Setting(contentEl)
 			.setName('Verteilung')
@@ -225,10 +245,12 @@ export class SchemaTabelleModal extends Modal {
 			new Setting(contentEl)
 				.setName('Hintergrund')
 				.setDesc('Ein Satz für den Callout und die Lückentext-Karte.')
-				.addTextArea(text => text
-					.setValue(this.daten.hintergrund)
-					.setPlaceholder('Merkhilfe für die Übergabe von Traumapatienten in der Klinik')
-					.onChange(wert => { this.daten.hintergrund = wert; }));
+				.addTextArea(text => {
+					text.inputEl.addClass('schema-hintergrund');
+					text.setValue(this.daten.hintergrund)
+						.setPlaceholder('Merkhilfe für die Übergabe von Traumapatienten in der Klinik')
+						.onChange(wert => { this.daten.hintergrund = wert; });
+				});
 
 			new Setting(contentEl)
 				.setName('Anki-Deck')
@@ -288,7 +310,7 @@ export class SchemaTabelleModal extends Modal {
 		}
 
 		const zeichen = zeilen.map(z => z[0]);
-		const farben = farbenFuer(zeichen.length, this.daten.leiterId, this.daten.verteilung);
+		const farben = farbenFuer(zeichen.length, this.daten.leiter, this.daten.verteilung);
 		const namen = dateinamenFuer(zeichen);
 		// Dieselbe gemeinsame Schriftgroesse wie beim Schreiben der PNGs, nur
 		// auf die Vorschaugroesse gerechnet.

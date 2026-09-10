@@ -75,6 +75,42 @@ export const FARBLEITERN: Farbleiter[] = [
 		stuetzen: ['#F3C6F2', '#E056D0', '#9B30D9', '#5B2AB0', '#2B1B6B']
 	},
 	{
+		id: 'sonnenuntergang',
+		name: 'Sonnenuntergang',
+		beschreibung: 'Gelb → Orange → Rot → Pflaume → Nachtblau.',
+		stuetzen: ['#FFE066', '#FFA630', '#F0534B', '#B4327E', '#4A2A6B']
+	},
+	{
+		id: 'wald',
+		name: 'Wald',
+		beschreibung: 'Frischgrün → Blattgrün → Tannengrün. Ruhig, ohne Signalwirkung.',
+		stuetzen: ['#E4EF7A', '#9CCC65', '#4CAF50', '#2E7D5B', '#1B4B45']
+	},
+	{
+		id: 'erde',
+		name: 'Erde',
+		beschreibung: 'Sand → Ocker → Lehm → Kaffee. Warm und gedeckt.',
+		stuetzen: ['#F2DFC0', '#DDAA6B', '#B77A44', '#7E5030', '#43291B']
+	},
+	{
+		id: 'stahl',
+		name: 'Stahl',
+		beschreibung: 'Ein einziger Blauton von hell nach dunkel. Am zurückhaltendsten.',
+		stuetzen: ['#E3ECF5', '#A9C2D9', '#6E8FB0', '#3E5C7E', '#1C2E45']
+	},
+	{
+		id: 'neon',
+		name: 'Neon',
+		beschreibung: 'Giftgrün → Türkis → Blau → Violett → Pink. Sehr auffällig.',
+		stuetzen: ['#4DFF3A', '#00F5D4', '#00BBF9', '#9B5DE5', '#F15BB5']
+	},
+	{
+		id: 'pastell',
+		name: 'Pastell',
+		beschreibung: 'Durchweg helle Töne, alle mit schwarzer Schrift. Leise.',
+		stuetzen: ['#FFD6E0', '#FFEFB5', '#C7F0BD', '#B5E2FF', '#DCC9F5']
+	},
+	{
 		id: 'kontrast',
 		name: 'Maximaler Kontrast',
 		beschreibung: 'Kräftige Einzelfarben statt Verlauf – für Schemata, deren Buchstaben nichts miteinander zu tun haben.',
@@ -225,11 +261,13 @@ export function leiterfarbeBei(stuetzen: string[], t: number): string {
  */
 export function farbenFuer(
 	anzahl: number,
-	leiterId: string,
+	leiterOderId: Farbleiter | string,
 	verteilung: LeiterVerteilung = 'gespreizt'
 ): Kachelfarbe[] {
-	const leiter = findeLeiter(leiterId);
-	if (anzahl <= 0) return [];
+	// Eine gewuerfelte Leiter hat keine Id, unter der man sie wiederfinden
+	// koennte – sie wird deshalb als ganzes Objekt durchgereicht.
+	const leiter = typeof leiterOderId === 'string' ? findeLeiter(leiterOderId) : leiterOderId;
+	if (anzahl <= 0 || leiter.stuetzen.length === 0) return [];
 
 	const hintergruende: string[] = [];
 	if (verteilung === 'fortlaufend' && anzahl <= leiter.stuetzen.length) {
@@ -243,4 +281,126 @@ export function farbenFuer(
 	}
 
 	return hintergruende.map(hg => ({ hintergrund: hg, schrift: schriftfarbeFuer(hg) }));
+}
+
+// --- Gewuerfelte Leitern ----------------------------------------------------
+
+/**
+ * OKLCh statt OKLab: L bleibt die Helligkeit, C wird zur Buntheit und h zum
+ * Farbton auf dem Farbkreis. Nur so laesst sich "derselbe Farbton, nur
+ * dunkler" oder "vierzig Grad weiter" ueberhaupt formulieren.
+ */
+function okLchZuRgb(L: number, C: number, hGrad: number): Rgb {
+	const bogen = (hGrad * Math.PI) / 180;
+	return okLabZuRgb({ L, a: C * Math.cos(bogen), b: C * Math.sin(bogen) });
+}
+
+function ausserhalbDarstellbar(c: Rgb): boolean {
+	// Kleine Toleranz, sonst gilt schon Rundungsrauschen als Ueberlauf.
+	const raus = (v: number) => v < -0.5 || v > 255.5;
+	return raus(c.r) || raus(c.g) || raus(c.b);
+}
+
+/**
+ * Farbe aus OKLCh, notfalls entsaettigt.
+ *
+ * Nicht jede Kombination aus Helligkeit und Buntheit existiert in sRGB –
+ * ein knalliges Gelb bei 30 % Helligkeit gibt es schlicht nicht. Wuerde man
+ * einfach abschneiden, kaeme ein verfaerbter, flauer Ton heraus und der
+ * Farbton verschoebe sich. Stattdessen wird die Buntheit so weit
+ * zurueckgenommen, bis die Farbe wieder darstellbar ist; der Farbton bleibt
+ * dabei erhalten.
+ */
+export function okLchZuHex(L: number, C: number, hGrad: number): string {
+	let hoch = C;
+	let tief = 0;
+	if (!ausserhalbDarstellbar(okLchZuRgb(L, hoch, hGrad))) {
+		return rgbZuHex(okLchZuRgb(L, hoch, hGrad));
+	}
+	// Zwoelf Halbierungen reichen fuer deutlich feiner als einen 8-Bit-Schritt.
+	for (let i = 0; i < 12; i++) {
+		const mitte = (tief + hoch) / 2;
+		if (ausserhalbDarstellbar(okLchZuRgb(L, mitte, hGrad))) hoch = mitte;
+		else tief = mitte;
+	}
+	return rgbZuHex(okLchZuRgb(L, tief, hGrad));
+}
+
+/** Die Formen, in denen eine gewuerfelte Leiter ueber den Farbkreis laeuft. */
+interface Verlaufsform {
+	name: string;
+	/** Wie weit der Farbton insgesamt wandert, in Grad. */
+	spanne: number;
+}
+
+const VERLAUFSFORMEN: Verlaufsform[] = [
+	{ name: 'einfarbig', spanne: 0 },
+	{ name: 'benachbart', spanne: 45 },
+	{ name: 'weit', spanne: 100 },
+	{ name: 'gegenüber', spanne: 170 },
+	{ name: 'Regenbogen', spanne: 280 }
+];
+
+/** Deutscher Name des Farbtons, damit die gewuerfelte Leiter nicht "Zufall 3" heisst. */
+function farbtonName(hGrad: number): string {
+	const namen: [number, string][] = [
+		[20, 'Rot'], [50, 'Orange'], [95, 'Gelb'], [140, 'Grün'],
+		[190, 'Türkis'], [240, 'Blau'], [290, 'Violett'], [330, 'Magenta'], [360, 'Rot']
+	];
+	const h = ((hGrad % 360) + 360) % 360;
+	for (const [grenze, name] of namen) {
+		if (h < grenze) return name;
+	}
+	return 'Rot';
+}
+
+/**
+ * Wuerfelt eine Farbleiter, die aussieht wie von Hand gewaehlt.
+ *
+ * Frei gewuerfelte Farben ergeben keine Leiter, sondern Konfetti. Drei Dinge
+ * bleiben deshalb festgelegt, gewuerfelt wird nur innerhalb davon:
+ *
+ * 1. Die Helligkeit faellt streng von hell nach dunkel. Das macht aus fuenf
+ *    Farben ueberhaupt erst eine Leiter – und sorgt nebenbei dafuer, dass
+ *    die Schrift genau einmal von Schwarz auf Weiss umspringt, am dunklen
+ *    Ende, so wie beim Office-Regenbogen auch.
+ * 2. Der Farbton wandert gleichmaessig in eine Richtung, um eine feste
+ *    Spanne. Springt er hin und her, wirken die Kacheln zusammenhanglos.
+ * 3. Die Buntheit ist in der Mitte am hoechsten. Ganz helle und ganz dunkle
+ *    Toene vertragen weniger Buntheit, bevor sie aus sRGB herauslaufen.
+ */
+export function zufallsLeiter(): Farbleiter {
+	const zufall = (von: number, bis: number) => von + Math.random() * (bis - von);
+
+	const start = zufall(0, 360);
+	const form = VERLAUFSFORMEN[Math.floor(Math.random() * VERLAUFSFORMEN.length)];
+	const richtung = Math.random() < 0.5 ? 1 : -1;
+
+	// Von hell nach dunkel. Die Grenzen sind so gewaehlt, dass oben noch
+	// schwarze Schrift traegt und unten weisse noetig wird.
+	const oben = zufall(0.86, 0.93);
+	const unten = zufall(0.30, 0.42);
+	const buntheit = zufall(0.13, 0.20);
+
+	const stufen = 5;
+	const stuetzen: string[] = [];
+	for (let i = 0; i < stufen; i++) {
+		const t = i / (stufen - 1);
+		const L = oben + (unten - oben) * t;
+		// Halbwelle: an beiden Enden gedaempft, in der Mitte voll.
+		const C = buntheit * (0.45 + 0.55 * Math.sin(Math.PI * t));
+		stuetzen.push(okLchZuHex(L, C, start + richtung * form.spanne * t));
+	}
+
+	const bis = start + richtung * form.spanne;
+	const name = form.spanne === 0
+		? `Zufall: ${farbtonName(start)}`
+		: `Zufall: ${farbtonName(start)} → ${farbtonName(bis)}`;
+
+	return {
+		id: 'zufall',
+		name,
+		beschreibung: `Gewürfelt, Verlauf „${form.name}“. Nochmal würfeln gibt eine andere Leiter.`,
+		stuetzen
+	};
 }

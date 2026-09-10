@@ -57,6 +57,14 @@ await esbuild.build({
 const require = createRequire(import.meta.url);
 const mod = require(outfile);
 
+/** WCAG-Relativhelligkeit, nur für die Prüfungen hier. */
+function helligkeit(hex) {
+	const zu = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+	const h = hex.replace('#', '');
+	const [r, g, b] = [0, 2, 4].map((i) => zu(parseInt(h.substring(i, i + 2), 16) / 255));
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 let fehler = 0;
 const pruefe = (name, ist, soll) => {
 	const a = JSON.stringify(ist);
@@ -116,6 +124,50 @@ pruefe('Gelb bleibt schwarz beschriftet', mod.schriftfarbeFuer('#FFFF00'), '#000
 pruefe('Mittelblau bleibt schwarz beschriftet', mod.schriftfarbeFuer('#0070C0'), '#000000');
 pruefe('Dunkelblau kippt auf weiß', mod.schriftfarbeFuer('#002060'), '#FFFFFF');
 pruefe('Schwarz kippt auf weiß', mod.schriftfarbeFuer('#000000'), '#FFFFFF');
+
+// --- Alle Leitern ------------------------------------------------------------
+console.log('\nAlle Farbleitern');
+
+for (const leiter of mod.FARBLEITERN) {
+	const farben = mod.farbenFuer(8, leiter.id, 'gespreizt');
+	const eindeutig = new Set(farben.map((f) => f.hintergrund)).size;
+	const gueltig = farben.every((f) => /^#[0-9A-F]{6}$/.test(f.hintergrund));
+	// Wechselt die Schriftfarbe mehr als einmal, springt sie mitten in der
+	// Leiter hin und her — dann wirkt die Reihe unruhig statt wie eine Leiter.
+	const wechsel = farben.filter((f, i) => i > 0 && f.schrift !== farben[i - 1].schrift).length;
+	pruefe(`${leiter.name}: 8 gültige, verschiedene Farben`, [eindeutig, gueltig], [8, true]);
+	pruefe(`${leiter.name}: höchstens ein Schriftfarben-Wechsel`, wechsel <= 1, true);
+}
+
+// --- Gewürfelte Leitern -------------------------------------------------------
+console.log('\nGewürfelte Leitern');
+
+// 200 Würfe: was hier nicht auffällt, fällt beim Benutzen auch nicht auf.
+let zufallFehler = [];
+for (let i = 0; i < 200; i++) {
+	const leiter = mod.zufallsLeiter();
+	if (leiter.stuetzen.length !== 5) { zufallFehler.push('Stufenzahl'); continue; }
+	if (!leiter.stuetzen.every((h) => /^#[0-9A-F]{6}$/.test(h))) { zufallFehler.push('kein Hex: ' + leiter.stuetzen.join()); continue; }
+
+	const farben = mod.farbenFuer(8, leiter, 'gespreizt');
+	if (new Set(farben.map((f) => f.hintergrund)).size < 8) zufallFehler.push('doppelte Farbe: ' + leiter.name);
+
+	// Die Helligkeit muss streng fallen, sonst ist es keine Leiter.
+	const hell = leiter.stuetzen.map(helligkeit);
+	for (let k = 1; k < hell.length; k++) {
+		if (hell[k] >= hell[k - 1]) zufallFehler.push('nicht monoton: ' + leiter.stuetzen.join());
+	}
+
+	// Genau ein Wechsel Schwarz -> Weiß, und nie zurück.
+	const schriften = farben.map((f) => f.schrift);
+	const wechsel = schriften.filter((f, k) => k > 0 && f !== schriften[k - 1]).length;
+	if (wechsel > 1) zufallFehler.push('Schrift springt: ' + leiter.stuetzen.join());
+	if (schriften[0] !== '#000000') zufallFehler.push('heller Anfang trägt weiße Schrift: ' + leiter.stuetzen[0]);
+}
+pruefe('200 gewürfelte Leitern ohne Beanstandung', zufallFehler.slice(0, 3), []);
+
+pruefe('OKLCh außerhalb sRGB wird entsättigt statt abgeschnitten',
+	/^#[0-9A-F]{6}$/.test(mod.okLchZuHex(0.3, 0.4, 100)), true);
 
 // --- Zeilen zerlegen --------------------------------------------------------
 console.log('\nTabellenzeilen zerlegen');
