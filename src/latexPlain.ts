@@ -67,6 +67,59 @@ const ZEICHEN: Record<string, string> = {
 };
 
 /** `\text{...}`, `\mathrm{...}` und Verwandte: Inhalt behalten, Hülle weg. */
+/**
+ * Indizes und Exponenten nach Unicode.
+ *
+ * Im Vault stehen 103 solcher Ausdruecke, verteilt auf 35 verschiedene:
+ * `$O_2$`, `$CO_2$`, `$HCO_3^-$`, `$\beta_2$`, `$H^+$`, `$m^2$`. Ausnahmslos
+ * einfache Tief- und Hochstellungen — nichts, wofuer man einen Formelsatz
+ * braeuchte.
+ *
+ * Das ist nicht nur fuer Tippkarten wichtig. In einem Mermaid-Schaubild
+ * rendert LaTeX ueberhaupt nicht: die Beschriftung landet als reiner Text im
+ * SVG, und das SVG wird anschliessend zu PNG gerastert. Was dort als `$M_1$`
+ * hineingeht, kommt als `$M_1$` heraus. `M₁` dagegen ueberlebt jeden dieser
+ * Schritte, weil es ein gewoehnliches Zeichen ist.
+ */
+const TIEF: Record<string, string> = {
+	'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+	'5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+	'+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
+	a: 'ₐ', e: 'ₑ', o: 'ₒ', x: 'ₓ', h: 'ₕ', k: 'ₖ', l: 'ₗ',
+	m: 'ₘ', n: 'ₙ', p: 'ₚ', s: 'ₛ', t: 'ₜ',
+};
+const HOCH: Record<string, string> = {
+	'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+	'5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+	'+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+	n: 'ⁿ', i: 'ⁱ',
+};
+
+/**
+ * `_2`, `_{23}`, `^-`, `^{2+}` in Unicode ueberfuehren.
+ *
+ * Nur wenn JEDES Zeichen der Stellung eine Entsprechung hat. `GABA_A` bleibt
+ * stehen und wird gemeldet — ein grossgeschriebenes A gibt es tiefgestellt
+ * nicht, und ein stilles `GABAA` waere schlimmer als die Meldung.
+ */
+function stellungen(s: string, melden: (was: string) => void): string {
+	return s.replace(/([_^])(?:\{([^{}]*)\}|(\S))/g, (treffer, zeichen: string,
+			geklammert: string | undefined, einzeln: string | undefined) => {
+		const inhalt = geklammert !== undefined ? geklammert : (einzeln || '');
+		const tabelle = zeichen === '_' ? TIEF : HOCH;
+		let aus = '';
+		for (const c of inhalt) {
+			const u = tabelle[c];
+			if (!u) {
+				melden(treffer);
+				return treffer;
+			}
+			aus += u;
+		}
+		return aus;
+	});
+}
+
 const HUELLEN = /\\(?:text|mathrm|mathit|mathbf|mathsf|operatorname|si|unit)\{([^{}]*)\}/g;
 
 /** Was danach noch nach LaTeX aussieht — daran erkennt man, dass es nicht taugt. */
@@ -99,6 +152,8 @@ export function latexZuKlartext(text: string): KlartextErgebnis {
 			ungeloest.push('\\' + name);
 			return treffer;
 		});
+		// Indizes und Exponenten, bevor die Klammern fallen.
+		s = stellungen(s, (was) => ungeloest.push(was));
 		// Geschweifte Klammern, die nur der Gruppierung dienten.
 		s = s.replace(/[{}]/g, '');
 		if (REST.test(s)) ungeloest.push(s.trim());

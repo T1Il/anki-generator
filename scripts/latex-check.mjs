@@ -90,6 +90,34 @@ console.log('\nWas gaengig vorkommt:');
 	}
 }
 
+console.log('\nIndizes und Exponenten — 103 Vorkommen im Vault:');
+{
+	// Der Backslash wird aus seinem Zeichencode gebaut: auf dem Weg hierher
+	// wird er sonst gefressen, und aus \beta wird ein Backspace plus "eta".
+	const B = String.fromCharCode(92);
+	const faelle = [
+		['$O_2$-Angebot', 'O₂-Angebot'],
+		['$CO_2$', 'CO₂'],
+		['$HCO_3^-$', 'HCO₃⁻'],
+		['$H^+$-Ionen', 'H⁺-Ionen'],
+		['$m^2$', 'm²'],
+		['$' + B + 'beta_2$-Sympathomimetikum', 'β₂-Sympathomimetikum'],
+		['$M_1$-Autorezeptoren', 'M₁-Autorezeptoren'],
+		['$Na^{2+}$', 'Na²⁺'],
+	];
+	for (const [ein, aus] of faelle) {
+		const r = latexZuKlartext(ein);
+		check(ein + ' -> ' + aus, r.text === aus, r.text);
+	}
+}
+{
+	// Ein grossgeschriebenes A gibt es tiefgestellt nicht. Ein stilles
+	// "GABAA" waere schlimmer als die Meldung.
+	const r = latexZuKlartext('$GABA_A$-Rezeptor');
+	check('was es nicht gibt, wird gemeldet', r.ungeloest.length > 0, r.ungeloest);
+	check('und bleibt lesbar stehen', r.text.includes('GABA'), r.text);
+}
+
 console.log('\nWas unberuehrt bleiben muss:');
 {
 	const r = latexZuKlartext('Kostet 5 $ und 3 $ extra');

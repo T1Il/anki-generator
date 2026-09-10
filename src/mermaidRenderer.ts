@@ -1,5 +1,6 @@
 import { App, MarkdownRenderer, Component } from 'obsidian';
 import { storeAnkiMediaFile } from './anki/AnkiConnect';
+import { latexZuKlartext } from './latexPlain';
 
 // Matches ```mermaid ... ``` (with closing fence) OR ```mermaid ... (until end of string, no closing fence)
 // The second case occurs inside anki-cards blocks where a closing ``` would end the outer block.
@@ -27,11 +28,23 @@ export async function processMermaidBlocks(text: string, app: App): Promise<stri
 
         try {
             console.log(`[MermaidRenderer] Processing mermaid block (${mermaidCode.length} chars)`);
-            const pngBase64 = await renderMermaidToPng(mermaidCode, app);
+            // LATEX RENDERT IM SCHAUBILD NICHT.
+            //
+            // Die Beschriftung landet als reiner Text im SVG, und das SVG wird
+            // anschliessend zu PNG gerastert. Was als `$M_1$` hineingeht, kommt
+            // als `$M_1$` heraus — Anki bekommt ein Bild, kein MathJax. `M₁`
+            // dagegen ueberlebt jeden dieser Schritte.
+            const klartext = latexZuKlartext(mermaidCode);
+            if (klartext.ungeloest.length) {
+                console.warn('[MermaidRenderer] LaTeX in einer Beschriftung, das kein',
+                    'einzelnes Zeichen ist:', klartext.ungeloest.join(', '));
+            }
+            const pngBase64 = await renderMermaidToPng(klartext.text, app);
             if (pngBase64) {
                 const filename = `anki-mermaid-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.png`;
                 const ankiFilename = await storeAnkiMediaFile(filename, pngBase64);
-                result = result.replace(fullMatch, `<img src="${ankiFilename}">`);
+                result = result.replace(fullMatch,
+                    `<img src="${ankiFilename}" style="max-width:100%;height:auto">`);
                 console.log(`[MermaidRenderer] Uploaded as ${ankiFilename}`);
             } else {
                 console.warn('[MermaidRenderer] Rendering returned null');

@@ -162,10 +162,13 @@ REGELN ZUR KARTENERSTELLUNG:
      - Vergleich von 2-4 Dingen entlang derselben Kriterien -> Markdown-TABELLE, kein Diagramm
    - **WANN NICHT**: bei einer einfachen Aufzaehlung ohne Reihenfolge (dann Liste), bei Tippkarten ('A (type):') und bei allem, was in einen Satz passt.
    - **SYNTAX-REGELN** (sonst rendert es nicht):
-     - Nur \`flowchart TD\` oder \`flowchart LR\`.
+     - IMMER \`flowchart TD\`. ⛔️ **NIEMALS \`flowchart LR\`** — gelernt wird auf einem hochkant gehaltenen Handy. Dort ist Hoehe billig und Breite teuer; eine Kette aus sechs Gliedern nebeneinander schrumpft die Schrift, bis nichts mehr zu lesen ist.
+     - **HOECHSTENS ZWEI Kinder je Knoten.** Mermaid setzt Geschwister NEBENEINANDER: drei Aeste sind drei Spalten breit, fuenf sind fuenf. Wo mehr noetig waeren, fasse zusammen — oder lass es eine Liste bleiben.
      - HOECHSTENS 8 Knoten. Mehr heisst: die Karte ist nicht atomar.
      - Knotentext kurz halten und IMMER in Anfuehrungszeichen: \`A["Rhythmus pruefen"]\`
      - KEIN \`style\`, \`classDef\`, \`subgraph\`, \`:::\` — nur Knoten und Pfeile.
+     - ⛔️ **KEIN LaTeX in Beschriftungen.** Es rendert im Schaubild nicht: der Text landet unveraendert im Bild. Schreibe Unicode — \`M₁\` statt \`$M_1$\`, \`O₂\` statt \`$O_2$\`, \`HCO₃⁻\`, \`β₂\`, \`H⁺\`, \`m²\`.
+     - Schreibe Abkuerzungen NICHT aus und kuerze NICHT ab: steht \`RR\` in der Notiz, steht \`RR\` im Knoten.
    - ⛔️ **INHALTSRIEGEL**: Jeder Knoten muss im Lerninhalt stehen. Erfinde KEINEN Zwischenschritt, der dort nicht steht. Ein erfundenes Ablaufdiagramm sieht richtig aus und ist deshalb schlimmer als ein falscher Satz.
    - **BEISPIEL**:
      Q: Wie laeuft ein Zyklus der Reanimation ab?
