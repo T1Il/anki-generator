@@ -250,3 +250,29 @@ export function stripSuggestionBlocks(markdown: string): string {
 
 	return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
+
+/**
+ * KEIN FENCE, DEN DAS PLUGIN SELBST VERARBEITET, DARF IN DEN CHAT-RENDERER.
+ *
+ * `MarkdownRenderer.render()` ruft die registrierten Code-Block-Prozessoren
+ * auf – auch den eigenen fuer `anki-cards`. Der baut dann die komplette
+ * Karten-Oberflaeche mitten in eine Chat-Blase, mit dem sourcePath der Notiz,
+ * und stoesst von dort erneut ein Rendern an. Die Oberflaeche friert ein,
+ * und zwar schon beim Aktivieren des Plugins, weil die Chat-Ansicht ihren
+ * gespeicherten Verlauf wiederherstellt.
+ *
+ * Aufgetreten bei einer KI-Antwort, die `anki-cards` schrieb, wo `FENCE`
+ * `anki-card` erwartet. Der Block galt deshalb nicht als Vorschlag, wurde
+ * nicht weggeschnitten – und lief in den eigenen Prozessor.
+ *
+ * `stripSuggestionBlocks()` haerter zu machen reicht nicht: es wuerde nur
+ * diese eine Schreibweise abfangen. Die Regel muss lauten, dass ueberhaupt
+ * keine vom Plugin belegte Sprachmarke den Renderer erreicht. Sie wird
+ * deshalb entfernt – der Block ist dann ein gewoehnlicher Code-Block.
+ */
+export function entschaerfePluginFences(markdown: string): string {
+	return markdown.replace(
+		/^([ \t]*`{3,})[ \t]*(?:anki-cards?|anki-edit)[ \t]*$/gm,
+		'$1text'
+	);
+}

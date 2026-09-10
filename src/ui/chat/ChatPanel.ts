@@ -3,7 +3,7 @@ import AnkiGeneratorPlugin from '../../main';
 import { ChatMessage } from '../../types';
 import { streamChatResponse, generateFeedbackOnly } from '../../aiGenerator';
 import { resolveProvider, PROVIDERS } from '../../providers';
-import { parseSuggestions, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
+import { entschaerfePluginFences, parseSuggestions, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
 import { applySuggestion, canLocateEdit } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
@@ -222,7 +222,10 @@ export class ChatPanel extends Component {
 	private async renderBody(bubble: HTMLElement, content: string, isAi: boolean) {
 		bubble.empty();
 
-		const prose = isAi ? stripSuggestionBlocks(content) : content;
+		// Erst die Vorschlagsbloecke raus, dann jede uebrig gebliebene
+		// Plugin-Sprachmarke entschaerfen – sonst rendert der eigene
+		// anki-cards-Prozessor in die Chat-Blase und die App friert ein.
+		const prose = isAi ? entschaerfePluginFences(stripSuggestionBlocks(content)) : content;
 		if (prose) {
 			await MarkdownRenderer.render(this.plugin.app, prose, bubble, this.sourcePath || '', this);
 		}

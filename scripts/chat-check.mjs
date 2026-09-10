@@ -198,6 +198,52 @@ const NOTE = [
 	check('Exakter Treffer ist nicht fuzzy', exact && exact.fuzzy === false, exact);
 }
 
+// --- Kein Plugin-Fence darf in den Chat-Renderer ---------------------------
+// Regression vom 10.09.2026: eine KI-Antwort schrieb ```anki-cards (Plural),
+// wo FENCE ```anki-card erwartet. Der Block galt deshalb nicht als Vorschlag,
+// blieb beim Strippen stehen und landete in MarkdownRenderer.render() - das
+// rief den anki-cards-Prozessor des Plugins auf, mitten in der Chat-Blase.
+// Obsidian fror schon beim Aktivieren ein, weil die Chat-Ansicht ihren
+// gespeicherten Verlauf wiederherstellt.
+{
+	const antwort = [
+		'Hier mein Feedback.',
+		'',
+		'```anki-edit',
+		'FIND: alt',
+		'REPLACE: neu',
+		'```',
+		'',
+		'Und die Karten dazu:',
+		'',
+		'```anki-cards',
+		'Q: Frage',
+		'A: Antwort',
+		'```'
+	].join('\n');
+
+	const gestrippt = C.stripSuggestionBlocks(antwort);
+	check('anki-cards ueberlebt das Strippen (die Ausgangslage)',
+		gestrippt.split('\n').some((l) => /^\s*```anki-cards\s*$/.test(l)), gestrippt);
+
+	const prose = C.entschaerfePluginFences(gestrippt);
+	const fences = prose.split('\n').filter((l) => /^\s*```/.test(l));
+
+	check('nach dem Entschaerfen keine Plugin-Sprachmarke mehr',
+		fences.every((l) => !/anki-(cards?|edit)/.test(l)), fences);
+	check('der Block bleibt als Code-Block sichtbar',
+		fences.filter((l) => /```text/.test(l)).length === 1, fences);
+	check('der Fliesstext bleibt erhalten',
+		prose.includes('Hier mein Feedback.') && prose.includes('Und die Karten dazu:'), prose);
+
+	check('anki-card in der Einzahl wird auch entschaerft',
+		!/anki-card/.test(C.entschaerfePluginFences('```anki-card\nx\n```')));
+	check('vier Backticks werden erwischt',
+		!/anki-cards/.test(C.entschaerfePluginFences('````anki-cards\nx\n````')));
+	check('fremde Sprachmarken bleiben unangetastet',
+		C.entschaerfePluginFences('```mermaid\nflowchart TD\n```') === '```mermaid\nflowchart TD\n```');
+}
+
 console.log('');
 if (failures > 0) {
 	console.error(failures + ' Pruefung(en) fehlgeschlagen.');
