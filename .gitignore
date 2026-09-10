@@ -28,3 +28,6 @@ data.json
 
 # Claude Code local settings
 .claude/
+
+# Chat-Verlauf: Arbeitsdaten des Nutzers, gehoert nicht ins Repo.
+chat-history.json

@@ -276,3 +276,30 @@ export function entschaerfePluginFences(markdown: string): string {
 		'$1text'
 	);
 }
+
+/**
+ * Stabiler Schluessel fuer einen Vorschlag.
+ *
+ * Derselbe Chat kann zweimal offen sein – als Seitenleiste und als Tab. Wird
+ * ein Vorschlag in der einen Ansicht uebernommen, muss die andere ihn als
+ * erledigt markieren. Sonst steht dort weiter "Uebernehmen", und der zweite
+ * Klick scheitert daran, dass der gesuchte Text schon ersetzt ist – das sieht
+ * nach einem Fehler aus, obwohl alles richtig gelaufen ist.
+ *
+ * Der Schluessel kommt aus dem INHALT, nicht aus der Position: dieselbe
+ * Nachricht steht in beiden Ansichten womoeglich an unterschiedlicher Stelle,
+ * und eine frisch gestreamte Antwort verschiebt die Zaehlung ohnehin.
+ */
+export function schluesselFuer(vorschlag: Suggestion): string {
+	switch (vorschlag.kind) {
+		case 'edit':
+			return JSON.stringify(['edit', vorschlag.find, vorschlag.replace]);
+		case 'card':
+			return JSON.stringify([
+				'card', vorschlag.op, vorschlag.id, vorschlag.ref,
+				vorschlag.q, vorschlag.a, vorschlag.typeIn === true
+			]);
+		default:
+			return JSON.stringify(['invalid', vorschlag.raw]);
+	}
+}

@@ -17,12 +17,18 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 
 const stubFile = path.join(os.tmpdir(), 'anki-obsidian-stub.cjs');
-fs.writeFileSync(stubFile, 'module.exports = {};\n');
+// requestUrl wird von AnkiConnect.ts importiert; die geprueften Funktionen
+// rufen es nicht auf, der Import muss aber aufloesen.
+fs.writeFileSync(stubFile, 'module.exports = { requestUrl: async () => ({ json: {} }) };\n');
 
 const entry = path.join(os.tmpdir(), 'anki-drift-entry.ts');
 fs.writeFileSync(
 	entry,
-	'export * from ' + JSON.stringify(path.join(root, 'src/anki/driftCheck.ts').replace(/\\/g, '/')) + ';\n'
+	'export * from ' + JSON.stringify(path.join(root, 'src/anki/driftCheck.ts').replace(/\\/g, '/')) + ';\n' +
+	// Die Deck-Abfrage sichert ein deleteDecks mit cardsToo: true ab. Sie ist
+	// reine Stringarbeit und gehoert deshalb hierher, zum Anki-Vergleich.
+	'export { maskiereFuerSuche, baueDeckAbfrage } from ' +
+	JSON.stringify(path.join(root, 'src/anki/AnkiConnect.ts').replace(/\\/g, '/')) + ';\n'
 );
 
 const outfile = path.join(os.tmpdir(), 'anki-drift-check.cjs');
@@ -181,6 +187,38 @@ check('Ohne Luecke wird die Antwort angehaengt',
 
 check('Kein leeres {{c1::}} ohne Antwort',
 	!D.expectedClozeText({ q: 'Das Herz', a: '', type: 'Cloze', id: 1 }).includes('{{c1::}}'));
+
+// --- Deck-Abfrage vor dem Loeschen -----------------------------------------
+// Diese Abfrage entscheidet, ob ein Deck mit cardsToo: true geloescht wird.
+// Baut sie sich falsch zusammen, findet sie 0 Karten in einem vollen Deck --
+// und der Lernfortschritt ist weg.
+{
+	check('Anfuehrungszeichen im Decknamen werden maskiert',
+		D.maskiereFuerSuche('Deck "A"') === 'Deck \\"A\\"', D.maskiereFuerSuche('Deck "A"'));
+
+	check('Backslash wird maskiert',
+		D.maskiereFuerSuche('A\\B') === 'A\\\\B', D.maskiereFuerSuche('A\\B'));
+
+	// Reihenfolge: erst Backslash, dann Anfuehrungszeichen. Andersherum wuerde
+	// der zweite Durchlauf die Maskierung des ersten nochmal maskieren.
+	check('Backslash vor Anfuehrungszeichen bleibt ein Zeichenpaar',
+		D.maskiereFuerSuche('A\\"B') === 'A\\\\\\"B', D.maskiereFuerSuche('A\\"B'));
+
+	// Genau der Fall aus dem Vault: Ampersand, Bindestrich, Unterdeck-Trenner.
+	const echt = D.baueDeckAbfrage('NFS-AI::Medizin::Gehör- & Gleichgewichtsorgane');
+	check('echter Deckname bleibt unveraendert in der Abfrage',
+		echt.includes('Gehör- & Gleichgewichtsorgane') && !echt.includes('\\'), echt);
+
+	check('Unterdecks sind Teil der Abfrage',
+		D.baueDeckAbfrage('A::B').includes('deck:"A::B::*"'), D.baueDeckAbfrage('A::B'));
+
+	// Ein Deckname mit Anfuehrungszeichen darf die Abfrage nicht zerlegen:
+	// die Zahl der unmaskierten Anfuehrungszeichen muss gerade bleiben.
+	const boese = D.baueDeckAbfrage('Er sagte "Hallo"');
+	const offen = (boese.match(/(^|[^\\])"/g) || []).length;
+	check('Deckname mit Anfuehrungszeichen sprengt die Abfrage nicht',
+		offen % 2 === 0, { abfrage: boese, offen });
+}
 
 console.log('');
 if (failures > 0) {

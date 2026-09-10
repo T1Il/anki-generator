@@ -86,6 +86,20 @@ export class FeedbackView extends ItemView {
                 }
             })
         );
+
+        // Uebernommener Vorschlag anderswo -> Kartenliste hier nachziehen.
+        //
+        // 'modify' allein reicht nicht: Obsidian meldet es verzoegert, und bei
+        // einer Kartenaenderung ohne Textaenderung in der Notiz gar nicht.
+        // Die Liste stuende dann veraltet da, waehrend der Chat daneben
+        // bereits "Uebernommen" zeigt.
+        this.registerEvent(
+            this.plugin.app.workspace.on('anki:suggestion-applied' as any, (async (sourcePath: string) => {
+                if (!this.sourcePath || sourcePath !== this.sourcePath) return;
+                const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+                if (file instanceof TFile) await this.updateCards(file);
+            }) as any)
+        );
     }
 
     async onOpen() {

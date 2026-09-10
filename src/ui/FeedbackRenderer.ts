@@ -15,7 +15,7 @@ import { CardPreviewModal } from './CardPreviewModal';
 import { startRevisionProcess, updateFirstBlockDeck } from '../ankiBlockProcessor';
 import { DeckSelectionModal } from './DeckSelectionModal';
 import { RevisionInputModal } from './RevisionInputModal';
-import { getDeckNames, moveAnkiNotesToDeck, getCardCountForDeck, deleteAnkiDeck } from '../anki/AnkiConnect';
+import { getDeckNames, moveAnkiNotesToDeck } from '../anki/AnkiConnect';
 import { stripHybridObsidianLinks } from '../utils';
 import { resolveProvider } from '../providers';
 import { ChatPanel } from './chat/ChatPanel';

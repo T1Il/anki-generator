@@ -24,9 +24,59 @@ async function ankiConnectRequest(action: string, params: object): Promise<any> 
 	}
 }
 
+/**
+ * Maskiert einen Wert fuer Ankis Suchsyntax.
+ *
+ * Backslash zuerst, sonst verdoppelt der zweite Durchlauf die Maskierung des
+ * ersten. Innerhalb von Anfuehrungszeichen sind `&`, `-` und `::` harmlos;
+ * gefaehrlich sind nur `"` und `\`, weil sie die Anfuehrungszeichen schliessen
+ * bzw. die Maskierung kapern.
+ */
+export function maskiereFuerSuche(text: string): string {
+	return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** Suchanfrage fuer ein Deck einschliesslich seiner Unterdecks. */
+export function baueDeckAbfrage(deckName: string): string {
+	const name = maskiereFuerSuche(deckName);
+	// Ankis `deck:"X"` erfasst Unterdecks bereits mit. Der zweite Teil steht
+	// trotzdem da: er kostet nichts und macht die Absicht beim Lesen klar,
+	// statt sie in Ankis Suchsemantik nachschlagen zu muessen.
+	return `deck:"${name}" OR deck:"${name}::*"`;
+}
+
 export async function getCardCountForDeck(deckName: string): Promise<number> {
-	const result = await ankiConnectRequest('findCards', { query: `deck:"${deckName}"` });
-	return result ? result.length : 0;
+	const result = await ankiConnectRequest('findCards', { query: baueDeckAbfrage(deckName) });
+	return Array.isArray(result) ? result.length : 0;
+}
+
+/**
+ * Ob in einem Deck noch Karten liegen -- mit ausdruecklichem "weiss nicht".
+ */
+export type Deckbelegung = 'leer' | 'belegt' | 'unbekannt';
+
+/**
+ * EINE ZAHL REICHT HIER NICHT.
+ *
+ * Der Aufrufer loescht das Deck anschliessend mit `cardsToo: true`, und das
+ * ist unwiderruflich. `getCardCountForDeck()` liefert aber auch dann 0, wenn
+ * die Abfrage gar nicht durchkam oder etwas Unerwartetes zurueckgab -- ein
+ * kaputtes Ergebnis sah genauso aus wie ein wirklich leeres Deck.
+ *
+ * Darum drei Antworten statt einer Zahl. Bei 'unbekannt' wird nicht geloescht:
+ * ein Deck zu viel im Baum ist ein Schoenheitsfehler, geloeschte Karten sind
+ * verlorener Lernfortschritt.
+ */
+export async function pruefeDeckbelegung(deckName: string): Promise<Deckbelegung> {
+	if (!deckName || !deckName.trim()) return 'unbekannt';
+	try {
+		const treffer = await ankiConnectRequest('findCards', { query: baueDeckAbfrage(deckName) });
+		if (!Array.isArray(treffer)) return 'unbekannt';
+		return treffer.length === 0 ? 'leer' : 'belegt';
+	} catch (e) {
+		console.warn('[AnkiConnect] Belegung von Deck nicht ermittelbar:', deckName, e);
+		return 'unbekannt';
+	}
 }
 
 export async function getNotesInfo(noteIds: number[]): Promise<any[]> {

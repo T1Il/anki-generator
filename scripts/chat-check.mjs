@@ -244,6 +244,34 @@ const NOTE = [
 		C.entschaerfePluginFences('```mermaid\nflowchart TD\n```') === '```mermaid\nflowchart TD\n```');
 }
 
+// --- Schluessel fuer uebernommene Vorschlaege -------------------------------
+// Seitenleiste und Tab zeigen denselben Chat. Wird ein Vorschlag drueben
+// uebernommen, muss hier dieselbe Box gefunden werden - ueber den Inhalt, nicht
+// ueber die Position, denn die Nachricht kann unterschiedlich weit oben stehen.
+{
+	const ausText = (md) => C.parseSuggestions(md)[0];
+
+	const a = ausText('```anki-edit\nFIND: alt\nREPLACE: neu\n```');
+	const b = ausText('```anki-edit\nFIND: alt\nREPLACE: neu\n```');
+	const c = ausText('```anki-edit\nFIND: alt\nREPLACE: anders\n```');
+
+	check('gleicher Inhalt gibt gleichen Schluessel',
+		C.schluesselFuer(a) === C.schluesselFuer(b), [a, b]);
+	check('anderes REPLACE gibt anderen Schluessel',
+		C.schluesselFuer(a) !== C.schluesselFuer(c), [a, c]);
+
+	const karte = ausText('```anki-card\nOP: add\nQ: Frage\nA: Antwort\n```');
+	check('Kartenvorschlag hat einen eigenen Schluessel',
+		typeof C.schluesselFuer(karte) === 'string' && C.schluesselFuer(karte) !== C.schluesselFuer(a), karte);
+
+	// Der Schluessel landet als data-Attribut im DOM: keine Zeilenumbrueche,
+	// nichts, was HTML zerlegt.
+	const mehrzeilig = ausText('```anki-edit\nFIND:\nZeile 1\nZeile 2\nREPLACE:\nneu\n```');
+	const s = C.schluesselFuer(mehrzeilig);
+	check('mehrzeiliger Vorschlag ergibt einen einzeiligen Schluessel',
+		!s.includes('\n') && !s.includes('\r'), s);
+}
+
 console.log('');
 if (failures > 0) {
 	console.error(failures + ' Pruefung(en) fehlgeschlagen.');

@@ -3,7 +3,7 @@ import AnkiGeneratorPlugin from '../../main';
 import { ChatMessage } from '../../types';
 import { streamChatResponse, generateFeedbackOnly } from '../../aiGenerator';
 import { resolveProvider, PROVIDERS } from '../../providers';
-import { entschaerfePluginFences, parseSuggestions, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
+import { entschaerfePluginFences, parseSuggestions, schluesselFuer, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
 import { applySuggestion, canLocateEdit } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
@@ -70,6 +70,8 @@ export class ChatPanel extends Component {
 		this.buildInput(body);
 
 		this.renderAll();
+		// Erst nach renderAll(): vorher gibt es keine Boxen zum Markieren.
+		this.lauscheAufUebernahmen();
 	}
 
 	private buildHeader() {
@@ -238,6 +240,11 @@ export class ChatPanel extends Component {
 
 	private renderSuggestion(parent: HTMLElement, suggestion: Suggestion) {
 		const box = parent.createDiv({ cls: 'anki-suggestion' });
+		// Inhaltsschluessel am Element, damit jede andere offene Ansicht
+		// dieselbe Box wiederfindet, wenn der Vorschlag anderswo uebernommen
+		// wird.
+		const schluessel = schluesselFuer(suggestion);
+		box.dataset.ankiVorschlag = schluessel;
 
 		const title = box.createDiv({ cls: 'anki-suggestion-title' });
 		const titleIcon = title.createSpan({ cls: 'anki-chat-role-icon' });
@@ -287,8 +294,11 @@ export class ChatPanel extends Component {
 			applyBtn.setDisabled(true);
 			const result = await applySuggestion(this.plugin.app, this.sourcePath, suggestion);
 			if (result.ok) {
-				box.addClass('is-applied');
-				applyBtn.setButtonText('Übernommen');
+				this.markiereUebernommen(box, applyBtn);
+				// Jede andere offene Ansicht derselben Notiz mitziehen.
+				this.plugin.app.workspace.trigger(
+					'anki:suggestion-applied', this.sourcePath, schluessel
+				);
 			} else {
 				applyBtn.setDisabled(false);
 				box.addClass('is-missing');
@@ -367,6 +377,48 @@ export class ChatPanel extends Component {
 	}
 
 	// --- Senden -----------------------------------------------------------
+
+	/** Eine Vorschlagsbox als erledigt kennzeichnen. */
+	private markiereUebernommen(box: HTMLElement, knopf?: ButtonComponent) {
+		if (box.hasClass('is-applied')) return;
+		box.addClass('is-applied');
+		box.removeClass('is-missing');
+		if (knopf) {
+			knopf.setDisabled(true);
+			knopf.setButtonText('Übernommen');
+			return;
+		}
+		// Kam die Meldung aus einer anderen Ansicht, haben wir den
+		// ButtonComponent nicht – dann ueber das DOM.
+		const btn = box.querySelector('.anki-suggestion-actions button') as HTMLButtonElement | null;
+		if (btn) {
+			btn.disabled = true;
+			btn.setText('Übernommen');
+		}
+	}
+
+	/**
+	 * Uebernahmen aus einer anderen Ansicht nachziehen.
+	 *
+	 * Seitenleiste und Tab zeigen denselben Chat. Ohne das bleibt der
+	 * Vorschlag drueben anklickbar, und der zweite Klick meldet "Textstelle
+	 * nicht gefunden" – der Text ist ja bereits ersetzt.
+	 */
+	private lauscheAufUebernahmen() {
+		this.registerEvent(
+			this.plugin.app.workspace.on('anki:suggestion-applied' as any, ((
+				sourcePath: string, schluessel: string
+			) => {
+				if (!schluessel || sourcePath !== this.sourcePath) return;
+				const boxen = this.log.querySelectorAll('.anki-suggestion');
+				boxen.forEach((el) => {
+					if (el instanceof HTMLElement && el.dataset.ankiVorschlag === schluessel) {
+						this.markiereUebernommen(el);
+					}
+				});
+			}) as any)
+		);
+	}
 
 	private setBusy(busy: boolean) {
 		this.sendBtn.setIcon(busy ? 'square' : 'send');
@@ -481,11 +533,30 @@ export class ChatPanel extends Component {
 			this.plugin.addActiveGeneration(this.sourcePath + '::feedback', controller, 'Anki Feedback', this.sourcePath);
 		}
 
+		// DAS WARTEN MUSS IM PANEL SICHTBAR SEIN, NICHT NUR IN EINER NOTICE.
+		//
+		// Feedback kommt anders als der Chat nicht gestreamt: es passiert bis
+		// zur fertigen Antwort sichtbar gar nichts. Die Notice verschwindet
+		// hinter anderen Meldungen oder wird uebersehen, und dann sieht es
+		// aus, als haette der Knopf nicht reagiert. Deshalb dieselbe
+		// Warteblase mit den drei Punkten wie beim Streamen.
+		const platzhalter = await this.renderMessage({ role: 'ai', content: '' });
+		const blase = platzhalter.querySelector('.anki-chat-bubble') as HTMLElement | null;
+		if (blase) {
+			const punkte = blase.createDiv({ cls: 'anki-chat-typing' });
+			punkte.createSpan(); punkte.createSpan(); punkte.createSpan();
+		}
+		this.scrollToBottom();
+
 		try {
 			const { content } = await this.readNote();
 			const feedback = await generateFeedbackOnly(
 				this.plugin.app, content, provider, this.plugin.settings, controller.signal as any
 			);
+
+			// Erst die Warteblase weg, dann die echte Antwort einhaengen –
+			// sonst steht sie doppelt da.
+			platzhalter.remove();
 
 			if (feedback) {
 				this.history = appendFeedbackToCache(this.plugin, this.sourcePath, feedback);
@@ -495,8 +566,12 @@ export class ChatPanel extends Component {
 				this.plugin.app.workspace.trigger('anki:chat-update', this.sourcePath, this.history);
 			}
 		} catch (e: any) {
+			platzhalter.remove();
 			new Notice('Feedback fehlgeschlagen: ' + (e?.message || e));
 		} finally {
+			// Doppelt haelt besser: bei einem Fehler VOR dem try-Block bliebe
+			// die Blase sonst stehen.
+			if (platzhalter.isConnected) platzhalter.remove();
 			notice.hide();
 			if (this.sourcePath) this.plugin.removeActiveGeneration(this.sourcePath + '::feedback');
 		}

@@ -3,7 +3,7 @@ import { renderFeedback } from './ui/FeedbackRenderer';
 import AnkiGeneratorPlugin from './main';
 import { Card, ChatMessage } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
-import { getCardCountForDeck, moveAnkiNotesToDeck, deleteAnkiDeck, getDeckNames } from './anki/AnkiConnect';
+import { getCardCountForDeck, pruefeDeckbelegung, moveAnkiNotesToDeck, deleteAnkiDeck, getDeckNames } from './anki/AnkiConnect';
 import { AnkiParsedInfo, parseAnkiSection, parseCardsFromBlockSource, formatCardsToString, ANKI_BLOCK_REGEX, getAnkiBlockMatches, getAnkiBlocks, buildFullBlock, spliceBlock } from './anki/ankiParser';
 import { runGenerationProcess, cleanAiGeneratedText, extractImagesAndPrepareContent } from './generationManager';
 import { syncAnkiBlock, saveAnkiBlockChanges } from './anki/syncManager';
@@ -380,12 +380,18 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 				if (noteIds.length > 0) {
 					await moveAnkiNotesToDeck(noteIds, newDeckName);
 					new Notice(`${noteIds.length} Karte(n) nach "${newDeckName}" verschoben.`);
-					// Check if old deck is empty and delete it
+					// Altes Deck aufräumen -- aber nur, wenn nachweislich leer.
+					// deleteAnkiDeck() nimmt cardsToo: true, das ist
+					// unwiderruflich. Bei 'unbekannt' bleibt das Deck lieber
+					// stehen, als dass eine fehlgeschlagene Abfrage Karten
+					// mitreisst.
 					if (deckName) {
-						const cardCount = await getCardCountForDeck(deckName);
-						if (cardCount === 0) {
+						const belegung = await pruefeDeckbelegung(deckName);
+						if (belegung === 'leer') {
 							await deleteAnkiDeck(deckName);
 							new Notice(`Leeres Deck "${deckName}" gelöscht.`);
+						} else if (belegung === 'unbekannt') {
+							new Notice(`Deck "${deckName}" bleibt bestehen: Belegung nicht prüfbar.`);
 						}
 					}
 				}
