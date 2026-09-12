@@ -66,6 +66,59 @@ export function containsMermaid(text: string): boolean {
     return /```mermaid\n/i.test(text);
 }
 
+/**
+ * Das Diagramm direkt von der Mermaid-Bibliothek zeichnen lassen.
+ *
+ * Obsidians eigener Mermaid-Weg haengt am EDITOR: `initDOM()` der
+ * Live-Preview-Codeblock-Klasse ruft den Mermaid-Zweig auf, nicht
+ * `MarkdownRenderer.render()`. Rendert man Markdown in einen selbst gebauten
+ * `div`, bleibt deshalb ein gewoehnlicher Codeblock stehen — Prism faerbt ihn
+ * ein, Obsidian haengt einen Kopieren-Knopf daran, und ein Diagramm entsteht
+ * nie. Auf einem Rechner gemessen (Obsidian 1.13.7, Win32): alle vier
+ * Container-Varianten (fixed/absolute, sichtbar/unsichtbar) lieferten
+ * `<pre><code class="language-mermaid is-loaded">` und kein SVG — ohne eine
+ * einzige Fehlermeldung.
+ *
+ * `window.mermaid.render()` dagegen liefert das SVG unabhaengig von Ansicht,
+ * Sichtbarkeit und Vault-Freigabe. Nebeneffekt, der uns entgegenkommt: das SVG
+ * kommt in hellen Farben. Obsidian dreht Diagramme im Dunkelmodus erst per CSS
+ * (`.theme-dark .mermaid > svg { filter: invert(...) }`) — was auf einem
+ * weissen PNG fuer Anki genau falsch waere.
+ */
+async function renderMermaidViaBibliothek(mermaidCode: string): Promise<string | null> {
+    const mermaid = (window as unknown as { mermaid?: { render?: unknown } }).mermaid;
+    if (!mermaid || typeof mermaid.render !== 'function') return null;
+
+    const id = `anki-mermaid-svg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    let svgText: string | null = null;
+    try {
+        const ergebnis = await (mermaid.render as (id: string, code: string) => unknown)(id, mermaidCode);
+        if (typeof ergebnis === 'string') svgText = ergebnis;
+        else if (ergebnis && typeof (ergebnis as { svg?: string }).svg === 'string') {
+            svgText = (ergebnis as { svg: string }).svg;
+        }
+    } catch (e) {
+        console.warn('[MermaidRenderer] mermaid.render() ist gescheitert:', e);
+        return null;
+    }
+    if (!svgText) return null;
+
+    // Das SVG muss im Dokument haengen: svgToPngBase64() misst per
+    // getBoundingClientRect() und liest berechnete Stile aus.
+    const host = document.createElement('div');
+    host.style.cssText =
+        'position:absolute;left:-9999px;top:0;width:1200px;pointer-events:none';
+    document.body.appendChild(host);
+    try {
+        host.innerHTML = svgText;
+        const svg = host.querySelector('svg');
+        if (!svg) return null;
+        return await svgToPngBase64(svg as SVGSVGElement);
+    } finally {
+        host.remove();
+    }
+}
+
 async function renderMermaidToPng(mermaidCode: string, app: App): Promise<string | null> {
     const container = document.createElement('div');
     container.style.position = 'fixed';
@@ -80,6 +133,12 @@ async function renderMermaidToPng(mermaidCode: string, app: App): Promise<string
     component.load();
 
     try {
+        // Zuerst der verlaessliche Weg: die Bibliothek direkt.
+        const direkt = await renderMermaidViaBibliothek(mermaidCode);
+        if (direkt) return direkt;
+        console.warn('[MermaidRenderer] mermaid.render() nicht verfuegbar —',
+            'weiche auf Obsidians Nachbearbeitung aus.');
+
         const markdown = `\`\`\`mermaid\n${mermaidCode}\n\`\`\``;
         await MarkdownRenderer.render(app, markdown, container, '', component);
 
