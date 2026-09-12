@@ -62,6 +62,54 @@ export async function processMermaidBlocks(text: string, app: App): Promise<stri
 /**
  * Checks if text contains any mermaid code blocks (with or without closing fence).
  */
+/**
+ * Mermaid-Codebloecke in einem bereits gerenderten Element nachtraeglich zeichnen.
+ *
+ * Obsidian zeichnet Mermaid nur auf seinem eigenen Weg (siehe
+ * `renderMermaidViaBibliothek`): der Mermaid-Zweig haengt am Editor, nicht an
+ * `MarkdownRenderer.render()`. Wer Markdown selbst in ein Element rendert —
+ * die Kartenvorschau tut das —, bekommt deshalb einen syntaxgefaerbten
+ * Codeblock statt eines Diagramms.
+ *
+ * Hier wird derselbe Block nachtraeglich ersetzt. Die Huelle traegt bewusst
+ * die Klasse `mermaid`: daran haengt Obsidians eigene Regel
+ * `.theme-dark .mermaid > svg { filter: invert(…) }`, das Diagramm passt sich
+ * im Dunkelmodus also an wie ein normal gerendertes.
+ *
+ * Fehler werden geschluckt und der Codeblock bleibt stehen — in einer Vorschau
+ * ist ein lesbarer Quelltext besser als eine leere Flaeche.
+ */
+export async function renderMermaidInElement(el: HTMLElement): Promise<void> {
+    const mermaid = (window as unknown as { mermaid?: { render?: unknown } }).mermaid;
+    if (!mermaid || typeof mermaid.render !== 'function') return;
+
+    const bloecke = Array.from(el.querySelectorAll('code.language-mermaid'));
+    for (const code of bloecke) {
+        const quelle = (code.textContent || '').replace(/\n$/, '').trim();
+        if (!quelle) continue;
+
+        const ziel = code.parentElement instanceof HTMLPreElement ? code.parentElement : code;
+        const id = `anki-vorschau-mermaid-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+        try {
+            const ergebnis = await (mermaid.render as (id: string, code: string) => unknown)(id, quelle);
+            let svgText: string | null = null;
+            if (typeof ergebnis === 'string') svgText = ergebnis;
+            else if (ergebnis && typeof (ergebnis as { svg?: string }).svg === 'string') {
+                svgText = (ergebnis as { svg: string }).svg;
+            }
+            if (!svgText) continue;
+
+            const huelle = document.createElement('div');
+            huelle.addClass('mermaid');
+            huelle.innerHTML = svgText;
+            ziel.replaceWith(huelle);
+        } catch (e) {
+            console.warn('[MermaidRenderer] Vorschau: mermaid.render() gescheitert —',
+                'der Codeblock bleibt stehen.', e);
+        }
+    }
+}
+
 export function containsMermaid(text: string): boolean {
     return /```mermaid\n/i.test(text);
 }

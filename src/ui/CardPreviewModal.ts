@@ -1,4 +1,5 @@
 import { Modal, Setting, Notice, MarkdownRenderer, setIcon, TFile } from 'obsidian';
+import { renderMermaidInElement } from '../mermaidRenderer';
 import { Card } from '../types';
 import { CardEditModal } from './CardEditModal';
 import AnkiGeneratorPlugin from '../main';
@@ -363,11 +364,17 @@ export class CardPreviewModal extends Modal {
 
 		const qDiv = body.createDiv({ cls: 'anki-card-q' });
 		const highlightedQ = this.highlightClozes(stripHybridObsidianLinks(card.q));
-		void MarkdownRenderer.render(this.app, highlightedQ, qDiv, sourcePath, this.plugin);
 
 		const aDiv = body.createDiv({ cls: 'anki-card-a' });
 		const highlightedA = this.highlightClozes(stripHybridObsidianLinks(card.a));
-		void MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
+
+		// Erst rendern, dann die Mermaid-Bloecke nachziehen: Obsidian zeichnet
+		// sie hier nicht selbst, der Mermaid-Zweig haengt am Editor.
+		void (async () => {
+			await MarkdownRenderer.render(this.app, highlightedQ, qDiv, sourcePath, this.plugin);
+			await MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
+			await renderMermaidInElement(body);
+		})();
 	}
 
 	private buildCardEl(card: Card, index: number, sourcePath: string): HTMLElement {
