@@ -103,21 +103,48 @@ async function renderMermaidToPng(mermaidCode: string, app: App): Promise<string
     }
 }
 
+/**
+ * Das SVG des Diagramms finden — und ausschliesslich dieses.
+ *
+ * Ist Mermaid fuer den Vault nicht freigegeben (Obsidian 1.13 fragt einmal
+ * „Display Mermaid diagrams in this vault?"), rendert Obsidian statt eines
+ * Diagramms einen CODEBLOCK mit dem Quelltext — und an jeden Codeblock haengt
+ * es einen Kopieren-Knopf, der selbst ein <svg> traegt. Ein blosses
+ * `querySelector('svg')` greift dann genau dieses Symbol ab.
+ *
+ * Bis zum 12.09.2026 landete deshalb das Kopieren-Symbol als PNG in Anki. Der
+ * Fehler war zaeh, weil nichts fehlschlug: die Datei war ein gueltiges PNG,
+ * der Upload meldete Erfolg, das <img> in der Karte stimmte — nur zeigte es
+ * zwei kleine Rechtecke statt des Flussdiagramms.
+ */
+function findMermaidSvg(container: HTMLElement): SVGSVGElement | null {
+    const kandidaten = Array.from(container.querySelectorAll('svg'));
+    const diagramm = kandidaten.find(
+        (s) =>
+            !s.classList.contains('svg-icon') && // Obsidians Symbol-SVGs
+            !s.closest('button') && // alles, was in einem Knopf steckt
+            (s.id.startsWith('mermaid') ||
+                s.hasAttribute('aria-roledescription') || // z. B. "flowchart-v2"
+                s.closest('.mermaid') !== null)
+    );
+    return (diagramm ?? null) as SVGSVGElement | null;
+}
+
 async function waitForSvg(container: HTMLElement, timeout: number): Promise<SVGSVGElement | null> {
     // Check immediately
-    const existing = container.querySelector('svg');
-    if (existing) return existing as SVGSVGElement;
+    const existing = findMermaidSvg(container);
+    if (existing) return existing;
 
     return new Promise((resolve) => {
         let resolved = false;
 
         const observer = new MutationObserver(() => {
-            const svg = container.querySelector('svg');
+            const svg = findMermaidSvg(container);
             if (svg && !resolved) {
                 resolved = true;
                 observer.disconnect();
                 // Give mermaid a moment to finalize the SVG
-                setTimeout(() => resolve(svg as SVGSVGElement), 300);
+                setTimeout(() => resolve(svg), 300);
             }
         });
         observer.observe(container, { childList: true, subtree: true });
@@ -126,7 +153,7 @@ async function waitForSvg(container: HTMLElement, timeout: number): Promise<SVGS
             if (!resolved) {
                 resolved = true;
                 observer.disconnect();
-                resolve(container.querySelector('svg') as SVGSVGElement | null);
+                resolve(findMermaidSvg(container));
             }
         }, timeout);
     });

@@ -301,6 +301,7 @@ export class CardPreviewModal extends Modal {
 
 			const cardEl = this.buildCardEl(card, index, sourcePath);
 			container.appendChild(cardEl);
+			this.renderCardBody(cardEl, card, sourcePath);
 			this.cardEls.set(index, cardEl);
 		});
 	}
@@ -344,7 +345,29 @@ export class CardPreviewModal extends Modal {
 
 		const newEl = this.buildCardEl(card, index, this.cardsSourcePath);
 		oldEl.replaceWith(newEl);
+		this.renderCardBody(newEl, card, this.cardsSourcePath);
 		this.cardEls.set(index, newEl);
+	}
+
+	/**
+	 * Frage und Antwort in eine Karte rendern, die bereits im Dokument haengt.
+	 *
+	 * Das muss NACH dem Einhaengen passieren. Obsidians Mermaid-Nachbearbeitung
+	 * misst Text, um das Diagramm zu legen; auf einem losgeloesten Element gibt
+	 * es kein Layout, sie zeichnet nie, und im <pre> bleibt die nackte
+	 * Mermaid-Syntax stehen. Der Sync-Pfad (mermaidRenderer.ts) macht es
+	 * richtig — er haengt sein Container-Div vorher an document.body.
+	 */
+	private renderCardBody(cardEl: HTMLElement, card: Card, sourcePath: string): void {
+		const body = cardEl.createDiv({ cls: 'anki-card-body' });
+
+		const qDiv = body.createDiv({ cls: 'anki-card-q' });
+		const highlightedQ = this.highlightClozes(stripHybridObsidianLinks(card.q));
+		void MarkdownRenderer.render(this.app, highlightedQ, qDiv, sourcePath, this.plugin);
+
+		const aDiv = body.createDiv({ cls: 'anki-card-a' });
+		const highlightedA = this.highlightClozes(stripHybridObsidianLinks(card.a));
+		void MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
 	}
 
 	private buildCardEl(card: Card, index: number, sourcePath: string): HTMLElement {
@@ -554,19 +577,8 @@ export class CardPreviewModal extends Modal {
 				this.renderCards();
 			};
 
-			// --- Body: Question & Answer ---
-			const body = cardEl.createDiv({ cls: 'anki-card-body' });
-
-			// Question
-			const qDiv = body.createDiv({ cls: 'anki-card-q' });
-			const highlightedQ = this.highlightClozes(stripHybridObsidianLinks(card.q));
-			MarkdownRenderer.render(this.app, highlightedQ, qDiv, sourcePath, this.plugin);
-
-			// Answer
-			const aDiv = body.createDiv({ cls: 'anki-card-a' });
-			const highlightedA = this.highlightClozes(stripHybridObsidianLinks(card.a));
-			MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
-
+			// Der Rumpf wird bewusst NICHT hier gerendert, sondern erst, wenn das
+			// Element im Dokument haengt — siehe renderCardBody().
 			return cardEl;
 		}
 	}
