@@ -1069,6 +1069,7 @@ textarea.schema-hintergrund {
 /* --- Chat groß im Modal: links Chat, rechts Vergleich --- */
 
 .modal.anki-chat-modal {
+	box-sizing: border-box;
 	width: min(96vw, 1700px);
 	max-width: 96vw;
 	height: 90vh;
@@ -1088,7 +1089,7 @@ textarea.schema-hintergrund {
 	flex: 1 1 auto;
 	min-height: 0;
 	display: grid;
-	grid-template-columns: minmax(380px, 5fr) 6fr;
+	grid-template-columns: minmax(340px, 5fr) minmax(0, 6fr);
 	gap: var(--size-4-4);
 }
 
@@ -1233,3 +1234,42 @@ textarea.schema-hintergrund {
 	}
 	.anki-vergleich-spalten { grid-template-columns: 1fr; }
 }
+
+/*
+ * Chat und Vergleich markierbar. Obsidian setzt body { user-select: none }.
+ * Nur die Blasen freizugeben reicht nicht: zieht die Maus ueber einen
+ * gesperrten Zwischenraum (Abstand zwischen Nachrichten, Rand), springt
+ * Chromium auf ganze Bloecke. Deshalb – wie Obsidians .markdown-preview-view –
+ * die ganze Scrollflaeche freigeben und nur Bedienelemente sperren.
+ */
+.anki-chat-log,
+.anki-vergleich-inhalt {
+	user-select: text;
+	-webkit-user-select: text;
+}
+.anki-chat-log button,
+.anki-chat-log .anki-chat-role,
+.anki-chat-log .anki-suggestion-title,
+.anki-chat-log .anki-suggestion-actions,
+.anki-chat-log .anki-suggestion-source-toggle,
+.anki-vergleich-inhalt .anki-vergleich-spaltentitel {
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.anki-chat-copy {
+	margin-left: auto;
+	padding: 2px 4px;
+	height: auto;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-faint);
+	opacity: 0;
+	transition: opacity 0.1s;
+}
+.anki-chat-copy .svg-icon { width: 13px; height: 13px; }
+.anki-chat-message:hover .anki-chat-copy,
+.anki-vergleich-spalte:hover .anki-chat-copy { opacity: 1; }
+.anki-chat-copy:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.anki-vergleich-spaltentitel { display: flex; align-items: center; }
+.anki-chat-modal-chat, .anki-chat-modal-vergleich { min-width: 0; }

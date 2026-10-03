@@ -278,6 +278,14 @@ export class ChatPanel extends Component {
 		setIcon(roleIcon, msg.role === 'ai' ? 'bot' : 'user');
 		role.createSpan({ text: msg.role === 'ai' ? 'KI' : 'Du' });
 
+		// Ganze Nachricht als Markdown kopieren – msg.content erst beim Klick
+		// lesen, der Platzhalter einer gestreamten Antwort wird spaeter befuellt.
+		const kopieren = role.createEl('button', { cls: 'anki-chat-copy', attr: { 'aria-label': 'Nachricht kopieren' } });
+		setIcon(kopieren, 'copy');
+		kopieren.addEventListener('click', () => {
+			void navigator.clipboard.writeText(msg.content).then(() => new Notice('Kopiert.'));
+		});
+
 		const bubble = wrapper.createDiv({ cls: 'anki-chat-bubble' });
 		await this.renderBody(bubble, msg.content, msg.role === 'ai');
 
@@ -375,6 +383,8 @@ export class ChatPanel extends Component {
 			box.addEventListener('click', (e) => {
 				// Knöpfe haben eigene Aufgaben; „Quelltext zeigen" auch.
 				if ((e.target as HTMLElement).closest('button, .anki-suggestion-source-toggle')) return;
+				// Wer Text markiert, will kopieren, nicht den Vergleich wechseln.
+				if (window.getSelection()?.toString()) return;
 				this.markiereGewaehlt(box);
 				this.options.onVorschlagWaehlen && this.options.onVorschlagWaehlen(aktuell);
 			});

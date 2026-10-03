@@ -1,4 +1,4 @@
-import { Component, MarkdownRenderer, Modal, TFile, TAbstractFile, loadMermaid, setIcon } from 'obsidian';
+import { Component, MarkdownRenderer, Modal, Notice, TFile, TAbstractFile, loadMermaid, setIcon } from 'obsidian';
 import AnkiGeneratorPlugin from '../../main';
 import { ChatMessage } from '../../types';
 import { ChatPanel } from './ChatPanel';
@@ -164,13 +164,23 @@ export class ChatModal extends Modal {
 		}
 
 		const spalten = this.inhalt.createDiv({ cls: 'anki-vergleich-spalten' });
-		const spalte = (titel: string, cls: string) => {
+		const quelle = (k: { q: string; a: string } | null) => !k ? '' : k.a ? `Q: ${k.q}\nA: ${k.a}` : `Q: ${k.q}`;
+		const spalte = (titel: string, cls: string, text: string) => {
 			const s = spalten.createDiv({ cls: 'anki-vergleich-spalte ' + cls });
-			s.createDiv({ cls: 'anki-vergleich-spaltentitel', text: titel });
+			const kopf = s.createDiv({ cls: 'anki-vergleich-spaltentitel' });
+			kopf.createSpan({ text: titel });
+			if (text) {
+				// Markdown-Quelltext kopieren; markierter Text geht ohnehin.
+				const k = kopf.createEl('button', { cls: 'anki-chat-copy', attr: { 'aria-label': titel + ' kopieren' } });
+				setIcon(k, 'copy');
+				k.addEventListener('click', () => {
+					void navigator.clipboard.writeText(text).then(() => new Notice('Kopiert.'));
+				});
+			}
 			return s.createDiv({ cls: 'anki-vergleich-spalteninhalt markdown-rendered' });
 		};
-		const vorher = spalte('Vorher', 'is-vorher');
-		const nachher = spalte('Nachher', 'is-nachher');
+		const vorher = spalte('Vorher', 'is-vorher', v.art === 'text' ? v.vorher : quelle(v.vorher));
+		const nachher = spalte('Nachher', 'is-nachher', v.art === 'text' ? v.nachher : quelle(v.nachher));
 
 		if (v.art === 'text') {
 			if (v.vorher) await this.inhaltOderQuelle(vorher, v.vorher);
