@@ -23,7 +23,8 @@ fs.writeFileSync(entry, [
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/insertText.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/mermaidRepair.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/kartenSuche.ts').replace(/\\/g, '/')) + ";",
-	"export * from " + JSON.stringify(path.join(root, 'src/chat/vergleich.ts').replace(/\\/g, '/')) + ";"
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/vergleich.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/anki/legacyStrip.ts').replace(/\\/g, '/')) + ";"
 ].join('\n'));
 
 const outfile = path.join(os.tmpdir(), 'anki-chat-check.cjs');
@@ -479,6 +480,21 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 	const instr = C.SUGGESTION_FORMAT_INSTRUCTIONS;
 	check('Anweisungen verbieten ID:', instr.includes('NIEMALS eine `ID:`'));
 	check('Anweisungen nennen subgraph-Form', instr.includes('subgraph an["Anlegen (Donning)"]'));
+}
+
+// --- Legacy-Karten nicht an die KI ---
+{
+	const note = [
+		'# PSA', '', 'Text bleibt.', '## Anki', '', 'TARGET DECK', 'NFS-Ausbildung::Hygiene', '',
+		'Q: Alt?', 'A: alt', '<!--ID: 1749890860503-->', '', '',
+		'## Anki', '', '```anki-cards', 'TARGET DECK: NFS-AI::Hygiene', '', 'Q: Neu?', 'A: neu', 'ID: 42', '```',
+		'', '> [!example]- Archivierte Anki-Karten', '> TARGET DECK', '> Q: Archiv?', '', 'Schluss.'
+	].join('\n');
+	const r = C.ohneAlteKarten(note);
+	check('Legacy-Karten entfernt', !r.includes('Alt?') && !r.includes('<!--ID') && !r.includes('Archiv?'), r);
+	check('anki-cards-Block bleibt', r.includes('```anki-cards\nTARGET DECK: NFS-AI::Hygiene') && r.includes('Q: Neu?'), r);
+	check('leere ## Anki fällt weg, die mit Block bleibt', (r.match(/## Anki/g) || []).length === 1, r);
+	check('Fließtext bleibt', r.includes('Text bleibt.') && r.includes('Schluss.'), r);
 }
 
 console.log('');

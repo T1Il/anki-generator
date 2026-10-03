@@ -7,7 +7,8 @@ import { entschaerfePluginFences, mermaidAusVorschlag, parseSuggestions, schlues
 import { applySuggestion, canLocateEdit, pruefeKartenVorschlag } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
-import { getAnkiBlocks, parseCardsFromBlockSource, formatCardsToExistingCardsString } from '../../anki/ankiParser';
+import { ohneAlteKarten } from '../../anki/legacyStrip';
+import { getAnkiBlocks,parseCardsFromBlockSource, formatCardsToExistingCardsString } from '../../anki/ankiParser';
 import { ZoteroClient, ZoteroSource, collectionPath } from '../../zotero/zoteroClient';
 import { ZoteroAbgleichModal, AbgleichAuswahl } from '../ZoteroAbgleichModal';
 import { MedikamentQuellenModal } from '../MedikamentQuellenModal';
@@ -576,7 +577,8 @@ export class ChatPanel extends Component {
 			.map(b => parseCardsFromBlockSource(b.innerClean))
 			.reduce((acc, list) => acc.concat(list), []);
 
-		return { content, cards: formatCardsToExistingCardsString(cards) };
+		// Alte Legacy-Karten nicht mitschicken – siehe legacyStrip.ts.
+		return { content: ohneAlteKarten(content), cards: formatCardsToExistingCardsString(cards) };
 	}
 
 	// --- Senden -----------------------------------------------------------

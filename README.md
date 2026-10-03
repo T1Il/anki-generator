@@ -16,14 +16,21 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
 - Analyzes note content and gives feedback suited for medical/preclinical study contexts.
 - **Applicable suggestions**: the model returns changes in a machine-readable
   block, and the chat renders each one as a diff with an **Übernehmen** button.
-  Card changes are addressed by note ID, so they apply without any text search;
-  changes to note prose are located even when the passage contains wikilinks,
-  bold markers or typographic quotes.
+  Card changes are addressed by their card number (`CARD:`), so they apply without any
+  text search; an unknown ID is caught before the click (fallback: matching question,
+  or **Als neue Karte** for old `<!--ID-->` cards). Changes to note prose are located
+  even when the passage contains wikilinks, bold markers or typographic quotes.
+- **Full-size chat**: *Chat öffnen* (or ⤢ in the chat header) opens a modal with the
+  chat on the left and, on the right, a before/after comparison of the selected
+  suggestion — rendered, diagrams included — or the whole note.
+- **Legacy cards stay out of the prompt**: old `TARGET DECK` blocks with `<!--ID-->`
+  comments are removed from the note text sent to the model (the note is untouched).
 - **Insertions** (`anki-insert`, after an anchor line) for new sections; a new card in a
   note without cards creates the `## Anki` block (deck taken from neighbouring notes).
 - **Mermaid diagrams**: for processes (mechanism, kinetics, decision paths) the model
   proposes a diagram in the vault's style plus a card that asks for it. The suggestion
-  shows the rendered diagram and is blocked if Mermaid reports a syntax error.
+  shows the rendered diagram and is blocked if Mermaid reports a syntax error; common
+  model mistakes (unquoted subgraph titles or labels with parentheses) are repaired first.
 - **Open questions** written into a note (e.g. `(Frage: …)`) are answered with evidence;
   the suggestion replaces the question with the answer.
 - Streams responses, keeps a per-note history across restarts, and can be opened

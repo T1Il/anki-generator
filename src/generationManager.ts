@@ -7,6 +7,7 @@ import { ModelSelectionModal } from './ui/ModelSelectionModal';
 // DebugModal wird in aiGenerator verwendet
 import { parseAnkiSection, parseCardsFromBlockSource, ANKI_BLOCK_REGEX, getAnkiBlockMatches, getAnkiBlocks, buildFullBlock, parseBlockHeader } from './anki/ankiParser';
 import { getDeckNames } from './anki/AnkiConnect';
+import { ohneAlteKarten } from './anki/legacyStrip';
 import { generateCardsWithAI } from './aiGenerator';
 import { ImageInput, ChatMessage } from './types';
 import { arrayBufferToBase64, getMimeType, ensureBlockIdsForCallouts } from './utils';
@@ -127,7 +128,8 @@ export async function runGenerationProcess(
 		console.log("--- Existing Cards sent to AI (after ensureAnkiBlock) ---\n", existingCards, "\n--- End Existing Cards ---");
 
 		notice.setMessage(t('notice.searchingImages'));
-		const currentContentForAI = editor.getValue();
+		// Alte Legacy-Karten nicht mitschicken – siehe legacyStrip.ts.
+		const currentContentForAI = ohneAlteKarten(editor.getValue());
 
 		// Bilder extrahieren und Content vorbereiten
 		const activeFile = plugin.app.workspace.getActiveFile();

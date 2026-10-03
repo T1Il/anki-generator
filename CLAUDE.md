@@ -49,6 +49,7 @@ reload Obsidian.
 - `src/ui/chat/ChatModal.ts` — The chat full-size: chat left, before/after comparison (`chat/vergleich.ts`) or rendered note right
 - `src/chat/mermaidRepair.ts` — Fixes common LLM Mermaid errors (unquoted subgraph titles/labels with parentheses) before preview, apply and sync
 - `src/chat/kartenSuche.ts` — Resolves update/delete targets: ID → CARD → question similarity; detects legacy `<!--ID-->` cards
+- `src/anki/legacyStrip.ts` — `ohneAlteKarten()`: strips legacy cards (plain `TARGET DECK` blocks, archived callouts, `<!--ID-->` lines) from note text before it goes to any LLM. Every new AI entry point must use it, otherwise the model treats old cards as existing and reuses their IDs
 - `src/zotero/zoteroClient.ts` — Zotero local API (collections, items, attachment/full-text paths)
 - `src/ui/MedikamentQuellenModal.ts` + `src/agent/quellenPrompt.ts` — drug sources: agent proposes a JSON plan, user ticks, Fitness-Manager backend writes to Zotero
 - `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable)
