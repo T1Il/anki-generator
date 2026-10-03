@@ -17,7 +17,7 @@ npm run version      # Bump version in manifest.json & versions.json
 eslint ./src/        # Lint (requires global eslint: npm install -g eslint)
 ```
 
-`npm test` runs four standalone scripts under `scripts/`. They bundle the
+`npm test` runs standalone scripts under `scripts/`. They bundle the
 relevant module with esbuild (stubbing `obsidian`, whose imports are types
 only) and run fixtures against it — no test framework needed. Run them after
 any change to the parser, the chat suggestion format, the suggestion apply
@@ -46,6 +46,8 @@ reload Obsidian.
 - `src/anki/driftCheck.ts` — Compares notes against Anki, classifies the difference
 - `src/chat/` — Suggestion format/parsing, applying suggestions, text location, chat history
 - `src/ui/chat/ChatPanel.ts` — The AI chat (incremental rendering, streaming)
+- `src/zotero/zoteroClient.ts` — Zotero local API (collections, items, attachment/full-text paths)
+- `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable)
 - `src/ui/` — Modal/view components (preview, edit, deck selection, drift review, decorations)
 - `src/lang/` — i18n (German `de.ts`, English `en.ts`)
 - `src/types.ts` — `Card`, `ChatMessage`, `ChatTurn`, `ImageInput`, `AiProvider`

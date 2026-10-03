@@ -22,6 +22,19 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
 - Streams responses, keeps a per-note history across restarts, and can be opened
   in the sidebar or as a full tab.
 
+### Zotero cross-check (Claude agent, desktop only)
+- The **library** button in the chat header opens a picker for Zotero collections
+  (the collection named like the note is preselected, subcollections optional).
+- A Claude agent (`claude -p`, the Claude CLI) reads the sources — Zotero's full-text
+  cache first, then PDF/HTML — and compares them with the note and its cards:
+  errors, contradictions between sources, gaps, badly posed cards.
+- Its answer arrives in the chat with the usual **Übernehmen** suggestions; the agent
+  itself only has read tools (Read/Grep/Glob) and never writes files.
+- Optional **web research** (WebSearch/WebFetch); such evidence is marked
+  "außerhalb Zotero".
+- Needs Zotero 7 with the local API enabled (Settings → Advanced → "Allow other
+  applications on this computer to communicate with Zotero") and a logged-in Claude CLI.
+
 ### Anki Synchronization
 - **AnkiConnect**: Syncs cards directly to Anki. Requires the AnkiConnect add-on.
 - **Global Sync**: Identification and synchronization of all unsynced cards in the vault.

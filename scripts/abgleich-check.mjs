@@ -1,0 +1,165 @@
+/**
+ * Fixture-Test für den Zotero-Abgleich: Prompt, CLI-Argumente, stream-json.
+ *   node scripts/abgleich-check.mjs
+ *
+ * Mit --live <Notizpfad> <Sammlungsname> laeuft zusaetzlich ein echter Abgleich
+ * gegen die laufende Zotero-App und die Claude CLI (dauert Minuten, kostet).
+ */
+
+import esbuild from 'esbuild';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '..');
+
+// requestUrl ueber fetch nachbilden, damit der Zotero-Client auch ausserhalb
+// von Obsidian laeuft.
+const stubFile = path.join(os.tmpdir(), 'anki-obsidian-stub-abgleich.cjs');
+fs.writeFileSync(stubFile, `module.exports = {
+  requestUrl: async ({ url }) => {
+    const r = await fetch(url);
+    const text = await r.text();
+    let json = null; try { json = JSON.parse(text); } catch {}
+    return { status: r.status, json, text };
+  }
+};\n`);
+
+const entry = path.join(os.tmpdir(), 'anki-abgleich-entry.ts');
+const src = (f) => JSON.stringify(path.join(root, f).replace(/\\/g, '/'));
+fs.writeFileSync(entry, [
+	`export * from ${src('src/agent/abgleichPrompt.ts')};`,
+	`export * from ${src('src/agent/claudeAgent.ts')};`,
+	`export * from ${src('src/zotero/zoteroClient.ts')};`,
+	`export * from ${src('src/chat/suggestions.ts')};`,
+	`export * from ${src('src/anki/ankiParser.ts')};`
+].join('\n'));
+
+const outfile = path.join(os.tmpdir(), 'anki-abgleich-check.cjs');
+await esbuild.build({
+	entryPoints: [entry], bundle: true, format: 'cjs', platform: 'node',
+	target: 'es2020', external: ['obsidian'], outfile, logLevel: 'silent'
+});
+
+const require = createRequire(import.meta.url);
+const Module = require('module');
+const originalResolve = Module._resolveFilename;
+Module._resolveFilename = function (request, ...rest) {
+	if (request === 'obsidian') return stubFile;
+	return originalResolve.call(this, request, ...rest);
+};
+const m = require(outfile);
+
+let failed = 0;
+const check = (name, cond, info = '') => {
+	console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${name}${cond ? '' : '  ' + info}`);
+	if (!cond) failed++;
+};
+
+const storage = path.join('C:', 'Zotero', 'storage');
+const sources = [{
+	key: 'A', itemType: 'book', title: 'Pharmakologie', creators: 'Karow', date: '2024', url: '',
+	collectionName: 'Ondansetron',
+	attachments: [{ key: 'X1', title: 'Buch.pdf', contentType: 'application/pdf',
+		filePath: path.join(storage, 'X1', 'Buch.pdf'), fullTextPath: path.join(storage, 'X1', '.zotero-ft-cache') }],
+	notes: ['Markierung: 4 mg i.v.']
+}, {
+	key: 'B', itemType: 'webpage', title: 'Gelbe Liste', creators: '', date: '', url: 'https://example.org',
+	collectionName: 'Ondansetron',
+	attachments: [{ key: 'L1', title: 'verknüpft', contentType: 'text/html',
+		filePath: path.join('D:', 'Fremd', 'seite.html'), fullTextPath: null }],
+	notes: []
+}];
+
+console.log('Prompt');
+const prompt = m.buildAbgleichPrompt({
+	noteTitle: 'Ondansetron', noteContent: 'Dosis 8 mg', cards: 'CARD: 1\nQ: Dosis?\nA: 8 mg',
+	sources, research: false, extra: 'Kinderdosis prüfen'
+});
+check('enthält Notiz', prompt.includes('Dosis 8 mg'));
+check('enthält Volltext-Pfad', prompt.includes('.zotero-ft-cache'));
+check('enthält Zotero-Notiz', prompt.includes('Markierung: 4 mg'));
+check('enthält Vorschlagsformat', prompt.includes('```anki-card') && prompt.includes('```anki-edit'));
+check('verbietet Web ohne Recherche', prompt.includes('Recherchiere NICHT im Web'));
+check('Zusatzauftrag', prompt.includes('Kinderdosis prüfen'));
+check('Kartennummern', prompt.includes('CARD: 1'));
+const mitWeb = m.buildAbgleichPrompt({ noteTitle: 'x', noteContent: '', cards: '', sources, research: true, extra: '' });
+check('erlaubt Web mit Recherche', mitWeb.includes('WebSearch') && !mitWeb.includes('Recherchiere NICHT'));
+
+console.log('Lesbare Verzeichnisse');
+const dirs = m.readableDirs(sources, storage);
+check('storage als Ganzes', dirs[0] === storage, JSON.stringify(dirs));
+check('verknüpfter Ordner extra', dirs.includes(path.join('D:', 'Fremd')), JSON.stringify(dirs));
+check('kein Anhangsordner einzeln', !dirs.some((d) => d.includes('X1')), JSON.stringify(dirs));
+
+console.log('CLI-Argumente');
+const ohne = m.agentArgs({ addDirs: [storage], research: false, model: '' });
+check('Druckmodus + stream-json', ohne.includes('-p') && ohne.includes('stream-json'));
+check('ohne Recherche kein Web', !ohne.includes('WebSearch'));
+check('keine Schreibwerkzeuge', !ohne.some((a) => /^(Edit|Write|Bash)$/.test(a)));
+check('add-dir', ohne.join(' ').includes('--add-dir ' + storage));
+const mit = m.agentArgs({ addDirs: [], research: true, model: 'opus' });
+check('mit Recherche Web', mit.includes('WebSearch') && mit.includes('WebFetch'));
+check('Modell', mit.join(' ').includes('--model opus'));
+
+console.log('stream-json');
+const ev = m.describeStreamLine({ type: 'assistant', message: { content: [
+	{ type: 'tool_use', name: 'Grep', input: { pattern: 'Ondansetron', path: storage } },
+	{ type: 'text', text: 'Zwischenstand' }
+] } });
+check('Werkzeug erkannt', ev[0]?.kind === 'tool' && ev[0].detail === 'Ondansetron', JSON.stringify(ev));
+check('Text erkannt', ev[1]?.kind === 'text');
+check('anderes ignoriert', m.describeStreamLine({ type: 'system' }).length === 0);
+
+console.log('Zotero');
+const all = [
+	{ key: 'M', name: 'Medikamente', parentKey: null, numItems: 0, numCollections: 1 },
+	{ key: 'O', name: 'Ondansetron', parentKey: 'M', numItems: 6, numCollections: 1 },
+	{ key: 'K', name: 'Kinder', parentKey: 'O', numItems: 2, numCollections: 0 }
+];
+check('Unterordner rekursiv', m.withDescendants(['M'], all).sort().join() === 'K,M,O');
+check('Sammlungspfad', m.collectionPath('K', all) === 'Medikamente › Ondansetron › Kinder');
+check('HTML entfernt', m.stripHtml('<p>a&amp;b</p><p>c</p>') === 'a&b\nc');
+
+if (failed) {
+	console.log(`\n${failed} Prüfung(en) fehlgeschlagen.`);
+	process.exit(1);
+}
+console.log('\nAlle Pruefungen bestanden.');
+
+// --- Live-Probe ------------------------------------------------------------
+const li = process.argv.indexOf('--live');
+if (li > 0) {
+	const notePath = process.argv[li + 1];
+	const sammlung = process.argv[li + 2];
+	const research = process.argv.includes('--web');
+	const dataDir = m.defaultZoteroDataDir();
+	const client = new m.ZoteroClient('http://localhost:23119/api', dataDir);
+	const cols = await client.collections();
+	const keys = cols.filter((c) => c.name === sammlung).map((c) => c.key);
+	const srcs = await client.sources(keys, cols, true);
+	console.log(`\nLive: ${srcs.length} Quellen in „${sammlung}"`);
+	srcs.forEach((s) => console.log(`  - ${s.title} | Dateien: ${s.attachments.filter((a) => a.fullTextPath || a.filePath).length}/${s.attachments.length}`));
+
+	const content = fs.readFileSync(notePath, 'utf8');
+	const cards = m.getAnkiBlocks(content).flatMap((b) => m.parseCardsFromBlockSource(b.innerClean));
+	const p = m.buildAbgleichPrompt({
+		noteTitle: path.basename(notePath, '.md'), noteContent: content,
+		cards: m.formatCardsToExistingCardsString(cards), sources: srcs, research, extra: ''
+	});
+	const t0 = Date.now();
+	const res = await m.runClaudeAgent({
+		cliPath: m.defaultCliPath(), prompt: p, cwd: dataDir,
+		addDirs: m.readableDirs(srcs, path.join(dataDir, 'storage')), research,
+		onEvent: (e) => { if (e.kind === 'tool') console.log(`  [${e.name}] ${e.detail.slice(0, 110)}`); }
+	});
+	const out = path.join(os.tmpdir(), 'abgleich-ergebnis.md');
+	fs.writeFileSync(out, res.text);
+	const vs = m.parseSuggestions(res.text);
+	console.log(`\nFertig nach ${Math.round((Date.now() - t0) / 1000)} s, ${res.turns} Schritte, ${res.costUsd} $`);
+	console.log(`Vorschläge: ${vs.filter((v) => v.kind !== 'invalid').length} anwendbar, ${vs.filter((v) => v.kind === 'invalid').length} kaputt`);
+	console.log(`Antwort: ${out}`);
+}

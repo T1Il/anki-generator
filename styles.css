@@ -967,3 +967,59 @@ textarea.schema-hintergrund {
 .schema-modal .setting-item-control textarea.schema-hintergrund {
 	flex: 1;
 }
+
+/* --- Zotero-Abgleich ------------------------------------------------------ */
+
+.anki-zotero-modal { width: min(640px, 92vw); }
+.anki-zotero-hint { color: var(--text-muted); font-size: var(--font-ui-small); margin-top: 0; }
+.anki-zotero-search { width: 100%; margin-bottom: var(--size-4-2); }
+.anki-zotero-list {
+	max-height: 320px;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-1);
+	margin-bottom: var(--size-4-2);
+}
+.anki-zotero-list.is-error { color: var(--text-error); padding: var(--size-4-3); }
+.anki-zotero-row {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	padding: 2px var(--size-4-1);
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+.anki-zotero-row:hover { background: var(--background-modifier-hover); }
+.anki-zotero-arrow { width: 16px; display: inline-flex; color: var(--text-muted); }
+.anki-zotero-arrow.is-leaf { visibility: hidden; }
+.anki-zotero-icon { display: inline-flex; color: var(--text-muted); }
+.anki-zotero-icon svg, .anki-zotero-arrow svg { width: 14px; height: 14px; }
+.anki-zotero-name { flex: 1; }
+.anki-zotero-meta { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.anki-zotero-children.is-hidden { display: none; }
+.anki-zotero-empty { color: var(--text-muted); padding: var(--size-4-2); }
+.anki-zotero-extra { border-bottom: none; padding-bottom: 0; }
+.anki-zotero-extra-input { width: 100%; resize: vertical; }
+.anki-zotero-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	margin-top: var(--size-4-3);
+}
+.anki-zotero-count { color: var(--text-muted); font-size: var(--font-ui-small); }
+
+.anki-agent-progress {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	border-left: 2px solid var(--interactive-accent);
+	padding-left: var(--size-4-2);
+	margin-bottom: var(--size-4-2);
+}
+.anki-agent-progress-head { font-weight: var(--font-semibold); color: var(--text-normal); }
+.anki-agent-progress-line {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}

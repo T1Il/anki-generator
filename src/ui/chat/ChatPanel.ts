@@ -1,4 +1,4 @@
-import { ButtonComponent, MarkdownRenderer, Notice, TFile, setIcon, Component } from 'obsidian';
+import { ButtonComponent, MarkdownRenderer, Notice, Platform, TFile, setIcon, Component } from 'obsidian';
 import AnkiGeneratorPlugin from '../../main';
 import { ChatMessage } from '../../types';
 import { streamChatResponse, generateFeedbackOnly } from '../../aiGenerator';
@@ -8,6 +8,10 @@ import { applySuggestion, canLocateEdit } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
 import { getAnkiBlocks, parseCardsFromBlockSource, formatCardsToExistingCardsString } from '../../anki/ankiParser';
+import { ZoteroClient, ZoteroSource, collectionPath } from '../../zotero/zoteroClient';
+import { ZoteroAbgleichModal, AbgleichAuswahl } from '../ZoteroAbgleichModal';
+import { buildAbgleichPrompt, readableDirs } from '../../agent/abgleichPrompt';
+import { runClaudeAgent, defaultCliPath, defaultZoteroDataDir, AgentEvent } from '../../agent/claudeAgent';
 
 export interface ChatPanelOptions {
 	/** Im Notiz-Block statt in der Sidebar: begrenzte Höhe, keine Kopfzeilen-Aktionen. */
@@ -92,6 +96,12 @@ export class ChatPanel extends Component {
 			const popOut = new ButtonComponent(controls);
 			popOut.setIcon('external-link').setTooltip('In neuem Tab öffnen');
 			popOut.onClick(() => this.options.onPopOut && this.options.onPopOut());
+		}
+
+		if (Platform.isDesktopApp) {
+			const zoteroBtn = new ButtonComponent(controls);
+			zoteroBtn.setIcon('library').setTooltip('Mit Zotero-Quellen abgleichen (Claude-Agent)');
+			zoteroBtn.onClick(() => this.openZoteroAbgleich());
 		}
 
 		const feedbackBtn = new ButtonComponent(controls);
@@ -519,6 +529,148 @@ export class ChatPanel extends Component {
 		}
 	}
 
+	// --- Zotero-Abgleich ----------------------------------------------------
+
+	private zoteroClient(): { client: ZoteroClient; dataDir: string } {
+		const s = this.plugin.settings;
+		const dataDir = s.zoteroDataDir || defaultZoteroDataDir();
+		return { client: new ZoteroClient(s.zoteroApiUrl || 'http://localhost:23119/api', dataDir), dataDir };
+	}
+
+	private openZoteroAbgleich() {
+		if (!this.sourcePath) {
+			new Notice('Keine Notiz zum Abgleichen.');
+			return;
+		}
+		if (this.controller) {
+			new Notice('Es läuft schon eine Anfrage in diesem Chat.');
+			return;
+		}
+		const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+		const title = file instanceof TFile ? file.basename : this.sourcePath;
+		const { client } = this.zoteroClient();
+		new ZoteroAbgleichModal(this.plugin.app, client, title, (a) => void this.runZoteroAbgleich(title, a)).open();
+	}
+
+	/**
+	 * Laesst einen Claude-Agenten die Notiz gegen Zotero-Quellen pruefen.
+	 *
+	 * Die Antwort landet als gewoehnliche KI-Nachricht im Chat. Ihre
+	 * Vorschlagsbloecke werden also genauso angezeigt und per Klick
+	 * uebernommen wie die des normalen Chats – der Agent selbst schreibt nichts.
+	 */
+	private async runZoteroAbgleich(title: string, a: AbgleichAuswahl) {
+		const namen = a.collectionKeys.map((k) => collectionPath(k, a.collections)).join(', ');
+		const anfrage = [
+			`📚 **Zotero-Abgleich** mit ${namen}${a.includeSubcollections ? ' (inkl. Unterordner)' : ''}` +
+			(a.research ? ' · mit Web-Recherche' : ''),
+			a.extra.trim() ? `\n> ${a.extra.trim().replace(/\n/g, '\n> ')}` : ''
+		].join('');
+		this.history.push({ role: 'user', content: anfrage });
+		this.appendPending();
+
+		const placeholder: ChatMessage = { role: 'ai', content: '' };
+		const wrapper = await this.renderMessage(placeholder);
+		const bubble = wrapper.querySelector('.anki-chat-bubble') as HTMLElement;
+		const status = bubble.createDiv({ cls: 'anki-agent-progress' });
+		const statusHead = status.createDiv({ cls: 'anki-agent-progress-head' });
+		const statusLines = status.createDiv({ cls: 'anki-agent-progress-lines' });
+		const typing = bubble.createDiv({ cls: 'anki-chat-typing' });
+		typing.createSpan(); typing.createSpan(); typing.createSpan();
+		const zeile = (text: string) => {
+			statusLines.createDiv({ cls: 'anki-agent-progress-line', text });
+			while (statusLines.childElementCount > 8) statusLines.firstElementChild?.remove();
+			this.scrollToBottom();
+		};
+		statusHead.setText('Sammle Quellen aus Zotero…');
+		this.scrollToBottom();
+
+		this.controller = new AbortController();
+		this.setBusy(true);
+		const genKey = this.sourcePath + '::zotero';
+		if (this.sourcePath) {
+			this.plugin.addActiveGeneration(genKey, this.controller, 'Zotero-Abgleich', this.sourcePath);
+		}
+
+		const started = Date.now();
+		let schritte = 0;
+		const ticker = window.setInterval(() => {
+			const sek = Math.round((Date.now() - started) / 1000);
+			statusHead.setText(`Claude prüft die Quellen … ${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')} · ${schritte} Schritte`);
+		}, 1000);
+
+		let sources: ZoteroSource[] = [];
+		try {
+			const { client, dataDir } = this.zoteroClient();
+			sources = await client.sources(a.collectionKeys, a.collections, a.includeSubcollections);
+			if (sources.length === 0) throw new Error('In den gewählten Sammlungen liegen keine Einträge.');
+			const mitText = sources.filter((s) => s.attachments.some((at) => at.fullTextPath || at.filePath)).length;
+			zeile(`${sources.length} Quellen, ${mitText} davon mit Datei/Volltext`);
+
+			// Pfad → Quellentitel, damit der Fortschritt „liest: Fachinformation" sagt.
+			const titelZuPfad = new Map<string, string>();
+			const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+			sources.forEach((s) => s.attachments.forEach((at) => {
+				[at.fullTextPath, at.filePath].forEach((p) => p && titelZuPfad.set(norm(p), s.title));
+			}));
+
+			const { content, cards } = await this.readNote();
+			const prompt = buildAbgleichPrompt({
+				noteTitle: title,
+				noteContent: content,
+				cards,
+				sources,
+				research: a.research,
+				extra: a.extra
+			});
+
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const storage = require('path').join(dataDir, 'storage');
+			const result = await runClaudeAgent({
+				cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
+				prompt,
+				cwd: dataDir,
+				addDirs: readableDirs(sources, storage),
+				research: a.research,
+				model: this.plugin.settings.claudeAgentModel,
+				signal: this.controller.signal,
+				onEvent: (ev: AgentEvent) => {
+					if (ev.kind !== 'tool') return;
+					schritte++;
+					zeile(beschreibeWerkzeug(ev, titelZuPfad.get(norm(ev.detail))));
+				}
+			});
+
+			const details = [
+				'',
+				'> [!info]- Abgleich-Details',
+				`> Quellen: ${sources.map((s, i) => `${i + 1}. ${s.title}`).join(' · ')}`,
+				`> ${result.turns ?? schritte} Schritte · ${Math.round((Date.now() - started) / 1000)} s` +
+				(result.costUsd !== null ? ` · ${result.costUsd.toFixed(2)} $` : '')
+			].join('\n');
+			placeholder.content = result.text.trim() + '\n' + details;
+		} catch (e: any) {
+			const aborted = e?.name === 'AbortError' || e?.message === 'Aborted by user';
+			placeholder.content = aborted ? '_(Abgleich abgebrochen)_' : 'Fehler beim Zotero-Abgleich: ' + (e?.message || String(e));
+			if (!aborted) {
+				wrapper.addClass('is-error');
+				new Notice('Zotero-Abgleich fehlgeschlagen: ' + (e?.message || e));
+			}
+		} finally {
+			window.clearInterval(ticker);
+			this.history.push(placeholder);
+			this.renderedCount = this.history.length;
+			await this.renderBody(bubble, placeholder.content, true);
+
+			this.controller = null;
+			this.setBusy(false);
+			if (this.sourcePath) this.plugin.removeActiveGeneration(genKey);
+			setHistory(this.plugin, this.sourcePath, this.history);
+			this.plugin.app.workspace.trigger('anki:chat-update', this.sourcePath, this.history);
+			this.scrollToBottom();
+		}
+	}
+
 	/** "Feedback einholen" - eine einmalige Analyse der Notiz. */
 	private async requestFeedback() {
 		const provider = resolveProvider(this.plugin.settings);
@@ -575,5 +727,18 @@ export class ChatPanel extends Component {
 			notice.hide();
 			if (this.sourcePath) this.plugin.removeActiveGeneration(this.sourcePath + '::feedback');
 		}
+	}
+}
+
+/** Eine Werkzeug-Nutzung des Agenten als lesbare Fortschrittszeile. */
+function beschreibeWerkzeug(ev: { name: string; detail: string }, quelle?: string): string {
+	const datei = quelle ?? ev.detail.split(/[\/]/).pop() ?? ev.detail;
+	switch (ev.name) {
+		case 'Read': return `📖 liest: ${datei}`;
+		case 'Grep': return `🔍 sucht „${ev.detail}"`;
+		case 'Glob': return `📂 sieht nach: ${ev.detail}`;
+		case 'WebSearch': return `🌐 Websuche: ${ev.detail}`;
+		case 'WebFetch': return `🌐 öffnet: ${ev.detail}`;
+		default: return `⚙️ ${ev.name} ${ev.detail}`.trim();
 	}
 }

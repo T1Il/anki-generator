@@ -4,6 +4,7 @@ import { t } from './lang/helpers';
 import { IconPickerModal } from './ui/IconPickerModal';
 import { PROVIDERS, PROVIDER_ORDER } from './providers';
 import { AiProvider } from './types';
+import { defaultCliPath, defaultZoteroDataDir } from './agent/claudeAgent';
 
 export interface AnkiGeneratorSettings {
 	vaultName: string;
@@ -42,6 +43,13 @@ export interface AnkiGeneratorSettings {
 	decorationTemplate: string;
 	maxRetries: number;
 	ignoredFiles: string[];
+	/** Pfad zur Claude CLI fuer den Zotero-Abgleich; leer = automatisch. */
+	claudeCliPath: string;
+	/** Modell fuer den Agenten (z. B. "opus", "sonnet"); leer = CLI-Standard. */
+	claudeAgentModel: string;
+	zoteroApiUrl: string;
+	/** Zotero-Datenverzeichnis (enthaelt storage/); leer = ~/Zotero. */
+	zoteroDataDir: string;
 }
 
 /**
@@ -218,7 +226,11 @@ Hier ist der Lerninhalt:
 	iconIgnored: '👁️‍🗨️',
 	decorationTemplate: ' {count}',
 	maxRetries: 3,
-	ignoredFiles: []
+	ignoredFiles: [],
+	claudeCliPath: '',
+	claudeAgentModel: '',
+	zoteroApiUrl: 'http://localhost:23119/api',
+	zoteroDataDir: ''
 };
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {
@@ -531,6 +543,54 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				}));
 
 		// Prompts
+		containerEl.createEl('h3', { text: 'Zotero-Abgleich (Claude-Agent)' });
+		containerEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: 'Im AI-Chat startet der Bücher-Knopf einen Claude-Agenten (Claude CLI), der die Notiz gegen gewählte Zotero-Sammlungen prüft. Braucht Zotero mit eingeschalteter lokaler API und eine angemeldete Claude CLI. Nur am Desktop.'
+		});
+
+		new Setting(containerEl)
+			.setName('Pfad zur Claude CLI')
+			.setDesc(`Leer = automatisch (${defaultCliPath()})`)
+			.addText(text => text
+				.setPlaceholder(defaultCliPath())
+				.setValue(this.plugin.settings.claudeCliPath)
+				.onChange(async (value) => {
+					this.plugin.settings.claudeCliPath = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Modell des Agenten')
+			.setDesc('z. B. opus oder sonnet. Leer = Standard der Claude CLI.')
+			.addText(text => text
+				.setValue(this.plugin.settings.claudeAgentModel)
+				.onChange(async (value) => {
+					this.plugin.settings.claudeAgentModel = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Zotero-API')
+			.setDesc('Adresse der lokalen Zotero-API.')
+			.addText(text => text
+				.setValue(this.plugin.settings.zoteroApiUrl)
+				.onChange(async (value) => {
+					this.plugin.settings.zoteroApiUrl = value.trim() || 'http://localhost:23119/api';
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Zotero-Datenverzeichnis')
+			.setDesc(`Ordner mit „storage". Leer = ${defaultZoteroDataDir()}`)
+			.addText(text => text
+				.setPlaceholder(defaultZoteroDataDir())
+				.setValue(this.plugin.settings.zoteroDataDir)
+				.onChange(async (value) => {
+					this.plugin.settings.zoteroDataDir = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
 		containerEl.createEl('h3', { text: t('settings.prompts') });
 
 		new Setting(containerEl)
