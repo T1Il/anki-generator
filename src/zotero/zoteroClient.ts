@@ -63,7 +63,16 @@ export class ZoteroClient {
 			const url = `${this.baseUrl.replace(/\/$/, '')}/users/0/${path}${sep}limit=${SEITE}&start=${start}`;
 			let res;
 			try {
-				res = await requestUrl({ url, method: 'GET', throw: false });
+				// Zotero bricht Anfragen, die nach Browser aussehen (User-Agent
+				// „Mozilla", Origin-Kopf), ohne Antwort ab – Schutz vor Webseiten.
+				// Obsidian ist Electron und sendet beides; das hier war im Test mit
+				// Node unsichtbar und gab in Obsidian net::ERR_EMPTY_RESPONSE.
+				res = await requestUrl({
+					url,
+					method: 'GET',
+					headers: { 'Zotero-Allowed-Request': '1' },
+					throw: false
+				});
 			} catch (e: any) {
 				throw new ZoteroUnreachableError(e?.message || String(e));
 			}

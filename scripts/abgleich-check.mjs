@@ -20,8 +20,10 @@ const root = path.resolve(here, '..');
 // von Obsidian laeuft.
 const stubFile = path.join(os.tmpdir(), 'anki-obsidian-stub-abgleich.cjs');
 fs.writeFileSync(stubFile, `module.exports = {
-  requestUrl: async ({ url }) => {
-    const r = await fetch(url);
+  requestUrl: async ({ url, headers }) => {
+    // Wie Obsidian/Electron: Browser-Kennung mitsenden. Ohne den Kopf
+    // Zotero-Allowed-Request bricht Zotero solche Anfragen ab.
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 Electron obsidian', ...(headers || {}) } });
     const text = await r.text();
     let json = null; try { json = JSON.parse(text); } catch {}
     return { status: r.status, json, text };
