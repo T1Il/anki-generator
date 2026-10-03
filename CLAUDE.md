@@ -47,6 +47,7 @@ reload Obsidian.
 - `src/chat/` — Suggestion format/parsing (`anki-edit`, `anki-card`, `anki-insert`; closing fence must be at least as long as the opening one), shared prompt rules (`FRAGEN_REGELN`, `DIAGRAMM_REGELN`), applying suggestions (`insertText.ts` for insertions and new `## Anki` sections), text location, chat history
 - `src/ui/chat/ChatPanel.ts` — The AI chat (incremental rendering, streaming)
 - `src/zotero/zoteroClient.ts` — Zotero local API (collections, items, attachment/full-text paths)
+- `src/ui/MedikamentQuellenModal.ts` + `src/agent/quellenPrompt.ts` — drug sources: agent proposes a JSON plan, user ticks, Fitness-Manager backend writes to Zotero
 - `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable)
 - `src/ui/` — Modal/view components (preview, edit, deck selection, drift review, decorations)
 - `src/lang/` — i18n (German `de.ts`, English `en.ts`)

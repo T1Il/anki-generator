@@ -35,6 +35,7 @@ const src = (f) => JSON.stringify(path.join(root, f).replace(/\\/g, '/'));
 fs.writeFileSync(entry, [
 	`export * from ${src('src/agent/abgleichPrompt.ts')};`,
 	`export * from ${src('src/agent/claudeAgent.ts')};`,
+	`export * from ${src('src/agent/quellenPrompt.ts')};`,
 	`export * from ${src('src/zotero/zoteroClient.ts')};`,
 	`export * from ${src('src/chat/suggestions.ts')};`,
 	`export * from ${src('src/anki/ankiParser.ts')};`
@@ -126,6 +127,20 @@ check('Unterordner rekursiv', m.withDescendants(['M'], all).sort().join() === 'K
 check('Sammlungspfad', m.collectionPath('K', all) === 'Medikamente › Ondansetron › Kinder');
 check('HTML entfernt', m.stripHtml('<p>a&amp;b</p><p>c</p>') === 'a&b\nc');
 
+console.log('Medikament-Quellen');
+const qp = m.buildQuellenPrompt({ wirkstoff: 'Ondansetron', treffer: [sources[1]], standardwerke: [sources[0]], schonImOrdner: [] });
+check('Auftrag nennt alle Pflichtquellen', ['Fachinformation', 'Gelbe Liste', 'Medikamente im Rettungsdienst', 'SAA/BPR', 'DBRD', 'Karow', 'RD-Factsheets', 'Notfallguru'].every((w) => qp.includes(w)));
+check('Auftrag mit ISBN', qp.includes('978-3-13-245794-2') && qp.includes('978-3-13-245797-3'));
+check('Auftrag listet Bibliothek mit key und Volltext', qp.includes('key A ') && qp.includes('.zotero-ft-cache'));
+const plan = m.parseQuellenPlan('Text\n```json\n{"quellen":[{"kategorie":"Karow","art":"vorhanden","key":"K1","titel":"Karow"},{"art":"vorhanden","titel":"ohne key"},{"kategorie":"Gelbe Liste","titel":"GL","url":"https://x"}],"hinweise":["MiR-Kapitel unklar"]}\n```');
+check('Plan gelesen', plan.quellen.length === 2 && plan.hinweise[0] === 'MiR-Kapitel unklar', JSON.stringify(plan));
+check('vorhanden ohne key verworfen', !plan.quellen.some((q) => q.titel === 'ohne key'));
+check('art fehlt -> neu', plan.quellen[1].art === 'neu');
+let wirft = false; try { m.parseQuellenPlan('kein json'); } catch { wirft = true; }
+check('ohne JSON klare Meldung', wirft);
+const zwei = m.parseQuellenPlan('```json\n{"quellen":[]}\n```\nkorrigiert:\n```json\n{"quellen":[{"titel":"neu","url":"u"}]}\n```');
+check('letzter JSON-Block zaehlt', zwei.quellen.length === 1);
+
 if (failed) {
 	console.log(`\n${failed} Prüfung(en) fehlgeschlagen.`);
 	process.exit(1);
@@ -133,6 +148,34 @@ if (failed) {
 console.log('\nAlle Pruefungen bestanden.');
 
 // --- Live-Probe ------------------------------------------------------------
+const qi = process.argv.indexOf('--quellen');
+if (qi > 0) {
+	const wirkstoff = process.argv[qi + 1];
+	const dataDir = m.defaultZoteroDataDir();
+	const client = new m.ZoteroClient('http://localhost:23119/api', dataDir);
+	const alle = await client.collections();
+	const ober = alle.find((c) => !c.parentKey && c.name === 'Medikamente');
+	const ordner = ober && alle.find((c) => c.parentKey === ober.key && c.name.toLowerCase() === wirkstoff.toLowerCase());
+	const schonImOrdner = ordner ? await client.sources([ordner.key], alle, false) : [];
+	const gesehen = new Set(schonImOrdner.map((s) => s.key));
+	const sammle = (xs) => xs.filter((s) => !gesehen.has(s.key) && gesehen.add(s.key));
+	const standardwerke = [];
+	for (const q of m.STANDARDWERK_SUCHE) standardwerke.push(...sammle(await client.search(q, 6)));
+	const treffer = sammle(await client.search(wirkstoff, 25));
+	console.log(`\nQuellen-Lauf ${wirkstoff}: ${schonImOrdner.length} im Ordner, ${standardwerke.length} Standardwerke, ${treffer.length} Treffer`);
+	const t0 = Date.now();
+	const res = await m.runClaudeAgent({
+		cliPath: m.defaultCliPath(), prompt: m.buildQuellenPrompt({ wirkstoff, schonImOrdner, standardwerke, treffer }),
+		cwd: dataDir, addDirs: [path.join(dataDir, 'storage')], research: true,
+		onEvent: (e) => { if (e.kind === 'tool') console.log(`  [${e.name}] ${e.detail.slice(0, 110)}`); }
+	});
+	fs.writeFileSync(path.join(os.tmpdir(), 'quellen-ergebnis.md'), res.text);
+	const plan = m.parseQuellenPlan(res.text);
+	console.log(`\nFertig nach ${Math.round((Date.now() - t0) / 1000)} s, ${res.turns} Schritte, ${res.costUsd} $`);
+	for (const q of plan.quellen) console.log(`  [${q.kategorie}] ${q.art}${q.key ? ' ' + q.key : ''} · ${q.typ || ''} · ${q.titel}\n      ${q.url || ''}${q.pdf_url && q.pdf_url !== q.url ? '\n      PDF: ' + q.pdf_url : ''}`);
+	for (const h of plan.hinweise) console.log(`  Hinweis: ${h}`);
+}
+
 const li = process.argv.indexOf('--live');
 if (li > 0) {
 	const notePath = process.argv[li + 1];

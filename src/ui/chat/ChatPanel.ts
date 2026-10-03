@@ -10,6 +10,7 @@ import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chat
 import { getAnkiBlocks, parseCardsFromBlockSource, formatCardsToExistingCardsString } from '../../anki/ankiParser';
 import { ZoteroClient, ZoteroSource, collectionPath } from '../../zotero/zoteroClient';
 import { ZoteroAbgleichModal, AbgleichAuswahl } from '../ZoteroAbgleichModal';
+import { MedikamentQuellenModal } from '../MedikamentQuellenModal';
 import { buildAbgleichPrompt, readableDirs } from '../../agent/abgleichPrompt';
 import { runClaudeAgent, defaultCliPath, defaultZoteroDataDir, AgentEvent } from '../../agent/claudeAgent';
 
@@ -76,6 +77,33 @@ export class ChatPanel extends Component {
 		this.renderAll();
 		// Erst nach renderAll(): vorher gibt es keine Boxen zum Markieren.
 		this.lauscheAufUebernahmen();
+		if (this.options.embedded) this.merkeHoehe();
+	}
+
+	/**
+	 * Der eingebettete Chat ist per CSS (`resize: vertical`) aufziehbar. Die
+	 * gewaehlte Hoehe gilt fuer alle Notizen und ueberlebt Neustarts – sonst
+	 * stuende er bei jeder Notiz wieder auf 320 px.
+	 */
+	private merkeHoehe() {
+		const KEY = 'anki-generator-chat-hoehe';
+		try {
+			const h = parseInt(window.localStorage.getItem(KEY) || '', 10);
+			if (h >= 160) this.log.style.height = `${h}px`;
+		} catch { /* Speicher gesperrt: Standardhoehe */ }
+
+		let timer = 0;
+		const obs = new ResizeObserver(() => {
+			window.clearTimeout(timer);
+			timer = window.setTimeout(() => {
+				const h = Math.round(this.log.getBoundingClientRect().height);
+				// 0 = eingeklappt oder ausgeblendet, nicht speichern.
+				if (h < 160) return;
+				try { window.localStorage.setItem(KEY, String(h)); } catch { /* egal */ }
+			}, 300);
+		});
+		obs.observe(this.log);
+		this.register(() => obs.disconnect());
 	}
 
 	private buildHeader() {
@@ -102,6 +130,14 @@ export class ChatPanel extends Component {
 			const zoteroBtn = new ButtonComponent(controls);
 			zoteroBtn.setIcon('library').setTooltip('Mit Zotero-Quellen abgleichen (Claude-Agent)');
 			zoteroBtn.onClick(() => this.openZoteroAbgleich());
+
+			const quellenBtn = new ButtonComponent(controls);
+			quellenBtn.setIcon('folder-plus').setTooltip('Medikament: Zotero-Quellen zusammenstellen');
+			quellenBtn.onClick(() => {
+				const file = this.sourcePath && this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+				if (!(file instanceof TFile)) { new Notice('Keine Notiz.'); return; }
+				new MedikamentQuellenModal(this.plugin.app, this.plugin, file.basename).open();
+			});
 		}
 
 		const feedbackBtn = new ButtonComponent(controls);

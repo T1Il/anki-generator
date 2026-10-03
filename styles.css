@@ -489,8 +489,12 @@
 	height: auto;
 }
 
+/* In der Notiz an der unteren Kante aufziehbar; die Hoehe merkt sich ChatPanel. */
 .anki-chat-panel.is-embedded .anki-chat-log {
-	max-height: 320px;
+	height: 320px;
+	min-height: 160px;
+	max-height: none;
+	resize: vertical;
 }
 
 /* Der Chat soll im Leaf die volle Höhe bekommen statt der alten 400px. */
@@ -1034,3 +1038,30 @@ textarea.schema-hintergrund {
 	cursor: pointer;
 	margin-bottom: var(--size-4-1);
 }
+
+/* Medikament: Zotero-Quellen */
+.anki-quellen-modal { width: min(760px, 94vw); }
+.anki-quellen-liste { max-height: 52vh; }
+.anki-quellen-gruppe {
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	margin: var(--size-4-2) var(--size-4-1) 2px;
+}
+.anki-quellen-row { align-items: flex-start; padding: var(--size-4-1); }
+.anki-quellen-row input { margin-top: 3px; }
+.anki-quellen-text { flex: 1; min-width: 0; }
+.anki-quellen-titel { display: flex; gap: var(--size-4-1); align-items: baseline; flex-wrap: wrap; }
+.anki-quellen-art {
+	font-size: var(--font-ui-smaller);
+	border-radius: var(--radius-s);
+	padding: 0 6px;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+.anki-quellen-art.is-neu { background: var(--interactive-accent); color: var(--text-on-accent); }
+.anki-quellen-grund { font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.anki-quellen-hinweise { font-size: var(--font-ui-small); color: var(--text-muted); margin-top: var(--size-4-2); }
+.anki-quellen-hinweise ul { margin: var(--size-4-1) 0 0; padding-left: var(--size-4-5); }

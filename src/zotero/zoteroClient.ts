@@ -121,6 +121,17 @@ export class ZoteroClient {
 		return out;
 	}
 
+	/** Volltextsuche ueber die Bibliothek (Titel, Autoren, Jahr …), nur Top-Items. */
+	async search(query: string, limit = 25): Promise<ZoteroSource[]> {
+		const raw = await this.get(`items/top?q=${encodeURIComponent(query)}`);
+		const out: ZoteroSource[] = [];
+		for (const it of raw.slice(0, limit)) {
+			const sammlungen: string[] = it.data?.collections ?? [];
+			out.push(await this.toSource(it, sammlungen.join(',')));
+		}
+		return out;
+	}
+
 	private async toSource(it: any, collectionName: string): Promise<ZoteroSource> {
 		const d = it.data ?? {};
 		const src: ZoteroSource = {

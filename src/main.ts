@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf, TFile, TFolder } from 'obsidian';
+import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf, TFile, TFolder, Platform } from 'obsidian';
 import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings, repairCorruptedPrompt } from './settings';
 import { processAnkiCardsBlock } from './ankiBlockProcessor';
 import { triggerCardGeneration } from './generationManager';
@@ -19,6 +19,7 @@ import { FileSuggestModal } from './ui/FileSuggestModal';
 import { loadHistory, saveHistory } from './chat/chatHistory';
 import { checkDrift } from './anki/driftCheck';
 import { DriftReviewModal } from './ui/DriftReviewModal';
+import { MedikamentQuellenModal } from './ui/MedikamentQuellenModal';
 import {
 	schemaNotizErstellen,
 	schemaTabelleAktualisieren,
@@ -204,6 +205,17 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			name: 'Sync all unsynced Anki cards in Vault',
 			callback: () => {
 				new SyncReviewModal(this.app, this).open();
+			}
+		});
+
+		this.addCommand({
+			id: 'medikament-zotero-quellen',
+			name: 'Medikament: Zotero-Quellen zusammenstellen',
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== 'md' || !Platform.isDesktopApp) return false;
+				if (!checking) new MedikamentQuellenModal(this.app, this, file.basename).open();
+				return true;
 			}
 		});
 

@@ -29,6 +29,18 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
 - Streams responses, keeps a per-note history across restarts, and can be opened
   in the sidebar or as a full tab.
 
+### Drug sources into Zotero (desktop only)
+- Command **"Medikament: Zotero-Quellen zusammenstellen"** (also a folder button in the chat):
+  a Claude agent compiles the sources for the drug named like the note – summary of product
+  characteristics (form used in EMS), Gelbe Liste, the chapter in "Medikamente im Rettungsdienst",
+  SAA/BPR and DBRD (only if the drug appears, checked in the full text), DBRD Medikamentenbuch,
+  Karow, RD-Factsheets/Notfallguru and up to three strong studies/guidelines.
+- You tick the list; the Fitness-Manager backend (`/api/zotero/medikamente/anlegen`) creates
+  `Medikamente/<drug>`, files existing works into it and attaches PDFs/page copies via WebDAV.
+  Zotero key and WebDAV access stay on the server. Thieme chapter PDFs must be added via the
+  browser connector (bot protection).
+- The chat embedded in a note can be resized at its lower edge.
+
 ### Zotero cross-check (Claude agent, desktop only)
 - The **library** button in the chat header opens a picker for Zotero collections
   (the collection named like the note is preselected, subcollections optional).

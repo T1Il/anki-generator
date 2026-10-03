@@ -50,6 +50,8 @@ export interface AnkiGeneratorSettings {
 	zoteroApiUrl: string;
 	/** Zotero-Datenverzeichnis (enthaelt storage/); leer = ~/Zotero. */
 	zoteroDataDir: string;
+	/** Fitness-Manager-Backend, legt Zotero-Ordner und Anhaenge an (WebDAV). */
+	fitnessManagerUrl: string;
 }
 
 /**
@@ -230,7 +232,8 @@ Hier ist der Lerninhalt:
 	claudeCliPath: '',
 	claudeAgentModel: '',
 	zoteroApiUrl: 'http://localhost:23119/api',
-	zoteroDataDir: ''
+	zoteroDataDir: '',
+	fitnessManagerUrl: 'https://fitness-manager.tail0d1239.ts.net'
 };
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {
@@ -588,6 +591,16 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.zoteroDataDir)
 				.onChange(async (value) => {
 					this.plugin.settings.zoteroDataDir = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Fitness-Manager (Zotero-Quellen anlegen)')
+			.setDesc('Backend, das für „Medikament: Zotero-Quellen zusammenstellen" Ordner, Einträge und Dateien in Zotero anlegt. Zotero-Schlüssel und WebDAV-Zugang liegen dort.')
+			.addText(text => text
+				.setValue(this.plugin.settings.fitnessManagerUrl)
+				.onChange(async (value) => {
+					this.plugin.settings.fitnessManagerUrl = value.trim();
 					await this.plugin.saveSettings();
 				}));
 
