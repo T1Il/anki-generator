@@ -19,7 +19,8 @@ fs.writeFileSync(stubFile, 'module.exports = {};\n');
 const entry = path.join(os.tmpdir(), 'anki-chat-entry.ts');
 fs.writeFileSync(entry, [
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/suggestions.ts').replace(/\\/g, '/')) + ";",
-	"export * from " + JSON.stringify(path.join(root, 'src/chat/textLocator.ts').replace(/\\/g, '/')) + ";"
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/textLocator.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/insertText.ts').replace(/\\/g, '/')) + ";"
 ].join('\n'));
 
 const outfile = path.join(os.tmpdir(), 'anki-chat-check.cjs');
@@ -270,6 +271,89 @@ const NOTE = [
 	const s = C.schluesselFuer(mehrzeilig);
 	check('mehrzeiliger Vorschlag ergibt einen einzeiligen Schluessel',
 		!s.includes('\n') && !s.includes('\r'), s);
+}
+
+console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
+
+{
+	const md = [
+		'Hier ein Diagramm.',
+		'````anki-insert',
+		'NACH:',
+		'#### Wirkmechanismus',
+		'TEXT:',
+		'> [!info]- 🧬 Wirkmechanismus',
+		'> ```mermaid',
+		'> flowchart TD',
+		'>     A["Wirkstoff"] --> B["Effekt"]',
+		'> ```',
+		'````',
+		'',
+		'````anki-card',
+		'OP: add',
+		'Q: Zeige das Schema.',
+		'A: ```mermaid',
+		'flowchart TD',
+		'    A["Wirkstoff"] --> B["Effekt"]',
+		'```',
+		'````',
+		'Schluss.'
+	].join('\n');
+	const list = C.parseSuggestions(md);
+	check('insert und Karte erkannt', list.length === 2 && list[0].kind === 'insert' && list[1].kind === 'card',
+		list.map(x => x.kind));
+	check('NACH korrekt', list[0].after === '#### Wirkmechanismus', list[0]);
+	check('TEXT behaelt Callout-Praefix', list[0].text.startsWith('> [!info]-') && list[0].text.endsWith('> ```'), list[0].text);
+	check('Karte endet nicht am inneren ```', list[1].a.includes('A["Wirkstoff"]') && list[1].a.trim().endsWith('```'), list[1].a);
+	check('Prosa ohne Bloecke', C.stripSuggestionBlocks(md) === 'Hier ein Diagramm.\n\nSchluss.', C.stripSuggestionBlocks(md));
+
+	const ausInsert = C.mermaidAusVorschlag(list[0]);
+	check('Mermaid aus Callout ohne "> "', ausInsert.length === 1 && ausInsert[0].startsWith('flowchart TD') && !ausInsert[0].includes('>  '),
+		ausInsert);
+	const ausKarte = C.mermaidAusVorschlag(list[1]);
+	check('Mermaid aus Kartenantwort', ausKarte.length === 1 && ausKarte[0].includes('--> B'), ausKarte);
+	check('kein Mermaid bei normaler Karte',
+		C.mermaidAusVorschlag({ kind: 'card', op: 'add', id: null, ref: null, q: 'x', a: 'y', typeIn: false }).length === 0);
+
+	const kaputt = C.parseSuggestions(F + 'anki-insert\nTEXT:\nnur Text\n' + F);
+	check('insert ohne NACH ist invalid', kaputt[0] && kaputt[0].kind === 'invalid', kaputt);
+}
+
+{
+	const note = [
+		'#### Wirkmechanismus',
+		'',
+		'>[!algorithm] Wirkmechanismus',
+		'>- Antagonismus (Frage: auch Übelkeit?)',
+		'>- Area postrema',
+		'',
+		'### Dosierung'
+	].join('\n');
+
+	const a = C.insertAfterAnchor(note, '#### Wirkmechanismus', 'NEU');
+	check('nach Ueberschrift eingefuegt', a === '#### Wirkmechanismus\n\nNEU\n\n>[!algorithm] Wirkmechanismus\n>- Antagonismus (Frage: auch Übelkeit?)\n>- Area postrema\n\n### Dosierung', a);
+
+	const b = C.insertAfterAnchor(note, '>- Antagonismus (Frage: auch Übelkeit?)', 'NEU');
+	check('Anker im Callout: erst nach dem Callout', b.includes('>- Area postrema\n\nNEU\n\n### Dosierung'), b);
+
+	const c = C.insertAfterAnchor(note, '### Dosierung', 'NEU');
+	check('am Dateiende', c.endsWith('### Dosierung\n\nNEU\n'), c);
+
+	check('fehlender Anker ergibt null', C.insertAfterAnchor(note, 'gibt es nicht', 'x') === null);
+
+	const sec = C.newAnkiSection('TARGET DECK: X\n\nQ: a\nA: ```mermaid\nflowchart TD\n```');
+	check('neuer Block mit vier Backticks bei innerem ```', sec.startsWith('## Anki\n````anki-cards') && sec.endsWith('\n````'), sec);
+	check('neuer Block ohne Code mit drei', C.newAnkiSection('Q: a').includes('```anki-cards') && !C.newAnkiSection('Q: a').includes('````'));
+}
+
+{
+	const instr = C.SUGGESTION_FORMAT_INSTRUCTIONS;
+	check('Anweisungen nennen Fragen', instr.includes('(Frage: …)'));
+	check('Anweisungen nennen Diagramme', instr.includes('flowchart TD') && instr.includes("curve': 'step'"));
+	check('Anweisungen nennen anki-insert', instr.includes('anki-insert'));
+	check('Beispiele im Prompt sind selbst parsebar',
+		C.parseSuggestions(instr).filter(v => v.kind === 'invalid').length === 0,
+		C.parseSuggestions(instr).filter(v => v.kind === 'invalid'));
 }
 
 console.log('');

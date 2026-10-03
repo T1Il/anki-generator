@@ -1,9 +1,9 @@
-import { ButtonComponent, MarkdownRenderer, Notice, Platform, TFile, setIcon, Component } from 'obsidian';
+import { ButtonComponent, MarkdownRenderer, Notice, Platform, TFile, setIcon, Component, loadMermaid } from 'obsidian';
 import AnkiGeneratorPlugin from '../../main';
 import { ChatMessage } from '../../types';
 import { streamChatResponse, generateFeedbackOnly } from '../../aiGenerator';
 import { resolveProvider, PROVIDERS } from '../../providers';
-import { entschaerfePluginFences, parseSuggestions, schluesselFuer, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
+import { entschaerfePluginFences, mermaidAusVorschlag, parseSuggestions, schluesselFuer, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
 import { applySuggestion, canLocateEdit } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
@@ -279,6 +279,11 @@ export class ChatPanel extends Component {
 			title.createSpan({ text: 'Textänderung' });
 			suggestion.find.split('\n').forEach(l => line('- ' + l, 'is-remove'));
 			suggestion.replace.split('\n').forEach(l => line('+ ' + l, 'is-add'));
+		} else if (suggestion.kind === 'insert') {
+			setIcon(titleIcon, 'list-plus');
+			title.createSpan({ text: 'Einfügen' });
+			line('nach: ' + suggestion.after.split('\n')[0], 'is-meta');
+			suggestion.text.split('\n').forEach(l => line('+ ' + l, 'is-add'));
 		} else {
 			setIcon(titleIcon, 'layers');
 			const opLabel = suggestion.op === 'add' ? 'Neue Karte'
@@ -302,7 +307,7 @@ export class ChatPanel extends Component {
 		applyBtn.setButtonText('Übernehmen').setCta();
 		applyBtn.onClick(async () => {
 			applyBtn.setDisabled(true);
-			const result = await applySuggestion(this.plugin.app, this.sourcePath, suggestion);
+			const result = await applySuggestion(this.plugin.app, this.sourcePath, suggestion, this.plugin.settings.mainDeck);
 			if (result.ok) {
 				this.markiereUebernommen(box, applyBtn);
 				// Jede andere offene Ansicht derselben Notiz mitziehen.
@@ -316,10 +321,33 @@ export class ChatPanel extends Component {
 			}
 		});
 
-		if (suggestion.kind === 'edit') {
+		// Diagramme gezeichnet zeigen und vorab pruefen: ein Syntaxfehler soll
+		// hier auffallen, nicht erst als leere Flaeche in der Notiz oder in Anki.
+		const diagramme = mermaidAusVorschlag(suggestion);
+		if (diagramme.length) {
+			diff.addClass('is-collapsed');
+			const toggle = box.createDiv({ cls: 'anki-suggestion-source-toggle', text: 'Quelltext zeigen' });
+			toggle.addEventListener('click', () => {
+				diff.toggleClass('is-collapsed', !diff.hasClass('is-collapsed'));
+				toggle.setText(diff.hasClass('is-collapsed') ? 'Quelltext zeigen' : 'Quelltext verbergen');
+			});
+			box.insertBefore(toggle, diff);
+			const vorschau = box.createDiv({ cls: 'anki-suggestion-preview' });
+			box.insertBefore(vorschau, toggle);
+			void this.zeichneDiagramme(vorschau, diagramme).then((fehler) => {
+				if (!fehler) return;
+				applyBtn.setDisabled(true);
+				applyBtn.setButtonText('Diagramm fehlerhaft');
+				box.addClass('is-missing');
+				box.createDiv({ cls: 'anki-suggestion-note', text: 'Mermaid-Syntaxfehler: ' + fehler });
+			});
+		}
+
+		if (suggestion.kind === 'edit' || suggestion.kind === 'insert') {
+			const anker = suggestion.kind === 'edit' ? suggestion.find : suggestion.after;
 			const showBtn = new ButtonComponent(actions);
 			showBtn.setButtonText('Zeigen');
-			showBtn.onClick(() => void this.revealInNote(suggestion.find));
+			showBtn.onClick(() => void this.revealInNote(anker));
 
 			// Früh melden, wenn der zitierte Text gar nicht auffindbar ist.
 			void canLocateEdit(this.plugin.app, this.sourcePath, suggestion).then((found) => {
@@ -336,6 +364,41 @@ export class ChatPanel extends Component {
 		const dismissBtn = new ButtonComponent(actions);
 		dismissBtn.setButtonText('Verwerfen');
 		dismissBtn.onClick(() => box.remove());
+	}
+
+	/**
+	 * Mermaid-Code als SVG in die Vorschlagsbox zeichnen. Ueber die Bibliothek
+	 * direkt, nicht ueber MarkdownRenderer – der liefert ausserhalb des Editors
+	 * nur einen Codeblock (siehe mermaidRenderer.ts).
+	 * Gibt die erste Fehlermeldung zurueck oder null.
+	 */
+	private async zeichneDiagramme(ziel: HTMLElement, codes: string[]): Promise<string | null> {
+		let mermaid: any;
+		try {
+			mermaid = await loadMermaid();
+		} catch {
+			mermaid = (window as any).mermaid;
+		}
+		if (!mermaid?.render) {
+			ziel.createDiv({ cls: 'anki-suggestion-note', text: 'Vorschau nicht verfügbar.' });
+			return null;
+		}
+		for (const code of codes) {
+			const id = `anki-vorschlag-mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+			try {
+				if (typeof mermaid.parse === 'function') await mermaid.parse(code);
+				const ergebnis = await mermaid.render(id, code);
+				const svg = typeof ergebnis === 'string' ? ergebnis : ergebnis?.svg;
+				const huelle = ziel.createDiv({ cls: 'mermaid' });
+				huelle.innerHTML = svg ?? '';
+			} catch (e: any) {
+				// mermaid.render() haengt bei Fehlern ein Fehler-SVG an <body>.
+				document.getElementById(id)?.remove();
+				document.getElementById('d' + id)?.remove();
+				return String(e?.message || e).split('\n').slice(0, 3).join(' ');
+			}
+		}
+		return null;
 	}
 
 	/** Springt im Editor zur zitierten Stelle. */

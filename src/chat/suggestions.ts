@@ -40,10 +40,103 @@ export interface InvalidSuggestion {
 	reason: string;
 }
 
-export type Suggestion = EditSuggestion | CardSuggestion | InvalidSuggestion;
+/**
+ * Neuen Text NACH einer Ankerzeile einfuegen – fuer Ergaenzungen wie ein
+ * Mermaid-Diagramm. Mit FIND/REPLACE musste die KI dafuer den Anker im
+ * REPLACE wiederholen; verschrieb sie ihn dabei, war die Zeile veraendert.
+ */
+export interface InsertSuggestion {
+	kind: 'insert';
+	after: string;
+	text: string;
+}
+
+export type Suggestion = EditSuggestion | CardSuggestion | InsertSuggestion | InvalidSuggestion;
 
 /** Ergebnis eines Blockparsers - bei Fehlschlag mit Begründung für die UI. */
 type ParseOutcome<T> = { ok: true; value: T } | { ok: false; reason: string };
+
+/**
+ * Wann und wie die KI ein Mermaid-Diagramm vorschlaegt. Der Stil ist der der
+ * vorhandenen Notizen (Glyceroltrinitrat): eingeklapptes Callout, flowchart TD,
+ * stufige Kanten, vier Farbklassen. Gilt fuer Chat, Feedback und Zotero-Agent.
+ */
+export const DIAGRAMM_REGELN = `
+## Diagramme (Mermaid)
+
+Schlage ein Mermaid-Diagramm vor, wenn die Notiz einen **Ablauf** beschreibt, der als
+Bild schneller verstanden wird – und es noch kein Diagramm dazu gibt:
+- Wirkmechanismus als Kaskade (Wirkstoff → Rezeptor/Enzym → Botenstoff → Effekt),
+- Pharmakokinetik (Aufnahme → Verteilung → Metabolisierung → Ausscheidung),
+- Entscheidungswege (Indikation/Kontraindikation prüfen → Dosis), Algorithmen.
+
+Kein Diagramm für bloße Aufzählungen, Vergleiche (dafür eine Tabelle) oder
+Abläufe mit weniger als 3 Schritten ohne Verzweigung. Höchstens ca. 12 Knoten.
+Jeder Knoten muss durch die Notiz oder eine Quelle gedeckt sein – nichts erfinden.
+
+Form – genau so, als \`anki-insert\` direkt nach dem passenden Callout oder der Überschrift:
+
+\`\`\`\`anki-insert
+NACH:
+#### Wirkmechanismus
+TEXT:
+> [!info]- 🧬 Wirkmechanismus <Wirkstoff>
+> \`\`\`mermaid
+> %%{init: {'flowchart': {'curve': 'step'}}}%%
+> flowchart TD
+>     A["💊 <b>Wirkstoff</b>"] --> B["Rezeptor/Enzym"]
+>     B --> C["Effekt"]
+>     C --> D["✅ Klinische Wirkung"]
+>
+>     classDef drug fill:#ffe4e1,stroke:#c0392b,stroke-width:2px,color:#000
+>     classDef msg  fill:#d4edda,stroke:#155724,stroke-width:2px,color:#000
+>     classDef eff  fill:#cce5ff,stroke:#004085,color:#000
+>     classDef res  fill:#e2d5f1,stroke:#4a148c,stroke-width:2px,color:#000
+>     class A drug
+>     class B msg
+>     class C eff
+>     class D res
+> \`\`\`
+\`\`\`\`
+
+Regeln für den Mermaid-Code:
+- Jede Zeile des Callouts beginnt mit \`> \`.
+- Beschriftungen IMMER in \`["…"]\` (Klammern, Umlaute, Pfeile, Sonderzeichen sind
+  sonst Syntaxfehler). Zeilenumbruch mit \`<br/>\`, Hervorhebung mit \`<b>\`/\`<i>\`.
+- Knoten-IDs nur aus Buchstaben/Ziffern. Hemmung als gestrichelte Kante \`-. hemmt .->\`.
+- Klassen: \`drug\` = Wirkstoff, \`msg\` = Botenstoff/Enzym/Zwischenschritt,
+  \`eff\` = Effekt am Organ, \`res\` = klinisches Ergebnis.
+
+Zu JEDEM Diagramm gehört eine Karte, die es abfragt (Anki bekommt das Diagramm
+beim Sync als Bild):
+
+\`\`\`\`anki-card
+OP: add
+Q: Zeige das Schema zum Wirkmechanismus von [[<Notizname>]].
+A: \`\`\`mermaid
+%%{init: {'flowchart': {'curve': 'step'}}}%%
+flowchart TD
+    (derselbe Code wie im Diagramm, ohne "> ")
+\`\`\`
+\`\`\`\`
+`.trim();
+
+/**
+ * Offene Fragen, die der Lernende in die Notiz schreibt („(Frage: …)").
+ * Die KI beantwortet sie mit Beleg und baut die Antwort an der Stelle ein –
+ * die Frage verschwindet mit demselben Klick.
+ */
+export const FRAGEN_REGELN = `
+## Offene Fragen in der Notiz
+
+Der Lernende notiert offene Fragen direkt in der Notiz, z. B. \`(Frage: …)\`,
+\`Frage: …\`, \`??\` oder \`TODO: …\`. Suche die Notiz danach ab und gehe auf JEDE ein:
+- Beantworte sie im Fließtext kurz und mit Beleg (Quelle, Seite).
+- Schlage ein \`anki-edit\` vor, das die Frage entfernt und die Antwort als Aussage
+  an genau dieser Stelle einbaut (FIND = die Zeile mit der Frage, REPLACE = die Zeile
+  ohne Frage, ergänzt um die Antwort).
+- Lässt sich eine Frage nicht belegen, sag das ausdrücklich und lass sie stehen.
+`.trim();
 
 /**
  * Wird an Chat- und Feedback-Prompts angehängt. Bewusst deutsch, weil alle
@@ -90,13 +183,40 @@ A: Die neue Antwort
 - Für Lückentext schreibst du die Lücken mit \`{{c1::...}}\` in \`Q:\` und lässt
   \`A:\` weg. Für Type-In-Karten benutze \`A (type):\` statt \`A:\`.
 
+**Neuen Abschnitt einfügen (nach einer bestehenden Zeile):**
+
+\`\`\`anki-insert
+NACH:
+Eine Zeile exakt so, wie sie in der Notiz steht (z. B. eine Überschrift).
+TEXT:
+Der neue Text, der danach eingefügt wird.
+\`\`\`
+
 Bevorzuge \`anki-card\`, wenn es um Karten geht - das ist zuverlässiger als
-Textsuche. Benutze \`anki-edit\` nur für den Fließtext der Notiz.
+Textsuche. Benutze \`anki-edit\` für Änderungen am Fließtext und
+\`anki-insert\` für Ergänzungen.
+
+**Enthält ein Vorschlag selbst einen Code-Block (z. B. \`\`\`mermaid), öffne und
+schließe den Vorschlagsblock mit VIER Backticks.**
+
+${FRAGEN_REGELN}
+
+${DIAGRAMM_REGELN}
 `.trim();
 
 // 3 oder mehr Backticks erlauben - Modelle nutzen gern vier.
-const FENCE = /^[ \t]*`{3,}(anki-edit|anki-card)[ \t]*$/;
-const CLOSE_FENCE = /^[ \t]*`{3,}[ \t]*$/;
+const FENCE = /^[ \t]*(`{3,})(anki-edit|anki-card|anki-insert)[ \t]*$/;
+
+/**
+ * Schliessende Fence passend zur oeffnenden: mindestens gleich viele Backticks.
+ *
+ * Vorher schloss JEDE ```-Zeile den Vorschlag. Eine Karte, deren Antwort ein
+ * ```mermaid-Block ist, endete damit an dessen Ende, und der Rest lief als
+ * Fliesstext weiter.
+ */
+function closeFenceFor(open: string): RegExp {
+	return new RegExp('^[ \\t]*`{' + open.length + ',}[ \\t]*$');
+}
 
 /**
  * Zerlegt eine KI-Antwort in Vorschläge. Kaputte Blöcke werden als
@@ -114,10 +234,11 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 			continue;
 		}
 
-		const kind = open[1];
+		const kind = open[2];
+		const close = closeFenceFor(open[1]);
 		const body: string[] = [];
 		i++;
-		while (i < lines.length && !CLOSE_FENCE.test(lines[i])) {
+		while (i < lines.length && !close.test(lines[i])) {
 			body.push(lines[i]);
 			i++;
 		}
@@ -125,7 +246,9 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 
 		const parsed: ParseOutcome<Suggestion> = kind === 'anki-edit'
 			? parseEditBlock(body)
-			: parseCardBlock(body);
+			: kind === 'anki-insert'
+				? parseInsertBlock(body)
+				: parseCardBlock(body);
 
 		out.push(parsed.ok
 			? parsed.value
@@ -156,6 +279,21 @@ function parseEditBlock(body: string[]): ParseOutcome<EditSuggestion> {
 	const replace = body.slice(replaceIdx + 1).join('\n').trim();
 	if (!find) return { ok: false, reason: 'FIND: ist leer.' };
 	return { ok: true, value: { kind: 'edit', find, replace } };
+}
+
+function parseInsertBlock(body: string[]): ParseOutcome<InsertSuggestion> {
+	const afterIdx = body.findIndex((l) => /^(NACH|AFTER):$/i.test(l.trim()));
+	const textIdx = body.findIndex((l) => /^TEXT:$/i.test(l.trim()));
+	if (afterIdx === -1 || textIdx === -1 || textIdx < afterIdx) {
+		return { ok: false, reason: 'Der Block braucht eine NACH:- und eine TEXT:-Zeile.' };
+	}
+	const after = body.slice(afterIdx + 1, textIdx).join('\n').trim();
+	// TEXT nur an den Raendern kuerzen – Einrueckung im Mermaid-Code und das
+	// „> " der Callout-Zeilen muessen bleiben.
+	const text = body.slice(textIdx + 1).join('\n').replace(/^\s*\n/, '').replace(/\s+$/, '');
+	if (!after) return { ok: false, reason: 'NACH: ist leer.' };
+	if (!text) return { ok: false, reason: 'TEXT: ist leer.' };
+	return { ok: true, value: { kind: 'insert', after, text } };
 }
 
 function parseCardBlock(body: string[]): ParseOutcome<CardSuggestion> {
@@ -238,9 +376,11 @@ export function stripSuggestionBlocks(markdown: string): string {
 
 	let i = 0;
 	while (i < lines.length) {
-		if (FENCE.test(lines[i])) {
+		const open = lines[i].match(FENCE);
+		if (open) {
+			const close = closeFenceFor(open[1]);
 			i++;
-			while (i < lines.length && !CLOSE_FENCE.test(lines[i])) i++;
+			while (i < lines.length && !close.test(lines[i])) i++;
 			i++;
 			continue;
 		}
@@ -272,7 +412,7 @@ export function stripSuggestionBlocks(markdown: string): string {
  */
 export function entschaerfePluginFences(markdown: string): string {
 	return markdown.replace(
-		/^([ \t]*`{3,})[ \t]*(?:anki-cards?|anki-edit)[ \t]*$/gm,
+		/^([ \t]*`{3,})[ \t]*(?:anki-cards?|anki-edit|anki-insert)[ \t]*$/gm,
 		'$1text'
 	);
 }
@@ -294,6 +434,8 @@ export function schluesselFuer(vorschlag: Suggestion): string {
 	switch (vorschlag.kind) {
 		case 'edit':
 			return JSON.stringify(['edit', vorschlag.find, vorschlag.replace]);
+		case 'insert':
+			return JSON.stringify(['insert', vorschlag.after, vorschlag.text]);
 		case 'card':
 			return JSON.stringify([
 				'card', vorschlag.op, vorschlag.id, vorschlag.ref,
@@ -302,4 +444,35 @@ export function schluesselFuer(vorschlag: Suggestion): string {
 		default:
 			return JSON.stringify(['invalid', vorschlag.raw]);
 	}
+}
+
+/**
+ * Mermaid-Quelltext aus einem Vorschlag – fuer Vorschau und Pruefung im Chat.
+ * Versteht Callout-Zeilen („> ") und Karten-Antworten.
+ */
+export function mermaidAusVorschlag(v: Suggestion): string[] {
+	const text = v.kind === 'insert' ? v.text
+		: v.kind === 'edit' ? v.replace
+			: v.kind === 'card' ? v.a : '';
+	const out: string[] = [];
+	const lines = text.replace(/\r\n/g, '\n').split('\n');
+	for (let i = 0; i < lines.length; i++) {
+		const m = lines[i].match(/^((?:[ \t]*>)*)[ \t]*`{3,}mermaid[ \t]*$/i);
+		if (!m) continue;
+		const quote = m[1];
+		const code: string[] = [];
+		let j = i + 1;
+		for (; j < lines.length; j++) {
+			let l = lines[j];
+			if (quote) {
+				const q = l.match(/^((?:[ \t]*>)*)[ \t]?/);
+				l = l.slice(q ? q[0].length : 0);
+			}
+			if (/^[ \t]*`{3,}[ \t]*$/.test(l)) break;
+			code.push(l);
+		}
+		out.push(code.join('\n').trim());
+		i = j;
+	}
+	return out.filter(Boolean);
 }

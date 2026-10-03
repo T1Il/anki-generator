@@ -44,7 +44,7 @@ reload Obsidian.
 - `src/anki/ankiParser.ts` — Block location, card parsing, serialization
 - `src/anki/syncManager.ts` — Card sync with image handling and duplicate detection
 - `src/anki/driftCheck.ts` — Compares notes against Anki, classifies the difference
-- `src/chat/` — Suggestion format/parsing, applying suggestions, text location, chat history
+- `src/chat/` — Suggestion format/parsing (`anki-edit`, `anki-card`, `anki-insert`; closing fence must be at least as long as the opening one), shared prompt rules (`FRAGEN_REGELN`, `DIAGRAMM_REGELN`), applying suggestions (`insertText.ts` for insertions and new `## Anki` sections), text location, chat history
 - `src/ui/chat/ChatPanel.ts` — The AI chat (incremental rendering, streaming)
 - `src/zotero/zoteroClient.ts` — Zotero local API (collections, items, attachment/full-text paths)
 - `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable)

@@ -1023,3 +1023,14 @@ textarea.schema-hintergrund {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
+
+/* Diagramm-Vorschau in Vorschlaegen */
+.anki-suggestion-preview { margin: var(--size-4-2) 0; overflow-x: auto; }
+.anki-suggestion-preview .mermaid svg { max-width: 100%; height: auto; }
+.anki-suggestion-diff.is-collapsed { display: none; }
+.anki-suggestion-source-toggle {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-accent);
+	cursor: pointer;
+	margin-bottom: var(--size-4-1);
+}

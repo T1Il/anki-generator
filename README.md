@@ -19,6 +19,13 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
   Card changes are addressed by note ID, so they apply without any text search;
   changes to note prose are located even when the passage contains wikilinks,
   bold markers or typographic quotes.
+- **Insertions** (`anki-insert`, after an anchor line) for new sections; a new card in a
+  note without cards creates the `## Anki` block (deck taken from neighbouring notes).
+- **Mermaid diagrams**: for processes (mechanism, kinetics, decision paths) the model
+  proposes a diagram in the vault's style plus a card that asks for it. The suggestion
+  shows the rendered diagram and is blocked if Mermaid reports a syntax error.
+- **Open questions** written into a note (e.g. `(Frage: …)`) are answered with evidence;
+  the suggestion replaces the question with the answer.
 - Streams responses, keeps a per-note history across restarts, and can be opened
   in the sidebar or as a full tab.
 

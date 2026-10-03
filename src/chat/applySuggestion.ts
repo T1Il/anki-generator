@@ -1,6 +1,6 @@
 import { App, TFile, Notice } from 'obsidian';
 import { Card } from '../types';
-import { CardSuggestion, EditSuggestion, Suggestion } from './suggestions';
+import { CardSuggestion, EditSuggestion, InsertSuggestion, Suggestion } from './suggestions';
 import { applyFindReplace, locate } from './textLocator';
 import {
 	getAnkiBlocks,
@@ -10,6 +10,7 @@ import {
 	buildFullBlock,
 	spliceBlock
 } from '../anki/ankiParser';
+import { insertAfterAnchor, newAnkiSection } from './insertText';
 
 export interface ApplyResult {
 	ok: boolean;
@@ -43,16 +44,52 @@ export async function applyEditSuggestion(
 	return result;
 }
 
-/** Prüft, ob sich der FIND-Text überhaupt finden lässt (für die Vorschau). */
+/** Text nach einer Ankerzeile einfuegen. */
+export async function applyInsertSuggestion(
+	app: App,
+	sourcePath: string | undefined,
+	suggestion: InsertSuggestion
+): Promise<ApplyResult> {
+	const file = getFile(app, sourcePath);
+	if (!file) return { ok: false, message: 'Notiz nicht gefunden.' };
+
+	let result: ApplyResult = { ok: false, message: 'Ankerzeile (NACH:) nicht gefunden.' };
+	await app.vault.process(file, (content) => {
+		const updated = insertAfterAnchor(content, suggestion.after, suggestion.text);
+		if (updated === null) return content;
+		result = { ok: true, message: 'Eingefügt.' };
+		return updated;
+	});
+	return result;
+}
+
+/** Prüft, ob sich FIND bzw. NACH überhaupt finden lässt (für die Vorschau). */
 export async function canLocateEdit(
 	app: App,
 	sourcePath: string | undefined,
-	suggestion: EditSuggestion
+	suggestion: EditSuggestion | InsertSuggestion
 ): Promise<boolean> {
 	const file = getFile(app, sourcePath);
 	if (!file) return false;
 	const content = await app.vault.read(file);
-	return locate(content, suggestion.find) !== null;
+	return locate(content, suggestion.kind === 'edit' ? suggestion.find : suggestion.after) !== null;
+}
+
+/**
+ * Stapel fuer einen neuen Kartenblock: der erste TARGET DECK einer Notiz im
+ * selben Ordner (oder darueber), sonst der Hauptstapel aus den Einstellungen.
+ */
+async function deckFuerNeuenBlock(app: App, file: TFile, fallback: string): Promise<string> {
+	let folder = file.parent;
+	for (let tiefe = 0; folder && tiefe < 3; tiefe++, folder = folder.parent) {
+		for (const child of folder.children) {
+			if (!(child instanceof TFile) || child.extension !== 'md' || child.path === file.path) continue;
+			const text = await app.vault.cachedRead(child);
+			const m = text.match(/^[ \t>]*TARGET DECK:\s*(\S.*)$/m);
+			if (m) return m[1].trim();
+		}
+	}
+	return fallback;
 }
 
 /**
@@ -62,16 +99,30 @@ export async function canLocateEdit(
 export async function applyCardSuggestion(
 	app: App,
 	sourcePath: string | undefined,
-	suggestion: CardSuggestion
+	suggestion: CardSuggestion,
+	mainDeck = ''
 ): Promise<ApplyResult> {
 	const file = getFile(app, sourcePath);
 	if (!file) return { ok: false, message: 'Notiz nicht gefunden.' };
 
 	let result: ApplyResult = { ok: false, message: 'Kein anki-cards-Block in der Notiz.' };
+	// Nur fuer den Fall „noch kein Block" gebraucht, aber vor process() holen:
+	// die Callback-Funktion dort darf nicht asynchron sein.
+	const deck = suggestion.op === 'add' ? await deckFuerNeuenBlock(app, file, mainDeck) : '';
 
 	await app.vault.process(file, (content) => {
 		const blocks = getAnkiBlocks(content);
-		if (blocks.length === 0) return content;
+		if (blocks.length === 0) {
+			// Erste Karte einer Notiz: Abschnitt „## Anki" samt Block anlegen.
+			if (suggestion.op !== 'add') return content;
+			const card: Card = {
+				type: /\{\{c\d+::/.test(suggestion.q) ? 'Cloze' : 'Basic',
+				q: suggestion.q, a: suggestion.a, id: null, typeIn: suggestion.typeIn
+			};
+			const inner = formatCardsToString(`TARGET DECK: ${deck}`.trimEnd(), [card], '', undefined, []);
+			result = { ok: true, message: 'Kartenblock angelegt, Karte hinzugefügt.' };
+			return content.replace(/\s*$/, '') + '\n\n' + newAnkiSection(inner) + '\n';
+		}
 
 		// Gleiche Reihenfolge wie im Prompt: alle Blöcke, alle Karten. Die
 		// CARD-Nummer aus dem Vorschlag zählt 1-basiert über diese Liste.
@@ -171,7 +222,8 @@ function writeBack(
 export async function applySuggestion(
 	app: App,
 	sourcePath: string | undefined,
-	suggestion: Suggestion
+	suggestion: Suggestion,
+	mainDeck = ''
 ): Promise<ApplyResult> {
 	if (suggestion.kind === 'invalid') {
 		const result = { ok: false, message: suggestion.reason };
@@ -181,7 +233,9 @@ export async function applySuggestion(
 
 	const result = suggestion.kind === 'edit'
 		? await applyEditSuggestion(app, sourcePath, suggestion)
-		: await applyCardSuggestion(app, sourcePath, suggestion);
+		: suggestion.kind === 'insert'
+			? await applyInsertSuggestion(app, sourcePath, suggestion)
+			: await applyCardSuggestion(app, sourcePath, suggestion, mainDeck);
 
 	new Notice(result.message, result.ok ? 3000 : 6000);
 	return result;

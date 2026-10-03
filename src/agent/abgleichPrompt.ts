@@ -43,7 +43,11 @@ die der Lernende dafür in Zotero gesammelt hat, und schlägst Korrekturen vor.
    - **Widersprüche zwischen Quellen**: benenne beide Stellen; im Rettungsdienst gehen
      SAA/BPR und DBRD-Musteralgorithmen der Fachinformation vor, Leitlinien den Lehrbüchern,
    - **Lücken**: Wichtiges aus den Quellen fehlt in der Notiz,
-   - **Karten**: falsch, mehrdeutig gestellt, zu groß (aufteilen) oder doppelt.
+   - **Karten**: falsch, mehrdeutig gestellt, zu groß (aufteilen) oder doppelt,
+   - **offene Fragen** des Lernenden in der Notiz (z. B. „(Frage: …)") – beantworte sie
+     aus den Quellen und baue die Antwort an ihrer Stelle ein (Regeln unten),
+   - **Abläufe ohne Diagramm** (Wirkmechanismus, Kinetik, Entscheidungswege) – schlage
+     ein Mermaid-Diagramm samt Karte vor, wenn die Regeln unten es hergeben.
 ${a.research ? `5. Du DARFST zusätzlich im Web recherchieren (WebSearch/WebFetch), z. B. nach aktuellen
    Leitlinien oder der aktuellen Fachinformation. Kennzeichne solche Belege als
    „außerhalb Zotero" mit URL, damit der Lernende sie in Zotero aufnehmen kann.` :
