@@ -149,13 +149,19 @@ export async function generateFeedbackOnly(
 	noteContent: string,
 	provider: AiProvider,
 	settings: AnkiGeneratorSettings,
-    abortSignal?: { aborted: boolean }
+    abortSignal?: { aborted: boolean },
+	existingCards?: string
 ): Promise<string> {
 	let feedbackPrompt = settings.useCustomFeedbackPrompt ? settings.feedbackPrompt : DEFAULT_SETTINGS.feedbackPrompt;
 	if (!feedbackPrompt || typeof feedbackPrompt !== 'string') {
 		feedbackPrompt = DEFAULT_SETTINGS.feedbackPrompt;
 	}
 	feedbackPrompt = feedbackPrompt.replace('{{noteContent}}', noteContent);
+	// Ohne Kartenliste hatte die KI keine CARD-Nummern und griff zu Zahlen aus
+	// alten <!--ID: …-->-Kommentaren – die zu keiner Karte im Block gehoeren.
+	if (existingCards && existingCards.trim() && existingCards.trim() !== 'Keine.') {
+		feedbackPrompt += `\n\nDiese Anki-Karten existieren bereits zu dieser Notiz. Die Zeile "CARD: n" davor ist die Nummer, ueber die du dich auf eine Karte beziehst:\n"""\n${existingCards}\n"""`;
+	}
 	// Ohne diese Anweisung liefert das Feedback nur Fliesstext und die
 	// Vorschlaege lassen sich nicht per Klick uebernehmen.
 	feedbackPrompt += '\n\n' + SUGGESTION_FORMAT_INSTRUCTIONS;

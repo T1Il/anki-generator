@@ -4,7 +4,7 @@ import { ChatMessage } from '../../types';
 import { streamChatResponse, generateFeedbackOnly } from '../../aiGenerator';
 import { resolveProvider, PROVIDERS } from '../../providers';
 import { entschaerfePluginFences, mermaidAusVorschlag, parseSuggestions, schluesselFuer, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
-import { applySuggestion, canLocateEdit } from '../../chat/applySuggestion';
+import { applySuggestion, canLocateEdit, pruefeKartenVorschlag } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
 import { getAnkiBlocks, parseCardsFromBlockSource, formatCardsToExistingCardsString } from '../../anki/ankiParser';
@@ -20,6 +20,13 @@ export interface ChatPanelOptions {
 	/** Callback für "In neuem Tab öffnen". */
 	onPopOut?: () => void;
 	collapsible?: boolean;
+	/** Groß im Modal öffnen (Knopf in der Kopfzeile). */
+	onMaximize?: () => void;
+	/**
+	 * Ein Vorschlag wurde zum Vergleichen gewählt. Gesetzt nur im Modal – dort
+	 * zeigt die rechte Spalte Vorher/Nachher.
+	 */
+	onVorschlagWaehlen?: (s: Suggestion) => void;
 }
 
 /**
@@ -46,6 +53,8 @@ export class ChatPanel extends Component {
 	private renderedCount = 0;
 	private controller: AbortController | null = null;
 	private collapsed = false;
+	/** Pruefungen offener Vorschlaege – nach jeder Übernahme erneut ausgefuehrt. */
+	private pruefungen = new Map<HTMLElement, () => void>();
 
 	constructor(
 		plugin: AnkiGeneratorPlugin,
@@ -77,6 +86,7 @@ export class ChatPanel extends Component {
 		this.renderAll();
 		// Erst nach renderAll(): vorher gibt es keine Boxen zum Markieren.
 		this.lauscheAufUebernahmen();
+		this.lauscheAufVerlauf();
 		if (this.options.embedded) this.merkeHoehe();
 	}
 
@@ -119,6 +129,12 @@ export class ChatPanel extends Component {
 
 		const controls = header.createDiv({ cls: 'anki-chat-header-controls' });
 		controls.addEventListener('click', (e) => e.stopPropagation());
+
+		if (this.options.onMaximize) {
+			const max = new ButtonComponent(controls);
+			max.setIcon('maximize-2').setTooltip('Groß öffnen (mit Vergleichsansicht)');
+			max.onClick(() => this.options.onMaximize && this.options.onMaximize());
+		}
 
 		if (this.options.onPopOut) {
 			const popOut = new ButtonComponent(controls);
@@ -196,6 +212,7 @@ export class ChatPanel extends Component {
 	/** Vollständig neu zeichnen (nur bei Notizwechsel oder Leeren nötig). */
 	renderAll() {
 		this.log.empty();
+		this.pruefungen.clear();
 		this.renderedCount = 0;
 
 		if (this.history.length === 0) {
@@ -284,6 +301,19 @@ export class ChatPanel extends Component {
 		suggestions.forEach((s) => this.renderSuggestion(bubble, s));
 	}
 
+	/** Nach einer frischen Antwort: ersten Vorschlag gleich im Vergleich zeigen. */
+	private waehleErsten(bubble: HTMLElement) {
+		if (!this.options.onVorschlagWaehlen) return;
+		const box = bubble.querySelector('.anki-suggestion') as HTMLElement | null;
+		box?.click();
+	}
+
+	private markiereGewaehlt(box: HTMLElement) {
+		this.log.querySelectorAll('.anki-suggestion.is-selected')
+			.forEach((el) => el.removeClass('is-selected'));
+		box.addClass('is-selected');
+	}
+
 	private renderSuggestion(parent: HTMLElement, suggestion: Suggestion) {
 		const box = parent.createDiv({ cls: 'anki-suggestion' });
 		// Inhaltsschluessel am Element, damit jede andere offene Ansicht
@@ -339,11 +369,23 @@ export class ChatPanel extends Component {
 
 		const actions = box.createDiv({ cls: 'anki-suggestion-actions' });
 
+		if (this.options.onVorschlagWaehlen) {
+			box.addClass('is-selectable');
+			box.addEventListener('click', (e) => {
+				// Knöpfe haben eigene Aufgaben; „Quelltext zeigen" auch.
+				if ((e.target as HTMLElement).closest('button, .anki-suggestion-source-toggle')) return;
+				this.markiereGewaehlt(box);
+				this.options.onVorschlagWaehlen && this.options.onVorschlagWaehlen(aktuell);
+			});
+		}
+
+		// Was „Übernehmen" anwendet. „Als neue Karte" stellt das um.
+		let aktuell: Suggestion = suggestion;
 		const applyBtn = new ButtonComponent(actions);
 		applyBtn.setButtonText('Übernehmen').setCta();
 		applyBtn.onClick(async () => {
 			applyBtn.setDisabled(true);
-			const result = await applySuggestion(this.plugin.app, this.sourcePath, suggestion, this.plugin.settings.mainDeck);
+			const result = await applySuggestion(this.plugin.app, this.sourcePath, aktuell, this.plugin.settings.mainDeck);
 			if (result.ok) {
 				this.markiereUebernommen(box, applyBtn);
 				// Jede andere offene Ansicht derselben Notiz mitziehen.
@@ -386,15 +428,67 @@ export class ChatPanel extends Component {
 			showBtn.onClick(() => void this.revealInNote(anker));
 
 			// Früh melden, wenn der zitierte Text gar nicht auffindbar ist.
-			void canLocateEdit(this.plugin.app, this.sourcePath, suggestion).then((found) => {
+			// Erneut nach jeder Übernahme: ein Einfügen nach einem Callout, das
+			// erst ein anderer Vorschlag anlegt, wird dann gültig.
+			const pruefe = () => void canLocateEdit(this.plugin.app, this.sourcePath, suggestion).then((found) => {
+				box.querySelectorAll('.anki-suggestion-note.is-locate').forEach((el) => el.remove());
+				if (box.hasClass('is-applied')) return;
+				if (!box.querySelector('.anki-suggestion-note:not(.is-locate)')) box.toggleClass('is-missing', !found);
 				if (!found) {
-					box.addClass('is-missing');
 					box.createDiv({
-						cls: 'anki-suggestion-note',
-						text: 'Textstelle nicht in der Notiz gefunden - bitte manuell prüfen.'
+						cls: 'anki-suggestion-note is-locate',
+						text: suggestion.kind === 'insert'
+							? 'Ankerzeile nicht in der Notiz gefunden – evtl. erst einen anderen Vorschlag übernehmen.'
+							: 'Textstelle nicht in der Notiz gefunden - bitte manuell prüfen.'
 					});
 				}
 			});
+			this.pruefungen.set(box, pruefe);
+			pruefe();
+		}
+
+		if (suggestion.kind === 'card' && suggestion.op !== 'add') {
+			// Erfundene oder veraltete Bezuege vor dem Klick zeigen.
+			let alsNeuBtn: ButtonComponent | null = null;
+			const pruefe = () => void pruefeKartenVorschlag(this.plugin.app, this.sourcePath, suggestion).then((r) => {
+				box.querySelectorAll('.anki-suggestion-note.is-locate').forEach((el) => el.remove());
+				if (!r || box.hasClass('is-applied') || aktuell !== suggestion) return;
+				if (r.ok) {
+					box.removeClass('is-missing');
+					applyBtn.setDisabled(false);
+					if (r.treffer.weg === 'frage') {
+						box.createDiv({
+							cls: 'anki-suggestion-note is-locate is-info',
+							text: 'Die genannte ID passt zu keiner Karte – zugeordnet über die Frage. Bitte im Vergleich prüfen.'
+						});
+					}
+					return;
+				}
+				box.addClass('is-missing');
+				applyBtn.setDisabled(true);
+				box.createDiv({ cls: 'anki-suggestion-note is-locate', text: r.message });
+				if (suggestion.op === 'update' && !alsNeuBtn) {
+					const knopf = new ButtonComponent(actions);
+					alsNeuBtn = knopf;
+					knopf.setButtonText('Als neue Karte');
+					knopf.setTooltip('Den Vorschlag als neue Karte in den anki-cards-Block übernehmen');
+					actions.insertBefore(knopf.buttonEl, applyBtn.buttonEl.nextSibling);
+					knopf.onClick(() => {
+						aktuell = { ...suggestion, op: 'add', id: null, ref: null };
+						knopf.buttonEl.remove();
+						box.querySelectorAll('.anki-suggestion-note.is-locate').forEach((el) => el.remove());
+						box.removeClass('is-missing');
+						applyBtn.setDisabled(false);
+						applyBtn.setButtonText('Als neue Karte übernehmen');
+						if (this.options.onVorschlagWaehlen) {
+							this.markiereGewaehlt(box);
+							this.options.onVorschlagWaehlen(aktuell);
+						}
+					});
+				}
+			});
+			this.pruefungen.set(box, pruefe);
+			pruefe();
 		}
 
 		const dismissBtn = new ButtonComponent(actions);
@@ -519,12 +613,36 @@ export class ChatPanel extends Component {
 				sourcePath: string, schluessel: string
 			) => {
 				if (!schluessel || sourcePath !== this.sourcePath) return;
+				// Die Notiz hat sich geaendert: offene Vorschlaege neu pruefen.
+				window.setTimeout(() => {
+					this.pruefungen.forEach((pruefe, box) => {
+						if (!box.isConnected) this.pruefungen.delete(box);
+						else if (!box.hasClass('is-applied')) pruefe();
+					});
+				}, 50);
 				const boxen = this.log.querySelectorAll('.anki-suggestion');
 				boxen.forEach((el) => {
 					if (el instanceof HTMLElement && el.dataset.ankiVorschlag === schluessel) {
 						this.markiereUebernommen(el);
 					}
 				});
+			}) as any)
+		);
+	}
+
+	/**
+	 * Nachrichten aus einer anderen Ansicht derselben Notiz (Modal, Block,
+	 * Seitenleiste) nachziehen. Waehrend eine eigene Anfrage laeuft nicht –
+	 * dann steht der Platzhalter im DOM, aber noch nicht im Verlauf.
+	 */
+	private lauscheAufVerlauf() {
+		this.registerEvent(
+			this.plugin.app.workspace.on('anki:chat-update' as any, ((
+				sourcePath: string, history: ChatMessage[]
+			) => {
+				if (sourcePath !== this.sourcePath || this.controller || !Array.isArray(history)) return;
+				if (history === this.history && history.length === this.renderedCount) return;
+				this.syncHistoryRef(history);
 			}) as any)
 		);
 	}
@@ -603,6 +721,7 @@ export class ChatPanel extends Component {
 			this.history.push(placeholder);
 			this.renderedCount = this.history.length;
 			await this.renderBody(bubble, streamed, true);
+			this.waehleErsten(bubble);
 
 		} catch (e: any) {
 			if (raf) window.cancelAnimationFrame(raf);
@@ -800,9 +919,9 @@ export class ChatPanel extends Component {
 		this.scrollToBottom();
 
 		try {
-			const { content } = await this.readNote();
+			const { content, cards } = await this.readNote();
 			const feedback = await generateFeedbackOnly(
-				this.plugin.app, content, provider, this.plugin.settings, controller.signal as any
+				this.plugin.app, content, provider, this.plugin.settings, controller.signal as any, cards
 			);
 
 			// Erst die Warteblase weg, dann die echte Antwort einhaengen –

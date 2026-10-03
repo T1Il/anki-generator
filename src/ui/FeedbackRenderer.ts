@@ -19,6 +19,7 @@ import { getDeckNames, moveAnkiNotesToDeck } from '../anki/AnkiConnect';
 import { stripHybridObsidianLinks } from '../utils';
 import { resolveProvider } from '../providers';
 import { ChatPanel } from './chat/ChatPanel';
+import { ChatModal } from './chat/ChatModal';
 
 export async function renderFeedback(
     container: HTMLElement,
@@ -74,6 +75,7 @@ export async function renderFeedback(
         panel = new ChatPanel(plugin, chatHost, history, sourcePath, {
             embedded: !showControls,
             onPopOut: onOpenInAction,
+            onMaximize: sourcePath ? () => new ChatModal(plugin, sourcePath).open() : undefined,
             collapsible: true
         });
         panel.load();

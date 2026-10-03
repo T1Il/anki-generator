@@ -11,6 +11,7 @@ import {
 	spliceBlock
 } from '../anki/ankiParser';
 import { insertAfterAnchor, newAnkiSection } from './insertText';
+import { findeKarte, KartenSuche } from './kartenSuche';
 
 export interface ApplyResult {
 	ok: boolean;
@@ -73,6 +74,24 @@ export async function canLocateEdit(
 	if (!file) return false;
 	const content = await app.vault.read(file);
 	return locate(content, suggestion.kind === 'edit' ? suggestion.find : suggestion.after) !== null;
+}
+
+/**
+ * Vorab pruefen, ob ein update/delete seine Karte findet – damit ein
+ * erfundener Bezug schon in der Vorschlagsbox auffaellt, nicht erst beim Klick.
+ * null bei `add`: dort gibt es nichts zu finden.
+ */
+export async function pruefeKartenVorschlag(
+	app: App,
+	sourcePath: string | undefined,
+	suggestion: CardSuggestion
+): Promise<KartenSuche | null> {
+	if (suggestion.op === 'add') return null;
+	const file = getFile(app, sourcePath);
+	if (!file) return { ok: false, alteKarte: false, message: 'Notiz nicht gefunden.' };
+	const content = await app.vault.read(file);
+	const bloecke = getAnkiBlocks(content).map(b => ({ cards: parseCardsFromBlockSource(b.innerClean) }));
+	return findeKarte(content, bloecke, suggestion);
 }
 
 /**
@@ -151,38 +170,14 @@ export async function applyCardSuggestion(
 				parseBlockHeader(parsed[bi].block.innerClean), parsed[bi].cards);
 		}
 
-		// update/delete: erst über die Anki-ID, dann über die CARD-Nummer.
+		// update/delete: ID, dann CARD-Nummer, dann Aehnlichkeit der Frage.
 		// Der ID-Weg bleibt vorn, weil er auch nach Umsortieren noch stimmt.
-		let hit: { bi: number; ci: number } | null = null;
-
-		if (suggestion.id !== null) {
-			for (let bi = 0; bi < parsed.length && !hit; bi++) {
-				const ci = parsed[bi].cards.findIndex(c => c.id === suggestion.id);
-				if (ci >= 0) hit = { bi, ci };
-			}
-		}
-
-		if (!hit && suggestion.ref !== null) {
-			const pos = flat[suggestion.ref - 1];
-			if (!pos) {
-				result = {
-					ok: false,
-					message: `CARD: ${suggestion.ref} gibt es nicht — die Notiz hat ${flat.length} Karten.`
-				};
-				return content;
-			}
-			hit = pos;
-		}
-
-		if (!hit) {
-			result = {
-				ok: false,
-				message: suggestion.id !== null
-					? `Karte mit ID ${suggestion.id} nicht gefunden.`
-					: 'Der Vorschlag nennt weder CARD: noch ID:.'
-			};
+		const suche = findeKarte(content, parsed, suggestion);
+		if (!suche.ok) {
+			result = { ok: false, message: suche.message };
 			return content;
 		}
+		const hit = suche.treffer;
 
 		const { block, cards } = parsed[hit.bi];
 		const header = parseBlockHeader(block.innerClean);

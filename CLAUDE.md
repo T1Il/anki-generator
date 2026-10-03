@@ -46,6 +46,9 @@ reload Obsidian.
 - `src/anki/driftCheck.ts` — Compares notes against Anki, classifies the difference
 - `src/chat/` — Suggestion format/parsing (`anki-edit`, `anki-card`, `anki-insert`; closing fence must be at least as long as the opening one), shared prompt rules (`FRAGEN_REGELN`, `DIAGRAMM_REGELN`), applying suggestions (`insertText.ts` for insertions and new `## Anki` sections), text location, chat history
 - `src/ui/chat/ChatPanel.ts` — The AI chat (incremental rendering, streaming)
+- `src/ui/chat/ChatModal.ts` — The chat full-size: chat left, before/after comparison (`chat/vergleich.ts`) or rendered note right
+- `src/chat/mermaidRepair.ts` — Fixes common LLM Mermaid errors (unquoted subgraph titles/labels with parentheses) before preview, apply and sync
+- `src/chat/kartenSuche.ts` — Resolves update/delete targets: ID → CARD → question similarity; detects legacy `<!--ID-->` cards
 - `src/zotero/zoteroClient.ts` — Zotero local API (collections, items, attachment/full-text paths)
 - `src/ui/MedikamentQuellenModal.ts` + `src/agent/quellenPrompt.ts` — drug sources: agent proposes a JSON plan, user ticks, Fitness-Manager backend writes to Zotero
 - `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable)

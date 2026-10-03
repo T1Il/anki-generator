@@ -20,7 +20,10 @@ const entry = path.join(os.tmpdir(), 'anki-chat-entry.ts');
 fs.writeFileSync(entry, [
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/suggestions.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/textLocator.ts').replace(/\\/g, '/')) + ";",
-	"export * from " + JSON.stringify(path.join(root, 'src/chat/insertText.ts').replace(/\\/g, '/')) + ";"
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/insertText.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/mermaidRepair.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/kartenSuche.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/vergleich.ts').replace(/\\/g, '/')) + ";"
 ].join('\n'));
 
 const outfile = path.join(os.tmpdir(), 'anki-chat-check.cjs');
@@ -354,6 +357,128 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 	check('Beispiele im Prompt sind selbst parsebar',
 		C.parseSuggestions(instr).filter(v => v.kind === 'invalid').length === 0,
 		C.parseSuggestions(instr).filter(v => v.kind === 'invalid'));
+}
+
+// --- Mermaid-Reparatur (03.10.2026: subgraph Anlegen (Donning)) ---
+{
+	const code = [
+		'flowchart TD',
+		'    subgraph Anlegen (Donning)',
+		'        HD1["1. Händedesinfektion"] --> K[Kittel (lang)]',
+		'        K --> E{Kontamination (sichtbar)?}',
+		'        D[(Datenbank)] --> F{{Sechseck}}',
+		'    end',
+		'    subgraph Ablegen',
+		'    end',
+		'    subgraph ok["Schon (richtig)"]',
+		'    end'
+	].join('\n');
+	const r = C.repariereMermaid(code);
+	check('subgraph mit Klammern bekommt ID und Anführungszeichen', r.includes('subgraph sg1["Anlegen (Donning)"]'), r);
+	check('einfacher subgraph-Titel bleibt', r.includes('    subgraph Ablegen\n'), r);
+	check('korrekter subgraph bleibt', r.includes('subgraph ok["Schon (richtig)"]'), r);
+	check('Knoten mit Klammern wird gequotet', r.includes('K["Kittel (lang)"]'), r);
+	check('Raute mit Klammern wird gequotet', r.includes('E{"Kontamination (sichtbar)?"}'), r);
+	check('Sonderformen bleiben', r.includes('D[(Datenbank)]') && r.includes('F{{Sechseck}}'), r);
+	check('gequoteter Knoten bleibt', r.includes('HD1["1. Händedesinfektion"]'), r);
+
+	const callout = [
+		'> [!info]- 🔄 PSA',
+		'> ```mermaid',
+		'> flowchart TD',
+		'>     subgraph Anlegen (Donning)',
+		'>         A["x"]',
+		'>     end',
+		'> ```',
+		'danach (bleibt)'
+	].join('\n');
+	const rc = C.repariereMermaidImText(callout);
+	check('Reparatur im Callout behält "> "', rc.includes('>     subgraph sg1["Anlegen (Donning)"]'), rc);
+	check('Text außerhalb bleibt', rc.endsWith('danach (bleibt)'), rc);
+}
+
+// --- Vorschläge: Reparatur, mehrere Karten, keine ID bei add ---
+{
+	const antwort = [
+		'````anki-insert',
+		'NACH:',
+		'### Ablauf',
+		'TEXT:',
+		'> [!info]- Bild',
+		'> ```mermaid',
+		'> flowchart TD',
+		'>     subgraph Anlegen (Donning)',
+		'>     end',
+		'> ```',
+		'````',
+		'',
+		'````anki-card',
+		'OP: add',
+		'ID: 1749890860503',
+		'Q: Erste Frage?',
+		'A: 1. eins',
+		'2. zwei',
+		'',
+		'Q: Zweite Frage?',
+		'A: zwei',
+		'',
+		'Q: Schema?',
+		'A: ```mermaid',
+		'flowchart TD',
+		'    subgraph Ablegen (Doffing)',
+		'    Q: kein neuer Anfang',
+		'    end',
+		'```',
+		'````'
+	].join('\n');
+	const v = C.parseSuggestions(antwort);
+	check('Insert-Mermaid repariert', v[0].kind === 'insert' && v[0].text.includes('subgraph sg1["Anlegen (Donning)"]'), v[0]);
+	const karten = v.filter((x) => x.kind === 'card');
+	check('drei Karten aus einem add-Block', karten.length === 3, karten.map((k) => k.q));
+	check('add verwirft erfundene ID', karten.every((k) => k.id === null), karten.map((k) => k.id));
+	check('Antwort der ersten Karte mehrzeilig', karten[0] && karten[0].a === '1. eins\n2. zwei', karten[0]);
+	check('Q: im Mermaid-Code startet keine Karte', karten[2] && karten[2].a.includes('Q: kein neuer Anfang'), karten[2]);
+	check('Karten-Mermaid repariert', karten[2] && karten[2].a.includes('subgraph sg1["Ablegen (Doffing)"]'), karten[2]);
+}
+
+// --- Kartensuche: alte <!--ID-->, Ähnlichkeit ---
+{
+	const content = 'Q: Alt?\nA: x\n<!--ID: 1749890860503-->\n';
+	const bloecke = [{ cards: [
+		{ type: 'Basic', q: 'Was versteht man unter [[#^a|Arbeitskleidung]]?', a: 'x', id: null },
+		{ type: 'Basic', q: 'Nenne die Teile der [[#^t|hygienischen persönlichen Schutzausrüstung]].', a: 'y', id: null }
+	] }];
+	const upd = (id, q, ref = null) => ({ kind: 'card', op: 'update', id, ref, q, a: 'neu', typeIn: false });
+
+	const r1 = C.findeKarte(content, bloecke, upd(1749890860503, 'Welche Gegenstände gehören zur Küche?'));
+	check('alte <!--ID--> wird erkannt', !r1.ok && r1.alteKarte === true, r1);
+
+	const r2 = C.findeKarte(content, bloecke, upd(999, 'Nenne die Teile der hygienischen persönlichen Schutzausrüstung.'));
+	check('erfundene ID → Zuordnung über Frage', r2.ok && r2.treffer.ci === 1 && r2.treffer.weg === 'frage', r2);
+
+	const r3 = C.findeKarte(content, bloecke, upd(null, '', 2));
+	check('CARD: 2 trifft', r3.ok && r3.treffer.ci === 1 && r3.treffer.weg === 'card', r3);
+
+	const r4 = C.findeKarte(content, bloecke, upd(12345, 'Ganz andere Frage'));
+	check('erfundene ID ohne Treffer meldet sich', !r4.ok && !r4.alteKarte && /erfunden/.test(r4.message), r4);
+}
+
+// --- Vergleich ---
+{
+	const note = ['# T', '', 'a', 'b', 'c', '', '> [!info] Kopf', '> eins', '> zwei', '', 'Ende'].join('\n');
+	const v = C.berechneVergleich(note, [], { kind: 'edit', find: '> zwei', replace: '> ZWEI' });
+	check('Vergleich: Callout samt Kopf im Ausschnitt', v.art === 'text' && v.vorher.includes('> [!info] Kopf') && v.nachher.includes('> ZWEI'), v);
+	check('Vergleich: Zeilen-Diff', v.entfernt.join() === '> zwei' && v.hinzu.join() === '> ZWEI', v);
+
+	const k = C.berechneVergleich(note, [{ cards: [{ type: 'Basic', q: 'Alt?', a: 'alt', id: 5 }] }],
+		{ kind: 'card', op: 'update', id: 5, ref: null, q: 'Neu?', a: 'neu', typeIn: false });
+	check('Vergleich: Karte vorher/nachher', k.art === 'karte' && k.vorher.q === 'Alt?' && k.nachher.q === 'Neu?', k);
+}
+
+{
+	const instr = C.SUGGESTION_FORMAT_INSTRUCTIONS;
+	check('Anweisungen verbieten ID:', instr.includes('NIEMALS eine `ID:`'));
+	check('Anweisungen nennen subgraph-Form', instr.includes('subgraph an["Anlegen (Donning)"]'));
 }
 
 console.log('');

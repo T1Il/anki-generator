@@ -7,6 +7,8 @@
  * anwenden lassen.
  */
 
+import { repariereMermaidImText } from './mermaidRepair';
+
 export interface EditSuggestion {
 	kind: 'edit';
 	find: string;
@@ -103,6 +105,8 @@ Regeln für den Mermaid-Code:
 - Jede Zeile des Callouts beginnt mit \`> \`.
 - Beschriftungen IMMER in \`["…"]\` (Klammern, Umlaute, Pfeile, Sonderzeichen sind
   sonst Syntaxfehler). Zeilenumbruch mit \`<br/>\`, Hervorhebung mit \`<b>\`/\`<i>\`.
+- Subgraphen IMMER mit ID und Titel in Anführungszeichen:
+  \`subgraph an["Anlegen (Donning)"]\` – nie \`subgraph Anlegen (Donning)\`.
 - Knoten-IDs nur aus Buchstaben/Ziffern. Hemmung als gestrichelte Kante \`-. hemmt .->\`.
 - Klassen: \`drug\` = Wirkstoff, \`msg\` = Botenstoff/Enzym/Zwischenschritt,
   \`eff\` = Effekt am Organ, \`res\` = klinisches Ergebnis.
@@ -176,9 +180,12 @@ A: Die neue Antwort
 - \`OP:\` ist \`update\`, \`add\` oder \`delete\`.
 - \`CARD:\` ist die Nummer aus der Kartenliste oben. Bei \`update\` und
   \`delete\` Pflicht, bei \`add\` weglassen.
-- \`ID:\` darfst du zusätzlich angeben, wenn die Karte eine hat. Karten ohne
-  \`ID:\` sind nur noch nicht mit Anki synchronisiert - über \`CARD:\` kannst
-  du sie genauso ändern und löschen.
+- Schreibe NIEMALS eine \`ID:\`-Zeile – Karten werden nur über \`CARD:\`
+  angesprochen. Zahlen in \`<!--ID: …-->\`-Kommentaren im Notiztext gehören zu
+  alten Karten außerhalb der anki-cards-Blöcke; sie lassen sich hier weder
+  ändern noch löschen. Soll so eine alte Karte ersetzt werden, schlage eine
+  neue Karte mit \`OP: add\` vor.
+- Mehrere neue Karten: ein \`anki-card\`-Block je Karte.
 - Bei \`delete\` genügen \`OP:\` und \`CARD:\`.
 - Für Lückentext schreibst du die Lücken mit \`{{c1::...}}\` in \`Q:\` und lässt
   \`A:\` weg. Für Type-In-Karten benutze \`A (type):\` statt \`A:\`.
@@ -244,18 +251,60 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 		}
 		i++; // schließende Fence überspringen
 
+		if (kind === 'anki-card') {
+			// Ein Block kann mehrere neue Karten enthalten (die Modelle tun das
+			// trotz Anweisung) – vorher gewann stillschweigend die letzte.
+			teileKartenBlock(body).forEach((teil) => {
+				const parsed = parseCardBlock(teil);
+				out.push(parsed.ok
+					? repariereDiagramme(parsed.value)
+					: { kind: 'invalid', raw: teil.join('\n').trim(), reason: parsed.reason });
+			});
+			continue;
+		}
+
 		const parsed: ParseOutcome<Suggestion> = kind === 'anki-edit'
 			? parseEditBlock(body)
-			: kind === 'anki-insert'
-				? parseInsertBlock(body)
-				: parseCardBlock(body);
+			: parseInsertBlock(body);
 
 		out.push(parsed.ok
-			? parsed.value
+			? repariereDiagramme(parsed.value)
 			: { kind: 'invalid', raw: body.join('\n').trim(), reason: parsed.reason });
 	}
 
 	return out;
+}
+
+/** Mermaid-Code im Vorschlag reparieren, bevor Vorschau und Übernahme ihn sehen. */
+function repariereDiagramme<T extends Suggestion>(v: T): T {
+	if (v.kind === 'insert') return { ...v, text: repariereMermaidImText(v.text) };
+	if (v.kind === 'edit') return { ...v, replace: repariereMermaidImText(v.replace) };
+	if (v.kind === 'card') return { ...v, q: repariereMermaidImText(v.q), a: repariereMermaidImText(v.a) };
+	return v;
+}
+
+/**
+ * Einen anki-card-Block mit mehreren `Q:` in Einzelkarten zerlegen – nur bei
+ * `OP: add`. Kopfzeilen (OP, CARD) gelten fuer jede Teilkarte. Ein `Q:` in
+ * einem Code-Block der Antwort (```mermaid) beginnt keine neue Karte.
+ */
+function teileKartenBlock(body: string[]): string[][] {
+	if (!body.some((l) => /^\s*OP:\s*add\s*$/i.test(l))) return [body];
+	const kopf: string[] = [];
+	const teile: string[][] = [];
+	let imCode = false;
+	for (const line of body) {
+		const t = line.trim();
+		// Fence am Zeilenanfang oder direkt hinter "A:" schaltet um.
+		if (/^(?:A(?: \(type\))?:\s*)?`{3,}/i.test(t)) imCode = !imCode;
+		if (!imCode && /^Q:/.test(t)) {
+			teile.push([...kopf, line]);
+			continue;
+		}
+		if (teile.length === 0) kopf.push(line);
+		else teile[teile.length - 1].push(line);
+	}
+	return teile.length > 1 ? teile : [body];
 }
 
 function parseEditBlock(body: string[]): ParseOutcome<EditSuggestion> {
@@ -307,8 +356,21 @@ function parseCardBlock(body: string[]): ParseOutcome<CardSuggestion> {
 	// 'q' | 'a' | null - wohin gehören Folgezeilen ohne eigenen Schlüssel?
 	let current: 'q' | 'a' | null = null;
 
+	// Innerhalb eines Code-Blocks der Antwort (```mermaid) gibt es keine
+	// Schluessel – sonst beendet ein „Q:" in einer Beschriftung die Antwort.
+	let imCode = false;
+
 	for (const line of body) {
 		const trimmed = line.trim();
+
+		if (imCode) {
+			if (/^`{3,}\s*$/.test(trimmed)) imCode = false;
+			if (current === 'q') q += '\n' + line;
+			else if (current === 'a') a += '\n' + line;
+			continue;
+		}
+		// Ungerade Zahl von Fences in der Zeile oeffnet einen Block.
+		if (current && ((trimmed.match(/`{3,}/g) || []).length % 2 === 1)) imCode = true;
 
 		const opMatch = trimmed.match(/^OP:\s*(add|update|delete)\s*$/i);
 		if (opMatch) {
@@ -365,6 +427,11 @@ function parseCardBlock(body: string[]): ParseOutcome<CardSuggestion> {
 	if (op !== 'delete' && !q.trim()) {
 		return { ok: false, reason: 'Kein Q: im Block.' };
 	}
+
+	// Eine neue Karte hat keine Anki-ID. Schreibt die KI trotzdem eine (meist
+	// aus einem alten <!--ID: …-->-Kommentar der Notiz), landete sie im Block,
+	// und der naechste Sync haette eine fremde Anki-Notiz ueberschrieben.
+	if (op === 'add') id = null;
 
 	return { ok: true, value: { kind: 'card', op, id, ref, q: q.trim(), a: a.trim(), typeIn } };
 }

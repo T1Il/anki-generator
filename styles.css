@@ -1065,3 +1065,171 @@ textarea.schema-hintergrund {
 .anki-quellen-grund { font-size: var(--font-ui-smaller); color: var(--text-muted); }
 .anki-quellen-hinweise { font-size: var(--font-ui-small); color: var(--text-muted); margin-top: var(--size-4-2); }
 .anki-quellen-hinweise ul { margin: var(--size-4-1) 0 0; padding-left: var(--size-4-5); }
+
+/* --- Chat groß im Modal: links Chat, rechts Vergleich --- */
+
+.modal.anki-chat-modal {
+	width: min(96vw, 1700px);
+	max-width: 96vw;
+	height: 90vh;
+	max-height: 90vh;
+	display: flex;
+	flex-direction: column;
+}
+
+.modal.anki-chat-modal .modal-content {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.anki-chat-modal-grid {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(380px, 5fr) 6fr;
+	gap: var(--size-4-4);
+}
+
+.anki-chat-modal-chat,
+.anki-chat-modal-vergleich {
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.anki-chat-modal-chat .anki-chat-panel { height: 100%; }
+.anki-chat-modal-chat .anki-chat-header { cursor: default; }
+.anki-chat-modal-chat .anki-chat-arrow { display: none; }
+.anki-chat-modal-chat .anki-chat-bubble { font-size: var(--font-text-size); }
+
+.anki-chat-modal-vergleich {
+	border-left: 1px solid var(--background-modifier-border);
+	padding-left: var(--size-4-4);
+}
+
+.anki-vergleich-kopf {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-2);
+}
+
+.anki-vergleich-tabs { display: flex; gap: 2px; }
+
+.anki-vergleich-tab,
+.anki-vergleich-quelle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.anki-vergleich-tab .svg-icon { width: 15px; height: 15px; }
+.anki-vergleich-quelle { margin-left: auto; }
+
+.anki-vergleich-tab.is-active,
+.anki-vergleich-quelle.is-active {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.anki-vergleich-inhalt {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	padding-right: 4px;
+}
+
+.anki-vergleich-leer {
+	color: var(--text-muted);
+	font-style: italic;
+	padding: var(--size-4-4) 0;
+}
+
+.anki-vergleich-hinweis {
+	font-size: var(--font-ui-small);
+	color: var(--text-warning, var(--text-muted));
+	margin-bottom: var(--size-4-2);
+}
+
+.anki-vergleich-spalten {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--size-4-3);
+	align-items: start;
+}
+
+.anki-vergleich-spalte {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	overflow: hidden;
+	min-width: 0;
+}
+
+.anki-vergleich-spaltentitel {
+	padding: 4px 10px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--text-muted);
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.anki-vergleich-spalte.is-vorher { border-top: 3px solid var(--text-error); }
+.anki-vergleich-spalte.is-nachher { border-top: 3px solid var(--text-success, var(--interactive-accent)); }
+
+.anki-vergleich-spalteninhalt {
+	padding: var(--size-4-2) var(--size-4-3);
+	overflow-x: auto;
+}
+
+.anki-vergleich-spalteninhalt .mermaid svg,
+.anki-vergleich-inhalt > .mermaid svg { max-width: 100%; height: auto; }
+
+.anki-vergleich-karte { display: flex; flex-direction: column; gap: 2px; }
+
+.anki-vergleich-kartenlabel {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+	margin-top: var(--size-4-2);
+}
+
+.anki-vergleich-quelltext,
+.anki-vergleich-diff {
+	white-space: pre-wrap;
+	font-size: var(--font-ui-small);
+	margin: 0;
+}
+
+/* Wählbare Vorschläge im Modal */
+.anki-suggestion.is-selectable { cursor: pointer; }
+.anki-suggestion.is-selectable:hover { border-color: var(--interactive-accent); }
+.anki-suggestion.is-selected {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.anki-suggestion-note.is-info { color: var(--text-muted); }
+
+@media (max-width: 900px) {
+	.anki-chat-modal-grid {
+		grid-template-columns: 1fr;
+		grid-template-rows: minmax(320px, 1fr) minmax(280px, 1fr);
+	}
+	.anki-chat-modal-vergleich {
+		border-left: none;
+		padding-left: 0;
+		border-top: 1px solid var(--background-modifier-border);
+		padding-top: var(--size-4-2);
+	}
+	.anki-vergleich-spalten { grid-template-columns: 1fr; }
+}

@@ -1,6 +1,7 @@
 import { App, MarkdownRenderer, Component } from 'obsidian';
 import { storeAnkiMediaFile } from './anki/AnkiConnect';
 import { latexZuKlartext } from './latexPlain';
+import { repariereMermaid } from './chat/mermaidRepair';
 
 // Matches ```mermaid ... ``` (with closing fence) OR ```mermaid ... (until end of string, no closing fence)
 // The second case occurs inside anki-cards blocks where a closing ``` would end the outer block.
@@ -34,7 +35,7 @@ export async function processMermaidBlocks(text: string, app: App): Promise<stri
             // anschliessend zu PNG gerastert. Was als `$M_1$` hineingeht, kommt
             // als `$M_1$` heraus — Anki bekommt ein Bild, kein MathJax. `M₁`
             // dagegen ueberlebt jeden dieser Schritte.
-            const klartext = latexZuKlartext(mermaidCode);
+            const klartext = latexZuKlartext(repariereMermaid(mermaidCode));
             if (klartext.ungeloest.length) {
                 console.warn('[MermaidRenderer] LaTeX in einer Beschriftung, das kein',
                     'einzelnes Zeichen ist:', klartext.ungeloest.join(', '));
@@ -85,7 +86,7 @@ export async function renderMermaidInElement(el: HTMLElement): Promise<void> {
 
     const bloecke = Array.from(el.querySelectorAll('code.language-mermaid'));
     for (const code of bloecke) {
-        const quelle = (code.textContent || '').replace(/\n$/, '').trim();
+        const quelle = repariereMermaid((code.textContent || '').replace(/\n$/, '').trim());
         if (!quelle) continue;
 
         const ziel = code.parentElement instanceof HTMLPreElement ? code.parentElement : code;

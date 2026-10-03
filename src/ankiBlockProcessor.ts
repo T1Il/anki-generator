@@ -1,5 +1,6 @@
 import { MarkdownPostProcessorContext, Notice, MarkdownView, TFile, MarkdownRenderer, ButtonComponent, TextAreaComponent, Modal, App as ObsidianApp, Setting, TextComponent, setIcon, Editor } from 'obsidian';
 import { renderFeedback } from './ui/FeedbackRenderer';
+import { ChatModal } from './ui/chat/ChatModal';
 import AnkiGeneratorPlugin from './main';
 import { Card, ChatMessage } from './types';
 import { CardPreviewModal } from './ui/CardPreviewModal';
@@ -471,17 +472,10 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 
 	const chatButton = actionContainer.createEl('button', { text: '💬 Chat öffnen' });
 	chatButton.style.flex = '1';
-	chatButton.title = "Öffnet den KI-Chat";
+	chatButton.title = "Öffnet den KI-Chat groß, mit Vergleichsansicht";
 	chatButton.onclick = () => {
-		const history: ChatMessage[] = [];
-		if (ctx.sourcePath) {
-			const cached = plugin.feedbackCache.get(ctx.sourcePath);
-			if (cached) history.push(...cached);
-		}
-
-		renderFeedback(el, history, plugin, ctx.sourcePath, () => {
-             plugin.activateFeedbackView(history, ctx.sourcePath || "");
-        }, undefined, undefined, null, false);
+		if (!ctx.sourcePath) { new Notice('Keine Notiz.'); return; }
+		new ChatModal(plugin, ctx.sourcePath).open();
 	};
 
 	const cachedHistory = plugin.feedbackCache.get(ctx.sourcePath);
