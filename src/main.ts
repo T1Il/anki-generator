@@ -16,6 +16,7 @@ import { InsertCalloutLinkModal } from './ui/InsertCalloutLinkModal';
 import { legacyAnkiStateField } from './ui/LegacyAnkiDecorator';
 import { CancelGenerationModal } from './ui/CancelGenerationModal';
 import { FileSuggestModal } from './ui/FileSuggestModal';
+import { registriereMermaidEditor } from './mermaid/notizEditor';
 import { loadHistory, saveHistory } from './chat/chatHistory';
 import { checkDrift } from './anki/driftCheck';
 import { DriftReviewModal } from './ui/DriftReviewModal';
@@ -135,6 +136,9 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor('anki-cards', async (source, el, ctx) => {
 			await processAnkiCardsBlock(this, source, el, ctx);
 		});
+
+		// Mermaid-Editor an Diagrammen in Notizen (Stift, Befehl, Rechtsklick).
+		registriereMermaidEditor(this);
 
 		// Register Editor Extension (CM6)
 		this.registerEditorExtension(legacyAnkiStateField);

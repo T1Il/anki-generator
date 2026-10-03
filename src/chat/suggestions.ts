@@ -7,7 +7,9 @@
  * anwenden lassen.
  */
 
-import { repariereMermaidImText } from './mermaidRepair';
+import { repariereMermaid, repariereMermaidImText } from './mermaidRepair';
+import { mapMermaid } from '../mermaid/mermaidBloecke';
+import { senkrecht } from '../mermaid/mermaidEinstellungen';
 
 export interface EditSuggestion {
 	kind: 'edit';
@@ -105,6 +107,8 @@ Regeln für den Mermaid-Code:
 - Jede Zeile des Callouts beginnt mit \`> \`.
 - Beschriftungen IMMER in \`["…"]\` (Klammern, Umlaute, Pfeile, Sonderzeichen sind
   sonst Syntaxfehler). Zeilenumbruch mit \`<br/>\`, Hervorhebung mit \`<b>\`/\`<i>\`.
+- Immer senkrecht (\`flowchart TD\`), nie \`LR\`/\`RL\` – waagerechte Diagramme sind
+  in der Notiz und auf der Karte unlesbar.
 - Subgraphen IMMER mit ID und Titel in Anführungszeichen:
   \`subgraph an["Anlegen (Donning)"]\` – nie \`subgraph Anlegen (Donning)\`.
 - Knoten-IDs nur aus Buchstaben/Ziffern. Hemmung als gestrichelte Kante \`-. hemmt .->\`.
@@ -277,10 +281,25 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 
 /** Mermaid-Code im Vorschlag reparieren, bevor Vorschau und Übernahme ihn sehen. */
 function repariereDiagramme<T extends Suggestion>(v: T): T {
-	if (v.kind === 'insert') return { ...v, text: repariereMermaidImText(v.text) };
-	if (v.kind === 'edit') return { ...v, replace: repariereMermaidImText(v.replace) };
-	if (v.kind === 'card') return { ...v, q: repariereMermaidImText(v.q), a: repariereMermaidImText(v.a) };
+	return mapVorschlagText(v, (t) => mapMermaid(repariereMermaidImText(t), senkrecht));
+}
+
+/**
+ * Jedes Textfeld eines Vorschlags umformen, in dem Diagramme stehen koennen.
+ * Waagerechte Diagramme der KI werden dabei senkrecht gestellt – LR ist in
+ * den Notizen praktisch immer unlesbar (03.10.2026); wer es will, stellt es
+ * im Mermaid-Editor wieder um.
+ */
+export function mapVorschlagText<T extends Suggestion>(v: T, f: (t: string) => string): T {
+	if (v.kind === 'insert') return { ...v, text: f(v.text) };
+	if (v.kind === 'edit') return { ...v, replace: f(v.replace) };
+	if (v.kind === 'card') return { ...v, q: f(v.q), a: f(v.a) };
 	return v;
+}
+
+/** Vergleichbare Form eines Diagramms: so, wie es nach dem Parsen aussieht. */
+export function diagrammNorm(code: string): string {
+	return senkrecht(repariereMermaid(code));
 }
 
 /**

@@ -1,5 +1,8 @@
 import { Modal, Setting, Notice, MarkdownRenderer, setIcon, TFile } from 'obsidian';
 import { renderMermaidInElement } from '../mermaidRenderer';
+import { MermaidEditorModal } from './MermaidEditorModal';
+import { findeMermaidBloecke, ersetzeKtenMermaid } from '../mermaid/mermaidBloecke';
+import { klappbareCallouts } from './callouts';
 import { Card } from '../types';
 import { CardEditModal } from './CardEditModal';
 import AnkiGeneratorPlugin from '../main';
@@ -373,8 +376,27 @@ export class CardPreviewModal extends Modal {
 		void (async () => {
 			await MarkdownRenderer.render(this.app, highlightedQ, qDiv, sourcePath, this.plugin);
 			await MarkdownRenderer.render(this.app, highlightedA, aDiv, sourcePath, this.plugin);
-			await renderMermaidInElement(body);
+			klappbareCallouts(body);
+			await renderMermaidInElement(body, (k, code) => this.bearbeiteDiagramm(card, k, code));
 		})();
+	}
+
+	/**
+	 * Diagramm k der Karte im Mermaid-Editor oeffnen. Die Diagramme der Frage
+	 * kommen in der Vorschau vor denen der Antwort – daher die Zaehlung.
+	 * Gespeichert wird wie jede andere Aenderung beim Schliessen (onSave).
+	 */
+	private bearbeiteDiagramm(card: Card, k: number, code: string) {
+		new MermaidEditorModal(this.app, code, (neu) => {
+			const index = this.cards.indexOf(card);
+			if (index < 0) return;
+			const inQ = findeMermaidBloecke(card.q).length;
+			const aktualisiert: Card = k < inQ
+				? { ...card, q: ersetzeKtenMermaid(card.q, k, neu) }
+				: { ...card, a: ersetzeKtenMermaid(card.a, k - inQ, neu) };
+			this.cards[index] = aktualisiert;
+			this.refreshCard(index);
+		}).open();
 	}
 
 	private buildCardEl(card: Card, index: number, sourcePath: string): HTMLElement {

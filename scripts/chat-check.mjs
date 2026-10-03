@@ -24,7 +24,9 @@ fs.writeFileSync(entry, [
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/mermaidRepair.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/kartenSuche.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/vergleich.ts').replace(/\\/g, '/')) + ";",
-	"export * from " + JSON.stringify(path.join(root, 'src/anki/legacyStrip.ts').replace(/\\/g, '/')) + ";"
+	"export * from " + JSON.stringify(path.join(root, 'src/anki/legacyStrip.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/mermaid/mermaidBloecke.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/mermaid/mermaidEinstellungen.ts').replace(/\\/g, '/')) + ";"
 ].join('\n'));
 
 const outfile = path.join(os.tmpdir(), 'anki-chat-check.cjs');
@@ -495,6 +497,42 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 	check('anki-cards-Block bleibt', r.includes('```anki-cards\nTARGET DECK: NFS-AI::Hygiene') && r.includes('Q: Neu?'), r);
 	check('leere ## Anki fällt weg, die mit Block bleibt', (r.match(/## Anki/g) || []).length === 1, r);
 	check('Fließtext bleibt', r.includes('Text bleibt.') && r.includes('Schluss.'), r);
+}
+
+// --- Mermaid-Bloecke und Einstellungen (Editor) ---
+{
+	const note = [
+		'Text', '> [!info]- Bild', '> ```mermaid', "> %%{init: {'flowchart': {'curve': 'step'}}}%%",
+		'> flowchart LR', '>     A["x"] --> B["y"]', '>', '>     class A drug', '> ```', '', '^id',
+		'', 'Q: Karte', 'A: ```mermaid', 'graph TD', '  C --> D', '```'
+	].join('\r\n');
+	const b = C.findeMermaidBloecke(note);
+	check('zwei Bloecke gefunden (Callout + Karte)', b.length === 2, b);
+	check('Callout-Code ohne "> "', b[0].code.startsWith("%%{init") && b[0].code.includes('\n\n    class A drug'), b[0]);
+
+	const neu = C.ersetzeMermaidCode(note, b[0], 'flowchart TD\n    A --> B\n\n    class A drug');
+	check('ersetzt mit "> " und CRLF', neu.includes('> ```mermaid\r\n> flowchart TD\r\n>     A --> B\r\n>\r\n>     class A drug\r\n> ```\r\n\r\n^id'), neu);
+	check('Rest bleibt', neu.endsWith('A: ```mermaid\r\ngraph TD\r\n  C --> D\r\n```'), neu);
+
+	const e = C.leseEinstellungen(b[0].code);
+	check('liest Richtung/Kurve/Abstand', e.richtung === 'LR' && e.kurve === 'step' && e.abstand === 'normal', e);
+	const g = C.setzeEinstellungen(b[0].code, { richtung: 'TD', kurve: 'basis', abstand: 'weit' });
+	const e2 = C.leseEinstellungen(g);
+	check('setzt Richtung/Kurve/Abstand', e2.richtung === 'TD' && e2.kurve === 'basis' && e2.abstand === 'weit', g);
+	check('Init-Zeile bleibt einzeilig mit einfachen Anführungszeichen', /^%%\{init: \{'flowchart': \{'curve': 'basis', 'nodeSpacing': 80, 'rankSpacing': 80\}\}\}%%$/m.test(g), g);
+	check('Rest des Codes unverändert', g.includes('A["x"] --> B["y"]') && g.includes('class A drug'), g);
+	const ohneInit = C.setzeEinstellungen('flowchart TD\n  A --> B', { kurve: 'step' });
+	check('Init-Zeile wird vorangestellt', ohneInit.startsWith("%%{init: {'flowchart': {'curve': 'step'}}}%%\nflowchart TD"), ohneInit);
+	check('Sequenzdiagramm: keine Richtung', C.leseEinstellungen('sequenceDiagram\n A->>B: x').richtung === null);
+	check('senkrecht stellt LR um', C.senkrecht('graph LR\n A-->B') === 'graph TD\n A-->B');
+
+	const gleich = C.ersetzeGleicheMermaid(note.replace(/\r\n/g, '\n') + '\n\nQ: X\nA: ```mermaid\n' + b[0].code + '\n```', b[0].code, 'flowchart TD\n  Z');
+	check('gleiche Diagramme alle ersetzt', (gleich.match(/flowchart TD\n(> )?  Z/g) || []).length === 2, gleich);
+}
+{
+	const v = C.parseSuggestions('````anki-insert\nNACH:\n# T\nTEXT:\n> ```mermaid\n> flowchart LR\n>   A --> B\n> ```\n````');
+	check('Vorschlag: LR wird senkrecht', v[0].kind === 'insert' && v[0].text.includes('> flowchart TD'), v[0]);
+	check('Norm erkennt reparierte Form', C.diagrammNorm('flowchart LR\n subgraph A (b)\n end') === C.diagrammNorm('flowchart TD\n subgraph sg1["A (b)"]\n end'));
 }
 
 console.log('');

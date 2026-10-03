@@ -1273,3 +1273,100 @@ textarea.schema-hintergrund {
 .anki-chat-copy:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 .anki-vergleich-spaltentitel { display: flex; align-items: center; }
 .anki-chat-modal-chat, .anki-chat-modal-vergleich { min-width: 0; }
+
+/* --- Mermaid-Editor --- */
+
+.modal.anki-mermaid-editor {
+	box-sizing: border-box;
+	width: min(94vw, 1400px);
+	max-width: 94vw;
+	height: 85vh;
+	display: flex;
+	flex-direction: column;
+}
+.modal.anki-mermaid-editor .modal-content {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+}
+.anki-mermaid-editor-grid {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(320px, 2fr) minmax(0, 3fr);
+	gap: var(--size-4-4);
+}
+.anki-mermaid-editor-links,
+.anki-mermaid-editor-rechts {
+	min-height: 0;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+}
+.anki-mermaid-editor-reihe { display: flex; flex-direction: column; gap: 4px; }
+.anki-mermaid-editor-label {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+.anki-mermaid-editor-segment { display: flex; flex-wrap: wrap; gap: 4px; }
+.anki-mermaid-editor-segment button { font-size: var(--font-ui-small); }
+.anki-mermaid-editor-segment button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.anki-mermaid-editor-code {
+	flex: 1 1 auto;
+	min-height: 160px;
+	resize: none;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+	line-height: 1.5;
+	white-space: pre;
+}
+.anki-mermaid-editor-fehler { color: var(--text-error); font-size: var(--font-ui-small); min-height: 1.2em; }
+.anki-mermaid-editor-vorschau {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	padding: var(--size-4-3);
+}
+.anki-mermaid-editor-vorschau .mermaid svg { max-width: 100%; height: auto; }
+.anki-mermaid-editor-leiste { display: flex; justify-content: flex-end; gap: var(--size-4-2); }
+
+/* Stift an gezeichneten Diagrammen (Notiz, Kartenvorschau) */
+.anki-mermaid-hat-knopf,
+.anki-mermaid-bearbeitbar { position: relative; }
+.anki-mermaid-bearbeiten {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	padding: 4px 6px;
+	height: auto;
+	opacity: 0;
+	transition: opacity 0.1s;
+	z-index: 2;
+}
+.anki-mermaid-bearbeiten .svg-icon { width: 14px; height: 14px; }
+.anki-mermaid-hat-knopf:hover > .anki-mermaid-bearbeiten,
+.anki-mermaid-bearbeitbar:hover > .anki-mermaid-bearbeiten { opacity: 1; }
+
+.anki-vergleich-diagramm {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: var(--size-4-2);
+	font-size: var(--font-ui-small);
+}
+.anki-vergleich-diagramm .svg-icon { width: 14px; height: 14px; }
+
+@media (max-width: 900px) {
+	.anki-mermaid-editor-grid { grid-template-columns: 1fr; grid-template-rows: auto minmax(240px, 1fr); }
+}

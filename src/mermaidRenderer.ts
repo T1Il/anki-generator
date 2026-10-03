@@ -1,4 +1,4 @@
-import { App, MarkdownRenderer, Component } from 'obsidian';
+import { App, MarkdownRenderer, Component, loadMermaid, setIcon } from 'obsidian';
 import { storeAnkiMediaFile } from './anki/AnkiConnect';
 import { latexZuKlartext } from './latexPlain';
 import { repariereMermaid } from './chat/mermaidRepair';
@@ -80,17 +80,30 @@ export async function processMermaidBlocks(text: string, app: App): Promise<stri
  * Fehler werden geschluckt und der Codeblock bleibt stehen — in einer Vorschau
  * ist ein lesbarer Quelltext besser als eine leere Flaeche.
  */
-export async function renderMermaidInElement(el: HTMLElement): Promise<void> {
-    const mermaid = (window as unknown as { mermaid?: { render?: unknown } }).mermaid;
+export async function renderMermaidInElement(
+    el: HTMLElement,
+    /**
+     * Gesetzt: jedes Diagramm bekommt einen Knopf "Diagramm bearbeiten".
+     * k = Nummer des Diagramms im Element, code = Quelltext wie im Text.
+     */
+    bearbeiten?: (k: number, code: string) => void
+): Promise<void> {
+    let mermaid = (window as unknown as { mermaid?: { render?: unknown } }).mermaid;
+    if (!mermaid || typeof mermaid.render !== 'function') {
+        try { mermaid = await loadMermaid(); } catch { /* bleibt Quelltext */ }
+    }
     if (!mermaid || typeof mermaid.render !== 'function') return;
 
     const bloecke = Array.from(el.querySelectorAll('code.language-mermaid'));
-    for (const code of bloecke) {
-        const quelle = repariereMermaid((code.textContent || '').replace(/\n$/, '').trim());
+    for (let k = 0; k < bloecke.length; k++) {
+        const code = bloecke[k];
+        const original = (code.textContent || '').replace(/\n$/, '');
+        const quelle = repariereMermaid(original.trim());
         if (!quelle) continue;
 
         const ziel = code.parentElement instanceof HTMLPreElement ? code.parentElement : code;
         const id = `anki-vorschau-mermaid-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+        let ersatz: HTMLElement = ziel as HTMLElement;
         try {
             const ergebnis = await (mermaid.render as (id: string, code: string) => unknown)(id, quelle);
             let svgText: string | null = null;
@@ -98,15 +111,32 @@ export async function renderMermaidInElement(el: HTMLElement): Promise<void> {
             else if (ergebnis && typeof (ergebnis as { svg?: string }).svg === 'string') {
                 svgText = (ergebnis as { svg: string }).svg;
             }
-            if (!svgText) continue;
-
-            const huelle = document.createElement('div');
-            huelle.addClass('mermaid');
-            huelle.innerHTML = svgText;
-            ziel.replaceWith(huelle);
+            if (svgText) {
+                const huelle = document.createElement('div');
+                huelle.addClass('mermaid');
+                huelle.innerHTML = svgText;
+                ziel.replaceWith(huelle);
+                ersatz = huelle;
+            }
         } catch (e) {
+            document.getElementById(id)?.remove();
+            document.getElementById('d' + id)?.remove();
             console.warn('[MermaidRenderer] Vorschau: mermaid.render() gescheitert —',
                 'der Codeblock bleibt stehen.', e);
+        }
+        if (bearbeiten) {
+            // Auch bei einem Syntaxfehler: gerade dann will man es reparieren.
+            const huelle = document.createElement('div');
+            huelle.addClass('anki-mermaid-bearbeitbar');
+            ersatz.replaceWith(huelle);
+            huelle.appendChild(ersatz);
+            const knopf = huelle.createEl('button', { cls: 'anki-mermaid-bearbeiten', attr: { 'aria-label': 'Diagramm bearbeiten' } });
+            setIcon(knopf, 'pencil');
+            knopf.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                bearbeiten(k, original);
+            });
         }
     }
 }

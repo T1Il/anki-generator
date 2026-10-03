@@ -200,6 +200,33 @@ export function ensureBlockIdsForCallouts(editor: Editor): void {
 
 			let lastLine = lines[lastLineIndex];
 
+			// ENDET DAS CALLOUT MIT EINEM CODEBLOCK, DARF DIE ID NICHT AN DIE FENCE.
+			//
+			// "> ``` ^id" ist keine schliessende Fence mehr: der Codeblock
+			// bleibt offen, ein Mermaid-Diagramm erscheint als Quelltext
+			// (03.10.2026, Schutzkittel & Ondansetron). Obsidians Regel fuer
+			// Callouts, Zitate und Tabellen: die ID auf eine eigene Zeile NACH
+			// dem Block, mit Leerzeile davor. Das repariert auch alte Faelle.
+			// Dasselbe gilt fuer eine Tabelle als letzte Zeile ("> | a | b | ^id").
+			const fenceMitId = lastLine.match(/^((?:\s*>)*\s*(?:`{3,}|\|.*\|))\s+\^([A-Za-z0-9-]+)\s*$/);
+			const endetMitFence = /^(?:\s*>)*\s*(?:`{3,}|\|.*\|)\s*$/.test(lastLine);
+			const idDanach = (lines[j] ?? '').trim() === '' && /^\^[A-Za-z0-9-]+\s*$/.test((lines[j + 1] ?? '').trim());
+			if (fenceMitId) {
+				lines[lastLineIndex] = fenceMitId[1];
+				lines.splice(j, 0, '', `^${fenceMitId[2]}`);
+				changesMade = true;
+				continue;
+			}
+			if (endetMitFence) {
+				if (!idDanach) {
+					const newId = generateSemanticBlockId(titleRaw ? titleRaw.trim() : type, existingIds);
+					lines.splice(j, 0, '', `^${newId}`);
+					existingIds.add(newId);
+					changesMade = true;
+				}
+				continue;
+			}
+
 			// Check if we already have a block ID
 			if (!blockIdRegex.test(lastLine)) {
 				const title = titleRaw ? titleRaw.trim() : type;

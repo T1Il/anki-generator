@@ -3,7 +3,10 @@ import AnkiGeneratorPlugin from '../../main';
 import { ChatMessage } from '../../types';
 import { streamChatResponse, generateFeedbackOnly } from '../../aiGenerator';
 import { resolveProvider, PROVIDERS } from '../../providers';
-import { entschaerfePluginFences, mermaidAusVorschlag, parseSuggestions, schluesselFuer, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
+import { MermaidEditorModal } from '../MermaidEditorModal';
+import { klappbareCallouts } from '../callouts';
+import { ersetzeGleicheMermaid } from '../../mermaid/mermaidBloecke';
+import { diagrammNorm, mapVorschlagText, entschaerfePluginFences, mermaidAusVorschlag, parseSuggestions, schluesselFuer, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
 import { applySuggestion, canLocateEdit, pruefeKartenVorschlag } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
@@ -27,7 +30,7 @@ export interface ChatPanelOptions {
 	 * Ein Vorschlag wurde zum Vergleichen gewählt. Gesetzt nur im Modal – dort
 	 * zeigt die rechte Spalte Vorher/Nachher.
 	 */
-	onVorschlagWaehlen?: (s: Suggestion) => void;
+	onVorschlagWaehlen?: (s: Suggestion, diagrammBearbeiten?: () => void) => void;
 }
 
 /**
@@ -56,6 +59,10 @@ export class ChatPanel extends Component {
 	private collapsed = false;
 	/** Pruefungen offener Vorschlaege – nach jeder Übernahme erneut ausgefuehrt. */
 	private pruefungen = new Map<HTMLElement, () => void>();
+	/** Aktueller Stand jeder Vorschlagsbox (nach „Als neue Karte" oder Diagramm-Edit). */
+	private boxZustand = new WeakMap<HTMLElement, () => Suggestion>();
+	/** Zu welcher Nachricht eine Blase gehoert – Diagramm-Edits landen im Verlauf. */
+	private blaseNachricht = new WeakMap<HTMLElement, ChatMessage>();
 
 	constructor(
 		plugin: AnkiGeneratorPlugin,
@@ -287,6 +294,7 @@ export class ChatPanel extends Component {
 		});
 
 		const bubble = wrapper.createDiv({ cls: 'anki-chat-bubble' });
+		this.blaseNachricht.set(bubble, msg);
 		await this.renderBody(bubble, msg.content, msg.role === 'ai');
 
 		return wrapper;
@@ -302,6 +310,7 @@ export class ChatPanel extends Component {
 		const prose = isAi ? entschaerfePluginFences(stripSuggestionBlocks(content)) : content;
 		if (prose) {
 			await MarkdownRenderer.render(this.plugin.app, prose, bubble, this.sourcePath || '', this);
+			klappbareCallouts(bubble);
 		}
 
 		if (!isAi) return;
@@ -323,8 +332,9 @@ export class ChatPanel extends Component {
 		box.addClass('is-selected');
 	}
 
-	private renderSuggestion(parent: HTMLElement, suggestion: Suggestion) {
+	private renderSuggestion(parent: HTMLElement, suggestion: Suggestion, ersetzt?: HTMLElement): HTMLElement {
 		const box = parent.createDiv({ cls: 'anki-suggestion' });
+		if (ersetzt) ersetzt.replaceWith(box);
 		// Inhaltsschluessel am Element, damit jede andere offene Ansicht
 		// dieselbe Box wiederfindet, wenn der Vorschlag anderswo uebernommen
 		// wird.
@@ -346,7 +356,7 @@ export class ChatPanel extends Component {
 			suggestion.raw.split('\n').forEach(l => line('  ' + l, 'is-meta'));
 			box.addClass('is-missing');
 			box.createDiv({ cls: 'anki-suggestion-note', text: suggestion.reason });
-			return;
+			return box;
 		}
 
 		if (suggestion.kind === 'edit') {
@@ -377,6 +387,7 @@ export class ChatPanel extends Component {
 		}
 
 		const actions = box.createDiv({ cls: 'anki-suggestion-actions' });
+		const diagramme = mermaidAusVorschlag(suggestion);
 
 		if (this.options.onVorschlagWaehlen) {
 			box.addClass('is-selectable');
@@ -386,12 +397,14 @@ export class ChatPanel extends Component {
 				// Wer Text markiert, will kopieren, nicht den Vergleich wechseln.
 				if (window.getSelection()?.toString()) return;
 				this.markiereGewaehlt(box);
-				this.options.onVorschlagWaehlen && this.options.onVorschlagWaehlen(aktuell);
+				this.options.onVorschlagWaehlen && this.options.onVorschlagWaehlen(aktuell,
+					diagramme.length ? () => this.bearbeiteDiagramm(box, diagramme[0]) : undefined);
 			});
 		}
 
 		// Was „Übernehmen" anwendet. „Als neue Karte" stellt das um.
 		let aktuell: Suggestion = suggestion;
+		this.boxZustand.set(box, () => aktuell);
 		const applyBtn = new ButtonComponent(actions);
 		applyBtn.setButtonText('Übernehmen').setCta();
 		applyBtn.onClick(async () => {
@@ -412,8 +425,13 @@ export class ChatPanel extends Component {
 
 		// Diagramme gezeichnet zeigen und vorab pruefen: ein Syntaxfehler soll
 		// hier auffallen, nicht erst als leere Flaeche in der Notiz oder in Anki.
-		const diagramme = mermaidAusVorschlag(suggestion);
 		if (diagramme.length) {
+			diagramme.forEach((code, k) => {
+				const b = new ButtonComponent(actions);
+				b.setIcon('pencil').setButtonText(diagramme.length > 1 ? `Diagramm ${k + 1}` : 'Diagramm bearbeiten');
+				b.setTooltip('Mermaid-Editor: Richtung, Kanten, Abstände, Quelltext');
+				b.onClick(() => this.bearbeiteDiagramm(box, code));
+			});
 			diff.addClass('is-collapsed');
 			const toggle = box.createDiv({ cls: 'anki-suggestion-source-toggle', text: 'Quelltext zeigen' });
 			toggle.addEventListener('click', () => {
@@ -505,6 +523,41 @@ export class ChatPanel extends Component {
 		const dismissBtn = new ButtonComponent(actions);
 		dismissBtn.setButtonText('Verwerfen');
 		dismissBtn.onClick(() => box.remove());
+		return box;
+	}
+
+	/**
+	 * Diagramm eines Vorschlags im Mermaid-Editor aendern.
+	 *
+	 * Dasselbe Diagramm steht meist zweimal in einer Antwort: im Callout fuer
+	 * die Notiz und in der Karte, die es abfragt. Die Aenderung geht deshalb an
+	 * jede Box der Nachricht mit demselben Diagramm – und in den gespeicherten
+	 * Verlauf, sonst waere sie nach einem Neustart wieder weg.
+	 */
+	private bearbeiteDiagramm(box: HTMLElement, alt: string) {
+		new MermaidEditorModal(this.plugin.app, alt, (neu) => {
+			const blase = box.closest('.anki-chat-bubble') as HTMLElement | null;
+			if (!blase) return;
+			const ersetze = (t: string) => ersetzeGleicheMermaid(t, alt, neu, diagrammNorm);
+
+			const msg = this.blaseNachricht.get(blase);
+			if (msg) {
+				msg.content = ersetze(msg.content);
+				setHistory(this.plugin, this.sourcePath, this.history);
+			}
+
+			const warGewaehlt = blase.querySelector('.anki-suggestion.is-selected');
+			blase.querySelectorAll<HTMLElement>('.anki-suggestion').forEach((b) => {
+				const zustand = this.boxZustand.get(b);
+				if (!zustand || b.hasClass('is-applied')) return;
+				const vorher = zustand();
+				const nachher = mapVorschlagText(vorher, ersetze);
+				if (JSON.stringify(nachher) === JSON.stringify(vorher)) return;
+				this.pruefungen.delete(b);
+				const neueBox = this.renderSuggestion(blase, nachher, b);
+				if (b === warGewaehlt || (!warGewaehlt && b === box)) neueBox.click();
+			});
+		}).open();
 	}
 
 	/**

@@ -6,6 +6,7 @@ import { Suggestion, entschaerfePluginFences } from '../../chat/suggestions';
 import { berechneVergleich, Vergleich } from '../../chat/vergleich';
 import { getAnkiBlocks, parseCardsFromBlockSource } from '../../anki/ankiParser';
 import { renderMermaidInElement } from '../../mermaidRenderer';
+import { klappbareCallouts } from '../callouts';
 
 type Ansicht = 'vergleich' | 'notiz';
 
@@ -25,6 +26,7 @@ export class ChatModal extends Modal {
 	private ansicht: Ansicht = 'vergleich';
 	private quelltext = false;
 	private gewaehlt: Suggestion | null = null;
+	private diagrammBearbeiten: (() => void) | null = null;
 
 	private rechts!: HTMLElement;
 	private inhalt!: HTMLElement;
@@ -56,8 +58,9 @@ export class ChatModal extends Modal {
 
 		this.panel = new ChatPanel(this.plugin, links, history, this.sourcePath, {
 			collapsible: false,
-			onVorschlagWaehlen: (s) => {
+			onVorschlagWaehlen: (s, bearbeiten) => {
 				this.gewaehlt = s;
+				this.diagrammBearbeiten = bearbeiten ?? null;
 				this.zeige('vergleich');
 			}
 		});
@@ -154,6 +157,13 @@ export class ChatModal extends Modal {
 	}
 
 	private async zeichneVergleich(v: Vergleich) {
+		if (this.diagrammBearbeiten) {
+			const knopf = this.inhalt.createEl('button', { cls: 'anki-vergleich-diagramm' });
+			setIcon(knopf.createSpan(), 'pencil');
+			knopf.createSpan({ text: 'Diagramm bearbeiten' });
+			const f = this.diagrammBearbeiten;
+			knopf.addEventListener('click', () => f());
+		}
 		if (v.hinweis) this.inhalt.createDiv({ cls: 'anki-vergleich-hinweis', text: v.hinweis });
 
 		if (v.art === 'text' && this.quelltext) {
@@ -218,6 +228,8 @@ export class ChatModal extends Modal {
 	private async markdown(ziel: HTMLElement, text: string) {
 		await MarkdownRenderer.render(this.app, entschaerfePluginFences(text), ziel, this.sourcePath,
 			this.renderKomponente ?? this.panel!);
+		// Im Vergleich alles offen: man will sehen, was sich aendert.
+		klappbareCallouts(ziel, this.ansicht === 'vergleich');
 		if (ziel.querySelector('code.language-mermaid')) {
 			try { await loadMermaid(); } catch { /* window.mermaid reicht dann evtl. */ }
 			await renderMermaidInElement(ziel);
