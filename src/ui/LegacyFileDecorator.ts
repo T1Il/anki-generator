@@ -1,5 +1,6 @@
 import { App, TFile, WorkspaceLeaf, debounce, EventRef, TFolder } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
+import { getAnkiBlockMatches } from '../anki/ankiParser';
 
 export class LegacyFileDecorator {
     app: App;
@@ -99,8 +100,9 @@ export class LegacyFileDecorator {
                 return;
             }
 
-            // Robust regex handling Windows \r\n and varying whitespace
-            const blockMatches = content.matchAll(/^```anki-cards[ \t]*\r?\n([\s\S]*?)\r?\n^```$/gm);
+            // Zentrale Blocksuche statt eigener Regex - die kannte nur ```-Fences,
+            // Bloecke mit ```` (wegen eingebetteter Code-Bloecke) blieben undekoriert.
+            const blockMatches = getAnkiBlockMatches(content);
             
             let syncedCount = 0;
             let unsyncedCount = 0;
