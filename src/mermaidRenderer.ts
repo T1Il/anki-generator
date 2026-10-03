@@ -113,7 +113,8 @@ export async function renderMermaidInElement(
             }
             if (svgText) {
                 const huelle = document.createElement('div');
-                huelle.addClass('mermaid');
+                // anki-mermaid-gezeichnet: auf Containerbreite skalieren (styles.css).
+                huelle.addClass('mermaid', 'anki-mermaid-gezeichnet');
                 huelle.innerHTML = svgText;
                 ziel.replaceWith(huelle);
                 ersatz = huelle;

@@ -1370,3 +1370,14 @@ textarea.schema-hintergrund {
 @media (max-width: 900px) {
 	.anki-mermaid-editor-grid { grid-template-columns: 1fr; grid-template-rows: auto minmax(240px, 1fr); }
 }
+
+/*
+ * Selbst gezeichnete Diagramme (Callouts, Vorschauen): Obsidian stellt Mermaid
+ * auf feste Breite, breite Diagramme liefen sonst aus dem Callout heraus.
+ * Proportional verkleinern, nie vergroessern.
+ */
+.anki-mermaid-gezeichnet { overflow: hidden; text-align: center; }
+.anki-mermaid-gezeichnet > svg {
+	max-width: 100% !important;
+	height: auto !important;
+}

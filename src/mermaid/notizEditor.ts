@@ -1,6 +1,7 @@
 import { Editor, MarkdownPostProcessorContext, MarkdownView, Notice, TFile, setIcon } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 import { MermaidEditorModal } from '../ui/MermaidEditorModal';
+import { renderMermaidInElement } from '../mermaidRenderer';
 import { MermaidBlock, ersetzeMermaidCode, findeMermaidBloecke } from './mermaidBloecke';
 
 /**
@@ -15,7 +16,20 @@ import { MermaidBlock, ersetzeMermaidCode, findeMermaidBloecke } from './mermaid
 export function registriereMermaidEditor(plugin: AnkiGeneratorPlugin) {
 	// Leseansicht: Abschnitt → Kontext, fuer getSectionInfo().
 	const sektionen = new WeakMap<HTMLElement, MarkdownPostProcessorContext>();
-	plugin.registerMarkdownPostProcessor((el, ctx) => { sektionen.set(el, ctx); });
+	plugin.registerMarkdownPostProcessor((el, ctx) => {
+		sektionen.set(el, ctx);
+		// MERMAID IN CALLOUTS ZEICHNET OBSIDIAN 1.13 NICHT.
+		//
+		// Nur der Editor wandelt ```mermaid in ein Diagramm um. Callouts (und
+		// alles andere, was ueber den Markdown-Renderer laeuft) behalten einen
+		// eingefaerbten Codeblock – ohne Fehlermeldung (03.10.2026,
+		// Ondansetron, Schutzhandschuhe). Kurz warten, falls Obsidian doch
+		// selbst zeichnet, dann den Rest uebernehmen.
+		if (!el.querySelector('code.language-mermaid')) return;
+		window.setTimeout(() => {
+			if (el.querySelector('code.language-mermaid')) void renderMermaidInElement(el);
+		}, 50);
+	});
 
 	plugin.registerDomEvent(document, 'mouseover', (e) => {
 		const t = e.target as HTMLElement | null;
