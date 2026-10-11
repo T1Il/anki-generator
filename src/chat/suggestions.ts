@@ -30,6 +30,12 @@ export interface CardSuggestion {
 	q: string;
 	a: string;
 	typeIn: boolean;
+	/**
+	 * Die Karte, die zum Zeitpunkt der Antwort hinter `CARD:` stand. Wird beim
+	 * Anzeigen aus dem gespeicherten Kartenstand der Nachricht gesetzt – die
+	 * Nummer allein verschiebt sich, sobald eine Karte davor geloescht wird.
+	 */
+	bezug?: { id: number | null; q: string } | null;
 }
 
 /**
@@ -55,7 +61,35 @@ export interface InsertSuggestion {
 	text: string;
 }
 
-export type Suggestion = EditSuggestion | CardSuggestion | InsertSuggestion | InvalidSuggestion;
+/**
+ * Eine recherchierte Quelle: als APA-Zitat in den Abschnitt „## Quellen" der
+ * Notiz und/oder als Eintrag nach Zotero (ueber das Backend, wie der
+ * Medikamenten-Quellenassistent).
+ */
+export interface QuelleSuggestion {
+	kind: 'quelle';
+	/** APA-Zitat, so wie es in die Notiz kommt. */
+	zitat: string;
+	titel: string;
+	typ?: string;
+	url?: string;
+	pdf_url?: string;
+	autoren?: string[];
+	jahr?: string;
+	herausgeber?: string;
+	doi?: string;
+	buch?: string;
+	verlag?: string;
+	isbn?: string;
+	auflage?: string;
+	ort?: string;
+	seiten?: string;
+	grund?: string;
+	/** Zotero-Sammlung als Pfad; leer = aus dem Ablageort der Notiz. */
+	sammlung?: string;
+}
+
+export type Suggestion = EditSuggestion | CardSuggestion | InsertSuggestion | QuelleSuggestion | InvalidSuggestion;
 
 /** Ergebnis eines Blockparsers - bei Fehlschlag mit Begründung für die UI. */
 type ParseOutcome<T> = { ok: true; value: T } | { ok: false; reason: string };
@@ -154,8 +188,9 @@ export const SUGGESTION_FORMAT_INSTRUCTIONS = `
 ## Format für konkrete Änderungen
 
 Wenn du eine konkrete Änderung vorschlägst, gib sie IMMER in einem der folgenden
-Blöcke aus. Nur so kann ich sie per Klick übernehmen. Schreibe zusätzlich einen
-kurzen Satz in normalem Text, warum du die Änderung vorschlägst.
+Blöcke aus. Nur so kann ich sie per Klick übernehmen. Schreibe UNMITTELBAR VOR
+jeden Block einen kurzen Absatz (ein, zwei Sätze) in normalem Text, warum du
+genau diese Änderung vorschlägst – er wird als Begründung im Vorschlag angezeigt.
 
 **Text in der Notiz ändern:**
 
@@ -207,6 +242,21 @@ Bevorzuge \`anki-card\`, wenn es um Karten geht - das ist zuverlässiger als
 Textsuche. Benutze \`anki-edit\` für Änderungen am Fließtext und
 \`anki-insert\` für Ergänzungen.
 
+**Neue Quelle (nur wenn du sie selbst geöffnet bzw. in der Websuche gesehen hast):**
+
+\`\`\`anki-quelle
+{"titel": "Titel der Quelle", "typ": "webpage", "url": "https://…", "pdf_url": "",
+ "autoren": ["Nachname, Vorname"], "jahr": "2024", "herausgeber": "Herausgeber/Verlag",
+ "doi": "", "zitat": "Nachname, V. (2024). _Titel der Quelle_. Herausgeber. [https://…](https://…)",
+ "grund": "Ein Satz, wofür die Quelle in dieser Notiz steht."}
+\`\`\`
+
+- Der Inhalt ist EIN JSON-Objekt. \`typ\` ist webpage, document, journalArticle,
+  bookSection, book oder report. Leere Felder darfst du weglassen.
+- \`zitat\` im APA-Stil wie die übrigen Einträge unter „## Quellen" der Notiz:
+  Titel kursiv mit Unterstrichen, URL als Markdown-Link \`[url](url)\`.
+- Keine Quelle vorschlagen, die schon unter „## Quellen" steht. Keine erfundenen Links.
+
 **Enthält ein Vorschlag selbst einen Code-Block (z. B. \`\`\`mermaid), öffne und
 schließe den Vorschlagsblock mit VIER Backticks.**
 
@@ -216,7 +266,7 @@ ${DIAGRAMM_REGELN}
 `.trim();
 
 // 3 oder mehr Backticks erlauben - Modelle nutzen gern vier.
-const FENCE = /^[ \t]*(`{3,})(anki-edit|anki-card|anki-insert)[ \t]*$/;
+const FENCE = /^[ \t]*(`{3,})(anki-edit|anki-card|anki-insert|anki-quelle)[ \t]*$/;
 
 /**
  * Schliessende Fence passend zur oeffnenden: mindestens gleich viele Backticks.
@@ -269,7 +319,9 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 
 		const parsed: ParseOutcome<Suggestion> = kind === 'anki-edit'
 			? parseEditBlock(body)
-			: parseInsertBlock(body);
+			: kind === 'anki-quelle'
+				? parseQuelleBlock(body)
+				: parseInsertBlock(body);
 
 		out.push(parsed.ok
 			? repariereDiagramme(parsed.value)
@@ -277,6 +329,96 @@ export function parseSuggestions(markdown: string): Suggestion[] {
 	}
 
 	return out;
+}
+
+export type AntwortTeil =
+	| { art: 'text'; text: string }
+	| { art: 'vorschlag'; vorschlag: Suggestion; warum: string };
+
+/**
+ * Eine KI-Antwort in Reihenfolge zerlegen: Fliesstext und Vorschlaege.
+ *
+ * Vorher stand aller Fliesstext oben und alle Vorschlaege darunter – die
+ * Begruendung zu Vorschlag 4 musste man sich oben zusammensuchen. Jetzt wird
+ * der letzte Absatz vor einem Block dessen Begruendung, sofern er kurz ist und
+ * keine Ueberschrift. Alles andere bleibt Fliesstext an seiner Stelle.
+ */
+export function parseAntwort(markdown: string): AntwortTeil[] {
+	const out: AntwortTeil[] = [];
+	const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+	let text: string[] = [];
+
+	const flushText = (rest: string) => {
+		if (rest.trim()) out.push({ art: 'text', text: rest.trim() });
+	};
+
+	let i = 0;
+	while (i < lines.length) {
+		const open = lines[i].match(FENCE);
+		if (!open) {
+			text.push(lines[i]);
+			i++;
+			continue;
+		}
+		const start = i;
+		const close = closeFenceFor(open[1]);
+		i++;
+		while (i < lines.length && !close.test(lines[i])) i++;
+		i++;
+
+		const { rest, warum } = teileBegruendung(text.join('\n'));
+		flushText(rest);
+		text = [];
+		const vorschlaege = parseSuggestions(lines.slice(start, i).join('\n'));
+		vorschlaege.forEach((v, k) => out.push({ art: 'vorschlag', vorschlag: v, warum: k === 0 ? warum : '' }));
+	}
+	flushText(text.join('\n'));
+	return out;
+}
+
+/** Den letzten Absatz eines Textstuecks als Begruendung abtrennen. */
+function teileBegruendung(text: string): { rest: string; warum: string } {
+	const absaetze = text.replace(/\s+$/, '').split(/\n[ \t]*\n/);
+	const letzter = (absaetze[absaetze.length - 1] || '').trim();
+	const istBegruendung = letzter
+		&& letzter.length <= 700
+		&& !/^#{1,6}\s/.test(letzter)
+		&& !/^\s*>\s*\[!/.test(letzter)
+		&& !/^`{3,}/.test(letzter)
+		&& !/^\s*\|/.test(letzter);
+	if (!istBegruendung) return { rest: text, warum: '' };
+	absaetze.pop();
+	const rest = absaetze.join('\n\n');
+	// Steht der „Absatz" in Wahrheit am Ende eines Code-Blocks mit Leerzeilen,
+	// wuerde der Block zerrissen.
+	if (((rest.match(/^[ \t>]*`{3,}/gm) || []).length % 2) === 1) return { rest: text, warum: '' };
+	return { rest, warum: letzter };
+}
+
+/** Den Vorschlag wieder als Block schreiben – fuer „Quelltext". */
+export function vorschlagAlsBlock(v: Suggestion): string {
+	switch (v.kind) {
+		case 'edit':
+			return ['FIND:', v.find, 'REPLACE:', v.replace].join('\n');
+		case 'insert':
+			return ['NACH:', v.after, 'TEXT:', v.text].join('\n');
+		case 'quelle': {
+			const { kind, ...daten } = v;
+			return JSON.stringify(daten, null, 2);
+		}
+		case 'card': {
+			const z = [`OP: ${v.op}`];
+			if (v.ref !== null) z.push(`CARD: ${v.ref}`);
+			if (v.id !== null) z.push(`ID: ${v.id}`);
+			if (v.op !== 'delete') {
+				z.push('Q: ' + v.q);
+				if (v.a) z.push((v.typeIn ? 'A (type): ' : 'A: ') + v.a);
+			}
+			return z.join('\n');
+		}
+		default:
+			return v.raw;
+	}
 }
 
 /** Mermaid-Code im Vorschlag reparieren, bevor Vorschau und Übernahme ihn sehen. */
@@ -324,6 +466,35 @@ function teileKartenBlock(body: string[]): string[][] {
 		else teile[teile.length - 1].push(line);
 	}
 	return teile.length > 1 ? teile : [body];
+}
+
+function parseQuelleBlock(body: string[]): ParseOutcome<QuelleSuggestion> {
+	const roh = body.join('\n').trim();
+	let d: any;
+	try {
+		d = JSON.parse(roh);
+	} catch (e: any) {
+		return { ok: false, reason: 'Der Quellenblock ist kein gültiges JSON: ' + (e?.message || e) };
+	}
+	if (!d || typeof d !== 'object') return { ok: false, reason: 'Der Quellenblock ist leer.' };
+	const str = (x: any) => (typeof x === 'string' && x.trim() ? x.trim() : undefined);
+	const titel = str(d.titel);
+	const zitat = str(d.zitat) ?? (titel ? `_${titel}_.${d.url ? ` [${d.url}](${d.url})` : ''}` : undefined);
+	if (!titel && !zitat) return { ok: false, reason: 'Die Quelle hat weder titel noch zitat.' };
+	return {
+		ok: true,
+		value: {
+			kind: 'quelle',
+			zitat: zitat as string,
+			titel: titel ?? (zitat as string).replace(/[_*[\]]/g, '').slice(0, 120),
+			typ: str(d.typ), url: str(d.url), pdf_url: str(d.pdf_url),
+			autoren: Array.isArray(d.autoren) ? d.autoren.map(String) : undefined,
+			jahr: d.jahr !== undefined ? String(d.jahr) : undefined,
+			herausgeber: str(d.herausgeber), doi: str(d.doi), buch: str(d.buch),
+			verlag: str(d.verlag), isbn: str(d.isbn), auflage: str(d.auflage),
+			ort: str(d.ort), seiten: str(d.seiten), grund: str(d.grund)
+		}
+	};
 }
 
 function parseEditBlock(body: string[]): ParseOutcome<EditSuggestion> {
@@ -498,7 +669,7 @@ export function stripSuggestionBlocks(markdown: string): string {
  */
 export function entschaerfePluginFences(markdown: string): string {
 	return markdown.replace(
-		/^([ \t]*`{3,})[ \t]*(?:anki-cards?|anki-edit|anki-insert)[ \t]*$/gm,
+		/^([ \t]*`{3,})[ \t]*(?:anki-cards?|anki-edit|anki-insert|anki-quelle)[ \t]*$/gm,
 		'$1text'
 	);
 }
@@ -522,6 +693,8 @@ export function schluesselFuer(vorschlag: Suggestion): string {
 			return JSON.stringify(['edit', vorschlag.find, vorschlag.replace]);
 		case 'insert':
 			return JSON.stringify(['insert', vorschlag.after, vorschlag.text]);
+		case 'quelle':
+			return JSON.stringify(['quelle', vorschlag.zitat, vorschlag.url ?? '']);
 		case 'card':
 			return JSON.stringify([
 				'card', vorschlag.op, vorschlag.id, vorschlag.ref,

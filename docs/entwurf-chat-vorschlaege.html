@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Entwurf – Chat-Vorschläge</title>
+<style>
+	:root {
+		--bg: #2a231e; --bg2: #231d19; --bg3: #332a24; --border: #4a3d33;
+		--text: #e8ddd0; --muted: #a8998a; --faint: #7d6f62; --accent: #8a6a48;
+		--green: #6fbf73; --red: #e06c5c; --blue: #6aa6e0; --yellow: #d9b44a; --cyan: #5fc4c0;
+		--mono: ui-monospace, "JetBrains Mono", Consolas, monospace;
+	}
+	* { box-sizing: border-box; }
+	body { margin: 0; background: #1c1814; color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+	.seite { max-width: 1180px; margin: 0 auto; padding: 24px; }
+	h1 { font-size: 20px; margin: 0 0 4px; }
+	.unter { color: var(--muted); margin: 0 0 20px; }
+	.chglog { background: var(--bg3); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 6px; margin-bottom: 24px; }
+	.chglog li { margin: 2px 0; }
+	.raster { display: grid; grid-template-columns: 560px 1fr; gap: 28px; align-items: start; }
+	.notiz { color: var(--muted); font-size: 13px; }
+	.notiz h3 { color: var(--text); font-size: 14px; margin: 18px 0 6px; }
+	.panel { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+	.kopf { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 600; }
+	.log { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+	.rolle { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+	.blase { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+	.blase.du { background: var(--bg3); }
+	.blase p { margin: 0 0 8px; }
+
+	/* Leiste über den Vorschlägen einer Antwort */
+	.leiste { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: 10px 0 8px; }
+	.leiste .zahl { color: var(--text); font-weight: 600; }
+	.leiste .pille { padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); }
+
+	/* Vorschlagskarte */
+	.vs { --farbe: var(--blue); border: 1px solid var(--border); border-left: 4px solid var(--farbe); border-radius: 8px; background: var(--bg); margin: 0 0 10px; overflow: hidden; }
+	.vs.neu { --farbe: var(--green); }
+	.vs.loeschen { --farbe: var(--red); }
+	.vs.text { --farbe: var(--yellow); }
+	.vs.einfuegen { --farbe: var(--cyan); }
+	.vs.kaputt { --farbe: var(--faint); border-style: dashed; border-left-style: solid; }
+	.vs-kopf { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: color-mix(in srgb, var(--farbe) 10%, transparent); }
+	.chip { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--farbe); display: flex; gap: 5px; align-items: center; }
+	.bezug { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+	.badge { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--bg3); color: var(--yellow); border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent); }
+	.warum { padding: 8px 10px 0; color: var(--muted); font-size: 13px; display: flex; gap: 6px; }
+	.warum b { color: var(--text); font-weight: 600; }
+	.feld { padding: 6px 10px; }
+	.feldname { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 2px; }
+	.inhalt { font-size: 13.5px; line-height: 1.55; }
+	.del { background: color-mix(in srgb, var(--red) 22%, transparent); color: #f2b2a8; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 70%, transparent); border-radius: 3px; padding: 0 1px; }
+	.ins { background: color-mix(in srgb, var(--green) 22%, transparent); color: #bfe8c1; border-radius: 3px; padding: 0 1px; }
+	.link { color: var(--blue); }
+	.ganz-neu .inhalt { color: #cfe9d0; }
+	.ganz-weg .inhalt { color: #d9a59c; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 60%, transparent); }
+	.aktionen { display: flex; gap: 6px; padding: 8px 10px 10px; align-items: center; }
+	button { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); cursor: pointer; }
+	button.cta { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+	button.leise { background: none; border-color: transparent; color: var(--muted); }
+	.rechts { margin-left: auto; display: flex; gap: 4px; }
+	.hinweis { margin: 0 10px 8px; padding: 5px 8px; border-radius: 5px; font-size: 12px; background: color-mix(in srgb, var(--red) 12%, transparent); color: #f0a99e; }
+	.hinweis.info { background: var(--bg3); color: var(--muted); }
+	textarea { width: 100%; font: 13px/1.5 var(--mono); background: var(--bg2); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+	.zu { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); }
+	.vs.erledigt { border-left-color: var(--green); opacity: .8; }
+	.vs.verworfen { border-left-color: var(--faint); opacity: .6; }
+	.quelle { font: 12px/1.5 var(--mono); color: var(--faint); padding: 0 10px 6px; white-space: pre-wrap; }
+
+	/* Eingabe mit Modellwahl */
+	.eingabe { border-top: 1px solid var(--border); padding: 8px 10px; }
+	.feldzeile { display: flex; gap: 8px; align-items: flex-end; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+	.feldzeile .ph { flex: 1; color: var(--faint); padding: 4px 2px; }
+	.unterzeile { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--faint); }
+	.modell { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--text); background: var(--bg3); }
+	.menue { margin-top: 6px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 4px; width: 290px; box-shadow: 0 6px 18px #0008; }
+	.menue div { padding: 5px 8px; border-radius: 5px; display: flex; justify-content: space-between; gap: 10px; }
+	.menue div.an { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+	.menue small { color: var(--faint); }
+	.menue hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+	.legende { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 0; }
+	.legende .vs { margin: 0; }
+</style>
+</head>
+<body>
+<div class="seite">
+	<h1>Entwurf – Vorschläge im AI Chat</h1>
+	<p class="unter">anki-generator · 11.10.2026 · links der Chat, rechts was sich ändert</p>
+
+	<div class="chglog"><b>Neu in diesem Entwurf</b>
+		<ul>
+			<li><b>Begründung sitzt im Vorschlag</b>: der Satz, den die KI vor einen Block schreibt, steht oben in der Karte und nicht mehr gesammelt über allen Vorschlägen.</li>
+			<li><b>Jede Art hat eine eigene Farbe</b>: Karte ändern blau, neue Karte grün, Karte löschen rot, Textänderung gelb, Einfügen türkis, nicht anwendbar grau gestrichelt.</li>
+			<li><b>Diff auf Wortebene</b> statt ganzer roter und grüner Zeilen. Wikilinks erscheinen als Begriff, der Quelltext ist aufklappbar.</li>
+			<li><b>Bearbeiten</b> öffnet jeden Vorschlag als Formular (Frage/Antwort bzw. Text). Ist er bearbeitet, trägt er die Marke „bearbeitet“ und lässt sich <b>auf das Original zurücksetzen</b>. Die Fassung wird im Chatverlauf gespeichert und übersteht so den Neustart.</li>
+			<li><b>Übernommen und verworfen</b> klappen zu einer Zeile zusammen, ebenfalls gespeichert. „Wiederherstellen“ holt einen verworfenen Vorschlag zurück. „Rückgängig“ macht eine Übernahme rückgängig, solange die Notiz seitdem unverändert ist.</li>
+			<li><b>Kartenbezug bleibt stabil</b>: Zu jeder Antwort wird gespeichert, welche Karte hinter „CARD: n“ stand. Wird eine Karte gelöscht, treffen die übrigen Vorschläge trotzdem die richtige Karte. Die Kopfzeile nennt die Frage statt einer Nummer.</li>
+			<li><b>Modellwahl unter dem Eingabefeld</b>, z. B. Claude (API) oder der Claude-Agent mit Zotero und Websuche. Jede Antwort kann neue Vorschläge enthalten.</li>
+		</ul>
+	</div>
+
+	<div class="raster">
+	<div class="panel">
+		<div class="kopf">🤖 AI Chat – Glucagon</div>
+		<div class="log">
+			<div>
+				<div class="rolle">👤 Du</div>
+				<div class="blase du">Prüf die Nebenwirkungen und Interaktionen nochmal gegen die Fachinfo.</div>
+			</div>
+			<div>
+				<div class="rolle">🤖 KI · Claude Opus 5</div>
+				<div class="blase">
+					<p>Zwei Karten sind unvollständig, eine Stelle im Fließtext ist zu knapp.</p>
+
+					<div class="leiste"><span class="zahl">5 Vorschläge</span><span class="pille">1 übernommen</span><span class="pille">1 verworfen</span></div>
+
+					<!-- Karte ändern -->
+					<div class="vs">
+						<div class="vs-kopf"><span class="chip">◫ Karte ändern</span><span class="bezug">„Nenne die allgemeinen Nebenwirkungen von Glucagon.“</span></div>
+						<div class="warum">💬 <span><b>Tachykardie und Hypertonie fehlen</b>, beide stehen in der Fachinfo als häufig.</span></div>
+						<div class="feld"><div class="feldname">Antwort</div>
+							<div class="inhalt">– Übelkeit, Erbrechen (beim Bewusstlosen: Aspirationsgefahr)<br>– Bauchschmerzen<br><span class="ins">– Tachykardie, Hypertonie</span><br><span class="ins">– sehr selten Überempfindlichkeitsreaktionen bis Anaphylaxie</span></div>
+						</div>
+						<div class="aktionen"><button class="cta">Übernehmen</button><button>Bearbeiten</button><div class="rechts"><button class="leise">Quelltext</button><button class="leise">Verwerfen</button></div></div>
+					</div>
+
+					<!-- Karte ändern, bearbeitet -->
+					<div class="vs">
+						<div class="vs-kopf"><span class="chip">◫ Karte ändern</span><span class="bezug">„Mit welchen Medikamenten interagiert Glucagon?“</span><span class="badge">bearbeitet</span></div>
+						<div class="warum">💬 <span>Warfarin und Indometacin ergänzt, Betablocker präzisiert.</span></div>
+						<div class="feld"><div class="feldname">Antwort</div>
+							<div class="inhalt">– <span class="link">Insulin</span>: Gegenspieler<br><span class="ins">– Indometacin: Wirkverlust oder paradoxe Hypoglykämie</span><br><span class="ins">– <span class="link">Warfarin</span>: Verstärkung der Gerinnungshemmung</span><br>– <span class="link">Betablocker</span>: <span class="del">verstärkte Wirkung</span> <span class="ins">Anstieg von Puls und Blutdruck (kurze HWZ)</span></div>
+						</div>
+						<div class="aktionen"><button class="cta">Übernehmen</button><button>Bearbeiten</button><div class="rechts"><button class="leise">↺ Original</button><button class="leise">Verwerfen</button></div></div>
+					</div>
+
+					<!-- Textänderung im Bearbeiten-Modus -->
+					<div class="vs text">
+						<div class="vs-kopf"><span class="chip">✎ Textänderung</span><span class="bezug">Abschnitt Pharmakokinetik</span></div>
+						<div class="warum">💬 <span>Die Elimination ist zu knapp. Leber und Nieren tragen je ca. 30 % der Clearance.</span></div>
+						<div class="feld"><div class="feldname">Wird ersetzt</div>
+							<div class="quelle" style="padding:0">&gt;enzymatischer Abbau ^elimination</div>
+						</div>
+						<div class="feld"><div class="feldname">Neuer Text</div>
+							<textarea rows="3">&gt;enzymatischer Abbau in Plasma und Organen, v. a. Leber und Nieren (je ca. 30 % der Clearance) ^elimination</textarea>
+						</div>
+						<div class="aktionen"><button class="cta">Speichern</button><button>Abbrechen</button></div>
+					</div>
+
+					<!-- Textänderung, Wortdiff -->
+					<div class="vs text">
+						<div class="vs-kopf"><span class="chip">✎ Textänderung</span><span class="bezug">Abschnitt Wirkung</span></div>
+						<div class="warum">💬 <span>Wirkeintritt in Minuten genauer angeben.</span></div>
+						<div class="feld"><div class="inhalt"><b>Wirkeintritt</b>: wenige Minuten <span class="ins">(BZ-Anstieg i.m. meist innerhalb von 10 Minuten, i.v. ab ca. 5 Minuten)</span></div></div>
+						<div class="hinweis">Textstelle nicht in der Notiz gefunden. Bearbeite „Wird ersetzt“ oder prüfe die Stelle über „Zeigen“.</div>
+						<div class="aktionen"><button class="cta" disabled style="opacity:.5">Übernehmen</button><button>Bearbeiten</button><button>Zeigen</button><div class="rechts"><button class="leise">Quelltext</button><button class="leise">Verwerfen</button></div></div>
+					</div>
+
+					<!-- Neue Karte -->
+					<div class="vs neu ganz-neu">
+						<div class="vs-kopf"><span class="chip">＋ Neue Karte</span><span class="bezug">in „Notfallmedikamente::Glucagon“</span></div>
+						<div class="warum">💬 <span>Die Erhaltungsdosis bei Betablocker-Intoxikation fehlt bisher.</span></div>
+						<div class="feld"><div class="feldname">Frage</div><div class="inhalt">Wie lautet die Erhaltungsdosis von <span class="link">Glucagon</span> bei Betablocker-Intoxikation für Kinder?</div></div>
+						<div class="feld"><div class="feldname">Antwort</div><div class="inhalt">50 µg/kgKG/h i.v. als Dauerinfusion</div></div>
+						<div class="aktionen"><button class="cta">Hinzufügen</button><button>Bearbeiten</button><div class="rechts"><button class="leise">Verwerfen</button></div></div>
+					</div>
+
+					<!-- Übernommen / verworfen -->
+					<div class="vs erledigt"><div class="zu">✓ <b style="color:var(--text)">Übernommen</b> · Karte gelöscht: „Was ist Glucagon?“ <div class="rechts"><button class="leise">Rückgängig</button></div></div></div>
+					<div class="vs verworfen"><div class="zu">Verworfen · Einfügen nach „## Dosierung“ <div class="rechts"><button class="leise">Wiederherstellen</button></div></div></div>
+				</div>
+			</div>
+		</div>
+		<div class="eingabe">
+			<div class="feldzeile"><span class="ph">Frage an die KI …</span><button>➤</button></div>
+			<div class="unterzeile"><span class="modell">✦ Claude Opus 5 ▾</span> Enter senden · Shift+Enter neue Zeile</div>
+			<div class="menue">
+				<div>Gemini <small>gemini-2.5-flash</small></div>
+				<div class="an">Claude <small>claude-opus-5</small></div>
+				<div>OpenAI <small>nicht eingerichtet</small></div>
+				<hr>
+				<div>Claude-Agent <small>Zotero + Websuche</small></div>
+			</div>
+		</div>
+	</div>
+
+	<div class="notiz">
+		<h3>Die Arten auf einen Blick</h3>
+		<div class="legende">
+			<div class="vs"><div class="vs-kopf"><span class="chip">◫ Karte ändern</span></div></div>
+			<div class="vs neu"><div class="vs-kopf"><span class="chip">＋ Neue Karte</span></div></div>
+			<div class="vs loeschen"><div class="vs-kopf"><span class="chip">🗑 Karte löschen</span></div></div>
+			<div class="vs text"><div class="vs-kopf"><span class="chip">✎ Textänderung</span></div></div>
+			<div class="vs einfuegen"><div class="vs-kopf"><span class="chip">↳ Einfügen</span></div></div>
+			<div class="vs kaputt"><div class="vs-kopf"><span class="chip">⚠ Nicht anwendbar</span></div></div>
+		</div>
+
+		<h3>Karte löschen</h3>
+		<div class="vs loeschen ganz-weg">
+			<div class="vs-kopf"><span class="chip">🗑 Karte löschen</span><span class="bezug">ID 1712049981</span></div>
+			<div class="warum">💬 <span>Doppelt zu Karte „Wirkmechanismus“.</span></div>
+			<div class="feld"><div class="feldname">Frage</div><div class="inhalt">Was ist Glucagon?</div></div>
+			<div class="aktionen"><button class="cta" style="background:#8a3f35;border-color:#8a3f35">Löschen</button><div class="rechts"><button class="leise">Verwerfen</button></div></div>
+		</div>
+
+		<h3>Nicht anwendbar</h3>
+		<div class="vs kaputt">
+			<div class="vs-kopf"><span class="chip">⚠ Nicht anwendbar</span></div>
+			<div class="quelle" style="padding-top:6px">&gt;enzymatischer Abbau ^elimination</div>
+			<div class="hinweis">Der Block braucht eine FIND:- und eine REPLACE:-Zeile.</div>
+			<div class="aktionen"><button>Als Textänderung bearbeiten</button><div class="rechts"><button class="leise">Verwerfen</button></div></div>
+		</div>
+
+		<h3>Regeln</h3>
+		<ul>
+			<li>Die Farbe zeigt die <b>Art</b>, die Diff-Markierung die <b>Änderung</b>. Rot heißt „fällt weg“, grün heißt „kommt dazu“, in jeder Art gleich.</li>
+			<li>Der Hauptknopf heißt je nach Art „Übernehmen“, „Hinzufügen“ oder „Löschen“. „Verwerfen“ und „Quelltext“ stehen leise rechts.</li>
+			<li>Beim Bearbeiten wird nur die Fassung im Chat geändert, nicht die Notiz. Erst „Übernehmen“ schreibt in die Notiz.</li>
+			<li>Kartenbezug: gespeichert wird zu jeder Antwort die Liste (ID, Frage) zum Zeitpunkt der Frage. Gesucht wird erst über die ID, dann über die gespeicherte Frage, dann über die Ähnlichkeit. Die Nummer dient nur noch als Rückfall für alte Verläufe.</li>
+			<li>Wird die Karte gar nicht mehr gefunden (z. B. gelöscht): „Karte ist nicht mehr in der Notiz“, dazu „Als neue Karte“.</li>
+		</ul>
+	</div>
+	</div>
+</div>
+</body>
+</html>

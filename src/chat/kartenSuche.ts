@@ -43,6 +43,30 @@ export function findeKarte(
 		}
 	}
 
+	// Gespeicherter Kartenstand der Antwort: welche Karte stand hinter CARD: n,
+	// als die KI geantwortet hat? Die Nummer selbst verschiebt sich, sobald
+	// eine Karte davor geloescht oder eingefuegt wurde – dann traf jeder
+	// weitere Vorschlag die Nachbarkarte.
+	if (vorschlag.bezug) {
+		const b = vorschlag.bezug;
+		if (b.id !== null) {
+			for (let bi = 0; bi < bloecke.length; bi++) {
+				const ci = bloecke[bi].cards.findIndex((c) => c.id === b.id);
+				if (ci >= 0) return { ok: true, treffer: { bi, ci, weg: 'id' } };
+			}
+		}
+		const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
+		const fragen = flat.map((p) => bloecke[p.bi].cards[p.ci].q);
+		const genau = fragen.findIndex((q) => norm(q) === norm(b.q));
+		if (genau >= 0) return { ok: true, treffer: { ...flat[genau], weg: 'card' } };
+		const best = aehnlichsteFrage(b.q, fragen);
+		if (best !== null) return { ok: true, treffer: { ...flat[best], weg: 'frage' } };
+		return {
+			ok: false, alteKarte: false,
+			message: 'Die Karte ist nicht mehr in der Notiz (gelöscht oder umgeschrieben).'
+		};
+	}
+
 	if (vorschlag.ref !== null) {
 		const pos = flat[vorschlag.ref - 1];
 		if (pos) return { ok: true, treffer: { ...pos, weg: 'card' } };

@@ -47,6 +47,11 @@ export interface AnkiGeneratorSettings {
 	claudeCliPath: string;
 	/** Modell fuer den Agenten (z. B. "opus", "sonnet"); leer = CLI-Standard. */
 	claudeAgentModel: string;
+	/**
+	 * Wer im AI Chat antwortet: ein Anbieter ('claude', 'gemini' …) oder
+	 * 'claude-agent' (Claude CLI mit Zotero und Websuche). Leer = aiProvider.
+	 */
+	chatProvider: string;
 	zoteroApiUrl: string;
 	/** Zotero-Datenverzeichnis (enthaelt storage/); leer = ~/Zotero. */
 	zoteroDataDir: string;
@@ -231,6 +236,7 @@ Hier ist der Lerninhalt:
 	ignoredFiles: [],
 	claudeCliPath: '',
 	claudeAgentModel: '',
+	chatProvider: '',
 	zoteroApiUrl: 'http://localhost:23119/api',
 	zoteroDataDir: '',
 	fitnessManagerUrl: 'https://fitness-manager.tail0d1239.ts.net'

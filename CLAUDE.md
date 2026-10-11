@@ -108,6 +108,18 @@ block itself carries.** Stripping every `>` removes quotes that are legitimate
 **After an async modal, re-find the block** instead of reusing indices captured
 before it opened — the file may have changed meanwhile.
 
+**`CARD: n` in a chat answer is resolved through the answer's own card snapshot**
+(`ChatMessage.karten`, set when the request is sent). `findeKarte()` uses
+`suggestion.bezug` (id, then exact question, then similarity) before the bare
+number. Without it, deleting one card shifted every later suggestion onto the
+next card. Never resolve `CARD:` against the current list alone when a snapshot
+exists.
+
+**Chat suggestion state lives in the message** (`ChatMessage.vorschlaege`, keyed
+by `schluesselFuer(original)`): user edits (`bearbeitet`), `applied`/`dismissed`.
+Do not rewrite `msg.content` to change a suggestion — the key would change and
+the state would be orphaned.
+
 **Prefer batched AnkiConnect calls.** `updateNoteFieldsBatch()` sends many
 field updates in one `multi` request; `addAnkiNotes` and `storeAnkiMediaFiles`
 batch as well. `syncAnkiBlock` accepts a list of card indices so a selection can

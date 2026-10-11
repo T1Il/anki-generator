@@ -3,6 +3,7 @@ import { Suggestion } from './suggestions';
 import { applyFindReplace } from './textLocator';
 import { insertAfterAnchor } from './insertText';
 import { findeKarte } from './kartenSuche';
+import { fuegeQuelleEin } from './quellen';
 
 /**
  * Vorher/Nachher eines Vorschlags fuer die Vergleichsansicht im Chat-Modal.
@@ -52,6 +53,14 @@ export function berechneVergleich(
 				? 'Zuordnung über die Ähnlichkeit der Frage – bitte prüfen.'
 				: undefined
 		};
+	}
+
+	if (v.kind === 'quelle') {
+		const mit = fuegeQuelleEin(content, v.zitat, v.url);
+		if (mit === null) {
+			return { art: 'text', vorher: '', nachher: v.zitat, entfernt: [], hinzu: [v.zitat], hinweis: 'Die Quelle steht schon in der Notiz.' };
+		}
+		return ausschnitt(content, mit);
 	}
 
 	const neu = v.kind === 'edit'

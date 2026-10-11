@@ -14,6 +14,30 @@ export type AiProvider = 'gemini' | 'openai' | 'ollama' | 'claude';
 export interface ChatMessage {
 	role: 'user' | 'ai';
 	content: string;
+	/**
+	 * Die Kartenliste, die die KI mit dieser Antwort gesehen hat: Eintrag n
+	 * gehoert zu `CARD: n+1`. Ohne sie zeigte jede Nummer nach dem Loeschen
+	 * einer Karte auf die naechste – siehe kartenSuche.ts.
+	 */
+	karten?: KartenBezug[];
+	/** Zustand der Vorschlaege dieser Antwort, Schluessel = Originalvorschlag. */
+	vorschlaege?: Record<string, VorschlagZustand>;
+	/** Welches Modell geantwortet hat (Anzeige). */
+	modell?: string;
+}
+
+/** Eine Karte, wie sie zum Zeitpunkt einer Anfrage im Block stand. */
+export interface KartenBezug {
+	id: number | null;
+	q: string;
+}
+
+export interface VorschlagZustand {
+	status?: 'applied' | 'dismissed';
+	/** Bei Quellen: wohin sie schon eingetragen ist ('notiz', 'zotero'). */
+	erledigt?: string[];
+	/** Vom Nutzer bearbeitete Fassung (ein Suggestion-Objekt). */
+	bearbeitet?: any;
 }
 
 /**

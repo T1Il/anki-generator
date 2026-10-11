@@ -24,6 +24,8 @@ fs.writeFileSync(entry, [
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/mermaidRepair.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/kartenSuche.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/chat/vergleich.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/wortDiff.ts').replace(/\\/g, '/')) + ";",
+	"export * from " + JSON.stringify(path.join(root, 'src/chat/quellen.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/anki/legacyStrip.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/mermaid/mermaidBloecke.ts').replace(/\\/g, '/')) + ";",
 	"export * from " + JSON.stringify(path.join(root, 'src/mermaid/mermaidEinstellungen.ts').replace(/\\/g, '/')) + ";"
@@ -533,6 +535,67 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 	const v = C.parseSuggestions('````anki-insert\nNACH:\n# T\nTEXT:\n> ```mermaid\n> flowchart LR\n>   A --> B\n> ```\n````');
 	check('Vorschlag: LR wird senkrecht', v[0].kind === 'insert' && v[0].text.includes('> flowchart TD'), v[0]);
 	check('Norm erkennt reparierte Form', C.diagrammNorm('flowchart LR\n subgraph A (b)\n end') === C.diagrammNorm('flowchart TD\n subgraph sg1["A (b)"]\n end'));
+}
+
+console.log('\nBegruendung, Kartenbezug, Wort-Diff, Quellen:');
+{
+	const md = [
+		'Zwei Karten sind unvollstaendig.',
+		'',
+		'## Karten',
+		'',
+		'Tachykardie fehlt in den Nebenwirkungen.',
+		'',
+		F + 'anki-card', 'OP: update', 'CARD: 2', 'Q: Frage', 'A: Antwort', F,
+		'',
+		F + 'anki-edit', 'FIND:', 'alt', 'REPLACE:', 'neu', F,
+		'',
+		'Fazit am Ende.'
+	].join('\n');
+	const t = C.parseAntwort(md);
+	check('Reihenfolge Text/Vorschlag/Vorschlag/Text', t.map((x) => x.art).join(',') === 'text,vorschlag,vorschlag,text', t);
+	check('letzter Absatz wird Begruendung', t[1].warum === 'Tachykardie fehlt in den Nebenwirkungen.', t[1]);
+	check('Ueberschrift bleibt Fliesstext', t[0].text.includes('## Karten') && !t[0].text.includes('Tachykardie'), t[0]);
+	check('ohne Text davor keine Begruendung', t[2].warum === '', t[2]);
+	const ueber = C.parseAntwort('## Nur Ueberschrift\n\n' + F + 'anki-edit\nFIND:\na\nREPLACE:\nb\n' + F);
+	check('Ueberschrift wird keine Begruendung', ueber[1].warum === '' && ueber[0].text === '## Nur Ueberschrift', ueber);
+}
+{
+	// Karte 1 wurde geloescht – CARD: 3 meint die Karte, die damals an Stelle 3 stand.
+	const damals = [{ id: 11, q: 'A?' }, { id: null, q: 'B?' }, { id: null, q: 'C?' }];
+	const jetzt = [{ cards: [
+		{ type: 'Basic', q: 'B?', a: '', id: null },
+		{ type: 'Basic', q: 'C?', a: '', id: null }
+	] }];
+	const v = { kind: 'card', op: 'update', id: null, ref: 3, q: 'C neu?', a: '', typeIn: false, bezug: damals[2] };
+	const r = C.findeKarte('', jetzt, v);
+	check('nach Loeschen: richtige Karte ueber den Bezug', r.ok && r.treffer.ci === 1, r);
+	const ohne = C.findeKarte('', jetzt, { ...v, bezug: undefined });
+	check('ohne Bezug (alter Verlauf): Nummer wie bisher', !ohne.ok && /CARD: 3 gibt es nicht/.test(ohne.message), ohne);
+	const weg = C.findeKarte('', jetzt, { ...v, ref: 1, bezug: damals[0] });
+	check('geloeschte Karte wird nicht der Nachbar', !weg.ok && /nicht mehr in der Notiz/.test(weg.message), weg);
+}
+{
+	const d = C.wortDiff('- [[#^x|Betablocker]]: verstaerkte Wirkung', '- [[#^x|Betablocker]]: Anstieg von Puls');
+	const txt = d.map((t) => t.art === 'gleich' ? t.text : t.art === 'weg' ? '[-' + t.text + '-]' : '{+' + t.text + '+}').join('');
+	check('Wort-Diff haelt Wikilink und fasst zusammen', txt === '- [[#^x|Betablocker]]: [-verstaerkte Wirkung-]{+Anstieg von Puls+}', txt);
+	check('linkText', C.linkText('[[#^x|Glucagon]]') === 'Glucagon' && C.linkText('[[Insulin]]') === 'Insulin');
+}
+{
+	const note = '# G\n\nText\n\n## Quellen\n\nBoido, A. (2015). _X_.\n\n_Fachinformation Y_. (2023).\n\nKarow, T. (2024). _Z_.\n\n## Anki\n```anki-cards\nQ: a\nA: b\n```';
+	const neu = C.fuegeQuelleEin(note, 'Gelbe Liste. (o. J.). _Glucagon_. [https://www.gelbe-liste.de/x](https://www.gelbe-liste.de/x)', 'https://www.gelbe-liste.de/x');
+	check('Quelle alphabetisch einsortiert', neu.indexOf('Gelbe Liste') > neu.indexOf('Fachinformation') && neu.indexOf('Gelbe Liste') < neu.indexOf('Karow'), neu);
+	check('Leerzeilen sauber', neu.includes('(2023).\n\nGelbe Liste. (o. J.). _Glucagon_. [https://www.gelbe-liste.de/x](https://www.gelbe-liste.de/x)\n\nKarow'), neu);
+	check('doppelte Quelle wird erkannt', C.fuegeQuelleEin(neu, 'anders', 'https://www.gelbe-liste.de/x') === null);
+	const ohne = C.fuegeQuelleEin('# G\n\nText\n\n## Anki\nQ: a', 'Neu. (2020). _T_.');
+	check('Abschnitt wird vor Anki angelegt', ohne === '# G\n\nText\n\n## Quellen\n\nNeu. (2020). _T_.\n\n## Anki\nQ: a', ohne);
+	const liste = C.fuegeQuelleEin('## Quellen\n\n**Aus meinen Notizen**\n- [[A]]\n', 'Neu. (2020).');
+	check('Notizliste bleibt, Zitat davor', liste.startsWith('## Quellen\n\nNeu. (2020).\n\n**Aus meinen Notizen**'), liste);
+	check('Zotero-Ziel aus Pfad', C.zoteroZielFuer('Medizin/Pharmakologie/Medikamente/Glucagon.md') === 'Medikamente/Glucagon');
+	const q = C.parseSuggestions(F + 'anki-quelle\n{"titel": "T", "url": "https://a.de", "zitat": "_T_. https://a.de", "typ": "webpage"}\n' + F);
+	check('Quellenblock gelesen', q[0].kind === 'quelle' && q[0].titel === 'T' && q[0].url === 'https://a.de', q[0]);
+	const kaputt = C.parseSuggestions(F + 'anki-quelle\n{titel: T}\n' + F);
+	check('kaputtes JSON sichtbar', kaputt[0].kind === 'invalid' && /JSON/.test(kaputt[0].reason), kaputt[0]);
 }
 
 console.log('');

@@ -20,6 +20,20 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
   text search; an unknown ID is caught before the click (fallback: matching question,
   or **Als neue Karte** for old `<!--ID-->` cards). Changes to note prose are located
   even when the passage contains wikilinks, bold markers or typographic quotes.
+- **Suggestion cards**: each suggestion shows the model's reason right inside it, a
+  colour per kind (card update blue, new card green, delete red, prose edit yellow,
+  insertion cyan, source orange) and a word-level diff against the current card or text.
+  **Bearbeiten** edits a suggestion before applying it; **Original** restores the model's
+  version. Edits, *Übernommen* and *Verworfen* are saved in the chat history;
+  **Rückgängig** reverts an applied suggestion while the note is unchanged since.
+- **Stable card references**: every answer stores which card stood behind each `CARD: n`.
+  Deleting a card no longer shifts the remaining suggestions onto its neighbour.
+- **Model picker** below the input: any configured provider or the **Claude-Agent**
+  (Claude CLI with Zotero access and web search, desktop only). Every answer can contain
+  new suggestions.
+- **Researched sources** (`anki-quelle`): *In Notiz eintragen* sorts the APA citation into
+  `## Quellen`; *In Zotero ablegen* creates the item via the Fitness-Manager backend in
+  `<parent folder>/<note>` (editable per suggestion).
 - **Full-size chat**: *Chat öffnen* (or ⤢ in the chat header) opens a modal with the
   chat on the left and, on the right, a before/after comparison of the selected
   suggestion — rendered, diagrams included — or the whole note.

@@ -366,3 +366,14 @@ export function resolveProvider(s: AnkiGeneratorSettings): AiProvider | null {
 	const available = getAvailableProviders(s);
 	return available.length > 0 ? available[0] : null;
 }
+
+/** Modellname fuer die Anzeige (Chat-Modellwahl). */
+export function modelLabel(id: AiProvider, s: AnkiGeneratorSettings): string {
+	switch (id) {
+		case 'gemini': return s.geminiModel || 'gemini';
+		case 'openai': return s.openAiModel || 'gpt';
+		case 'claude': return s.claudeModel || 'claude';
+		case 'ollama': return s.ollamaModel || 'ollama';
+	}
+	return id;
+}

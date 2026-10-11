@@ -1,6 +1,7 @@
 import { App, TFile, Notice } from 'obsidian';
 import { Card } from '../types';
-import { CardSuggestion, EditSuggestion, InsertSuggestion, Suggestion } from './suggestions';
+import { CardSuggestion, EditSuggestion, InsertSuggestion, QuelleSuggestion, Suggestion } from './suggestions';
+import { fuegeQuelleEin } from './quellen';
 import { applyFindReplace, locate } from './textLocator';
 import {
 	getAnkiBlocks,
@@ -64,6 +65,24 @@ export async function applyInsertSuggestion(
 	return result;
 }
 
+/** Quelle alphabetisch unter „## Quellen" eintragen. */
+export async function applyQuelleSuggestion(
+	app: App,
+	sourcePath: string | undefined,
+	suggestion: QuelleSuggestion
+): Promise<ApplyResult> {
+	const file = getFile(app, sourcePath);
+	if (!file) return { ok: false, message: 'Notiz nicht gefunden.' };
+	let result: ApplyResult = { ok: false, message: 'Die Quelle steht schon in der Notiz.' };
+	await app.vault.process(file, (content) => {
+		const updated = fuegeQuelleEin(content, suggestion.zitat, suggestion.url);
+		if (updated === null) return content;
+		result = { ok: true, message: 'Quelle in die Notiz eingetragen.' };
+		return updated;
+	});
+	return result;
+}
+
 /** Prüft, ob sich FIND bzw. NACH überhaupt finden lässt (für die Vorschau). */
 export async function canLocateEdit(
 	app: App,
@@ -92,6 +111,29 @@ export async function pruefeKartenVorschlag(
 	const content = await app.vault.read(file);
 	const bloecke = getAnkiBlocks(content).map(b => ({ cards: parseCardsFromBlockSource(b.innerClean) }));
 	return findeKarte(content, bloecke, suggestion);
+}
+
+/**
+ * Wie pruefeKartenVorschlag, liefert aber auch die gefundene Karte – fuer den
+ * Wort-Diff in der Vorschlagsbox (alte gegen neue Antwort).
+ */
+export async function ladeKartenKontext(
+	app: App,
+	sourcePath: string | undefined,
+	suggestion: CardSuggestion
+): Promise<{ suche: KartenSuche | null; karte: Card | null; deck: string }> {
+	const file = getFile(app, sourcePath);
+	if (!file) return { suche: { ok: false, alteKarte: false, message: 'Notiz nicht gefunden.' }, karte: null, deck: '' };
+	const content = await app.vault.read(file);
+	const roh = getAnkiBlocks(content);
+	const bloecke = roh.map(b => ({ cards: parseCardsFromBlockSource(b.innerClean) }));
+	if (suggestion.op === 'add') {
+		const letzter = roh[roh.length - 1];
+		return { suche: null, karte: null, deck: letzter ? parseBlockHeader(letzter.innerClean).deckName || '' : '' };
+	}
+	const suche = findeKarte(content, bloecke, suggestion);
+	const karte = suche.ok ? bloecke[suche.treffer.bi].cards[suche.treffer.ci] : null;
+	return { suche, karte, deck: '' };
 }
 
 /**
@@ -230,7 +272,9 @@ export async function applySuggestion(
 		? await applyEditSuggestion(app, sourcePath, suggestion)
 		: suggestion.kind === 'insert'
 			? await applyInsertSuggestion(app, sourcePath, suggestion)
-			: await applyCardSuggestion(app, sourcePath, suggestion, mainDeck);
+			: suggestion.kind === 'quelle'
+				? await applyQuelleSuggestion(app, sourcePath, suggestion)
+				: await applyCardSuggestion(app, sourcePath, suggestion, mainDeck);
 
 	new Notice(result.message, result.ok ? 3000 : 6000);
 	return result;

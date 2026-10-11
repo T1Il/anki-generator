@@ -1,13 +1,15 @@
-import { ButtonComponent, MarkdownRenderer, Notice, Platform, TFile, setIcon, Component, loadMermaid } from 'obsidian';
+import { ButtonComponent, MarkdownRenderer, Menu, Notice, Platform, TFile, setIcon, Component, loadMermaid, requestUrl } from 'obsidian';
 import AnkiGeneratorPlugin from '../../main';
-import { ChatMessage } from '../../types';
-import { streamChatResponse, generateFeedbackOnly } from '../../aiGenerator';
-import { resolveProvider, PROVIDERS } from '../../providers';
+import { AiProvider, ChatMessage, KartenBezug, VorschlagZustand } from '../../types';
+import { streamChatResponse, generateFeedbackOnly, buildChatSystemPrompt } from '../../aiGenerator';
+import { resolveProvider, PROVIDERS, getAvailableProviders, modelLabel } from '../../providers';
 import { MermaidEditorModal } from '../MermaidEditorModal';
 import { klappbareCallouts } from '../callouts';
 import { ersetzeGleicheMermaid } from '../../mermaid/mermaidBloecke';
-import { diagrammNorm, mapVorschlagText, entschaerfePluginFences, mermaidAusVorschlag, parseSuggestions, schluesselFuer, stripSuggestionBlocks, Suggestion } from '../../chat/suggestions';
-import { applySuggestion, canLocateEdit, pruefeKartenVorschlag } from '../../chat/applySuggestion';
+import { diagrammNorm, mapVorschlagText, entschaerfePluginFences, mermaidAusVorschlag, parseAntwort, schluesselFuer, vorschlagAlsBlock, QuelleSuggestion, Suggestion } from '../../chat/suggestions';
+import { DiffTeil, linkText, wortDiff } from '../../chat/wortDiff';
+import { zoteroZielFuer } from '../../chat/quellen';
+import { applySuggestion, ladeKartenKontext } from '../../chat/applySuggestion';
 import { locate } from '../../chat/textLocator';
 import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chatHistory';
 import { ohneAlteKarten } from '../../anki/legacyStrip';
@@ -59,8 +61,9 @@ export class ChatPanel extends Component {
 	private collapsed = false;
 	/** Pruefungen offener Vorschlaege – nach jeder Übernahme erneut ausgefuehrt. */
 	private pruefungen = new Map<HTMLElement, () => void>();
-	/** Aktueller Stand jeder Vorschlagsbox (nach „Als neue Karte" oder Diagramm-Edit). */
-	private boxZustand = new WeakMap<HTMLElement, () => Suggestion>();
+	/** Kontext jeder Vorschlagsbox: Original, Nachricht, Begruendung. */
+	private boxKontext = new WeakMap<HTMLElement, BoxKontext>();
+	private modellChip!: HTMLElement;
 	/** Zu welcher Nachricht eine Blase gehoert – Diagramm-Edits landen im Verlauf. */
 	private blaseNachricht = new WeakMap<HTMLElement, ChatMessage>();
 
@@ -209,10 +212,68 @@ export class ChatPanel extends Component {
 		this.sendBtn.buttonEl.addClass('anki-chat-send');
 		this.sendBtn.onClick(() => void this.send());
 
-		body.createDiv({
-			cls: 'anki-chat-hint',
-			text: 'Enter senden · Shift+Enter neue Zeile'
+		const hint = body.createDiv({ cls: 'anki-chat-hint' });
+		this.modellChip = hint.createEl('button', { cls: 'anki-chat-modell', attr: { 'aria-label': 'Wer antwortet?' } });
+		this.registerDomEvent(this.modellChip, 'click', (e: MouseEvent) => this.zeigeModellMenue(e));
+		this.zeichneModellChip();
+		hint.createSpan({ text: 'Enter senden · Shift+Enter neue Zeile' });
+	}
+
+	// --- Modellwahl ---------------------------------------------------------
+
+	/** Gewaehlter Antwortgeber: Anbieter oder 'claude-agent'. null = keiner verfuegbar. */
+	private gewaehltesModell(): AiProvider | 'claude-agent' | null {
+		const s = this.plugin.settings;
+		if (s.chatProvider === 'claude-agent' && Platform.isDesktopApp) return 'claude-agent';
+		const p = s.chatProvider as AiProvider;
+		if (p && PROVIDERS[p] && PROVIDERS[p].isAvailable(s)) return p;
+		return resolveProvider(s);
+	}
+
+	private modellName(m: AiProvider | 'claude-agent' | null): string {
+		if (m === 'claude-agent') {
+			const mod = this.plugin.settings.claudeAgentModel;
+			return mod ? `Claude-Agent (${mod})` : 'Claude-Agent';
+		}
+		if (!m) return 'kein Modell';
+		return `${PROVIDERS[m].label.replace(/^(Google|Anthropic) /, '')} · ${modelLabel(m, this.plugin.settings)}`;
+	}
+
+	private zeichneModellChip() {
+		if (!this.modellChip) return;
+		const m = this.gewaehltesModell();
+		this.modellChip.empty();
+		setIcon(this.modellChip.createSpan({ cls: 'anki-chat-modell-icon' }), m === 'claude-agent' ? 'library' : 'sparkles');
+		this.modellChip.createSpan({ text: this.modellName(m) });
+		setIcon(this.modellChip.createSpan({ cls: 'anki-chat-modell-icon' }), 'chevron-down');
+	}
+
+	private zeigeModellMenue(e: MouseEvent) {
+		const s = this.plugin.settings;
+		const aktuell = this.gewaehltesModell();
+		const menu = new Menu();
+		const waehle = async (wert: string) => {
+			s.chatProvider = wert;
+			await this.plugin.saveSettings();
+			this.zeichneModellChip();
+			// Andere offene Chats zeigen dieselbe Wahl.
+			this.plugin.app.workspace.trigger('anki:chat-modell');
+		};
+		getAvailableProviders(s).forEach((p) => {
+			menu.addItem((item) => item
+				.setTitle(this.modellName(p))
+				.setChecked(aktuell === p)
+				.onClick(() => void waehle(p)));
 		});
+		if (Platform.isDesktopApp) {
+			menu.addSeparator();
+			menu.addItem((item) => item
+				.setTitle('Claude-Agent – Zotero + Websuche')
+				.setIcon('library')
+				.setChecked(aktuell === 'claude-agent')
+				.onClick(() => void waehle('claude-agent')));
+		}
+		menu.showAtMouseEvent(e);
 	}
 
 	// --- Rendering --------------------------------------------------------
@@ -283,7 +344,7 @@ export class ChatPanel extends Component {
 		const role = wrapper.createDiv({ cls: 'anki-chat-role' });
 		const roleIcon = role.createSpan({ cls: 'anki-chat-role-icon' });
 		setIcon(roleIcon, msg.role === 'ai' ? 'bot' : 'user');
-		role.createSpan({ text: msg.role === 'ai' ? 'KI' : 'Du' });
+		role.createSpan({ text: msg.role === 'ai' ? (msg.modell ? `KI · ${msg.modell}` : 'KI') : 'Du' });
 
 		// Ganze Nachricht als Markdown kopieren – msg.content erst beim Klick
 		// lesen, der Platzhalter einer gestreamten Antwort wird spaeter befuellt.
@@ -300,29 +361,58 @@ export class ChatPanel extends Component {
 		return wrapper;
 	}
 
-	/** Fließtext als Markdown, Vorschlagsblöcke als eigene Widgets. */
+	/** Fließtext als Markdown, Vorschläge als eigene Boxen – in Reihenfolge. */
 	private async renderBody(bubble: HTMLElement, content: string, isAi: boolean) {
 		bubble.empty();
 
-		// Erst die Vorschlagsbloecke raus, dann jede uebrig gebliebene
-		// Plugin-Sprachmarke entschaerfen – sonst rendert der eigene
-		// anki-cards-Prozessor in die Chat-Blase und die App friert ein.
-		const prose = isAi ? entschaerfePluginFences(stripSuggestionBlocks(content)) : content;
-		if (prose) {
-			await MarkdownRenderer.render(this.plugin.app, prose, bubble, this.sourcePath || '', this);
-			klappbareCallouts(bubble);
+		if (!isAi) {
+			if (content) await MarkdownRenderer.render(this.plugin.app, content, bubble, this.sourcePath || '', this);
+			return;
 		}
 
-		if (!isAi) return;
+		// Begruendung und Vorschlag gehoeren zusammen: der Absatz direkt vor
+		// einem Block steht in dessen Box, nicht gesammelt ueber allen.
+		const msg = this.blaseNachricht.get(bubble);
+		const teile = parseAntwort(content);
+		const anzahl = teile.filter((t) => t.art === 'vorschlag').length;
+		let leisteGesetzt = false;
 
-		const suggestions = parseSuggestions(content);
-		suggestions.forEach((s) => this.renderSuggestion(bubble, s));
+		for (const teil of teile) {
+			if (teil.art === 'text') {
+				// Jede uebrig gebliebene Plugin-Sprachmarke entschaerfen – sonst
+				// rendert der eigene anki-cards-Prozessor in die Chat-Blase und
+				// die App friert ein.
+				const div = bubble.createDiv({ cls: 'anki-chat-prose' });
+				await MarkdownRenderer.render(this.plugin.app, entschaerfePluginFences(teil.text), div, this.sourcePath || '', this);
+				klappbareCallouts(div);
+				continue;
+			}
+			if (!leisteGesetzt && anzahl > 1) {
+				bubble.createDiv({ cls: 'anki-vs-leiste' });
+				leisteGesetzt = true;
+			}
+			this.renderSuggestion(bubble, teil.vorschlag, msg, teil.warum);
+		}
+		this.aktualisiereLeiste(bubble);
+	}
+
+	/** „5 Vorschläge · 1 übernommen · 1 verworfen" über den Vorschlägen. */
+	private aktualisiereLeiste(bubble: HTMLElement) {
+		const leiste = bubble.querySelector('.anki-vs-leiste') as HTMLElement | null;
+		if (!leiste) return;
+		const boxen = Array.from(bubble.querySelectorAll('.anki-suggestion'));
+		const uebernommen = boxen.filter((b) => b.hasClass('is-applied')).length;
+		const verworfen = boxen.filter((b) => b.hasClass('is-dismissed')).length;
+		leiste.empty();
+		leiste.createSpan({ cls: 'anki-vs-leiste-zahl', text: `${boxen.length} Vorschläge` });
+		if (uebernommen) leiste.createSpan({ cls: 'anki-vs-pille', text: `${uebernommen} übernommen` });
+		if (verworfen) leiste.createSpan({ cls: 'anki-vs-pille', text: `${verworfen} verworfen` });
 	}
 
 	/** Nach einer frischen Antwort: ersten Vorschlag gleich im Vergleich zeigen. */
 	private waehleErsten(bubble: HTMLElement) {
 		if (!this.options.onVorschlagWaehlen) return;
-		const box = bubble.querySelector('.anki-suggestion') as HTMLElement | null;
+		const box = bubble.querySelector('.anki-suggestion:not(.is-applied):not(.is-dismissed)') as HTMLElement | null;
 		box?.click();
 	}
 
@@ -332,198 +422,558 @@ export class ChatPanel extends Component {
 		box.addClass('is-selected');
 	}
 
-	private renderSuggestion(parent: HTMLElement, suggestion: Suggestion, ersetzt?: HTMLElement): HTMLElement {
+	private renderSuggestion(parent: HTMLElement, vorschlag: Suggestion, msg: ChatMessage | undefined, warum: string): HTMLElement {
 		const box = parent.createDiv({ cls: 'anki-suggestion' });
-		if (ersetzt) ersetzt.replaceWith(box);
 		// Inhaltsschluessel am Element, damit jede andere offene Ansicht
-		// dieselbe Box wiederfindet, wenn der Vorschlag anderswo uebernommen
-		// wird.
-		const schluessel = schluesselFuer(suggestion);
+		// dieselbe Box wiederfindet. Er kommt vom ORIGINAL – bearbeitete
+		// Fassungen haengen im Verlauf unter genau diesem Schluessel.
+		const schluessel = schluesselFuer(vorschlag);
 		box.dataset.ankiVorschlag = schluessel;
 
-		const title = box.createDiv({ cls: 'anki-suggestion-title' });
-		const titleIcon = title.createSpan({ cls: 'anki-chat-role-icon' });
-
-		const diff = box.createEl('pre', { cls: 'anki-suggestion-diff' });
-		const line = (text: string, cls: string) =>
-			diff.createSpan({ cls: `anki-diff-line ${cls}`, text });
-
-		// Nicht anwendbar: trotzdem zeigen. stripSuggestionBlocks entfernt den
-		// Block aus dem Fließtext, vorher war an dieser Stelle einfach nichts.
-		if (suggestion.kind === 'invalid') {
-			setIcon(titleIcon, 'alert-triangle');
-			title.createSpan({ text: 'Vorschlag nicht anwendbar' });
-			suggestion.raw.split('\n').forEach(l => line('  ' + l, 'is-meta'));
-			box.addClass('is-missing');
-			box.createDiv({ cls: 'anki-suggestion-note', text: suggestion.reason });
-			return box;
+		// Kartenbezug aus dem gespeicherten Kartenstand der Antwort.
+		if (vorschlag.kind === 'card' && vorschlag.ref !== null && msg?.karten) {
+			const b = msg.karten[vorschlag.ref - 1];
+			if (b) vorschlag = { ...vorschlag, bezug: b };
 		}
 
-		if (suggestion.kind === 'edit') {
-			setIcon(titleIcon, 'pencil');
-			title.createSpan({ text: 'Textänderung' });
-			suggestion.find.split('\n').forEach(l => line('- ' + l, 'is-remove'));
-			suggestion.replace.split('\n').forEach(l => line('+ ' + l, 'is-add'));
-		} else if (suggestion.kind === 'insert') {
-			setIcon(titleIcon, 'list-plus');
-			title.createSpan({ text: 'Einfügen' });
-			line('nach: ' + suggestion.after.split('\n')[0], 'is-meta');
-			suggestion.text.split('\n').forEach(l => line('+ ' + l, 'is-add'));
-		} else {
-			setIcon(titleIcon, 'layers');
-			const opLabel = suggestion.op === 'add' ? 'Neue Karte'
-				: suggestion.op === 'delete' ? 'Karte löschen' : 'Karte ändern';
-			title.createSpan({ text: opLabel });
-
-			if (suggestion.ref !== null) line(`CARD: ${suggestion.ref}`, 'is-meta');
-			if (suggestion.id !== null) line(`ID: ${suggestion.id}`, 'is-meta');
-			if (suggestion.op !== 'delete') {
-				suggestion.q.split('\n').forEach(l => line('Q: ' + l, 'is-add'));
-				if (suggestion.a) {
-					const prefix = suggestion.typeIn ? 'A (type): ' : 'A: ';
-					suggestion.a.split('\n').forEach(l => line(prefix + l, 'is-add'));
-				}
-			}
-		}
-
-		const actions = box.createDiv({ cls: 'anki-suggestion-actions' });
-		const diagramme = mermaidAusVorschlag(suggestion);
+		const ktx: BoxKontext = { box, original: vorschlag, schluessel, msg, warum, bearbeiten: false, quelltext: false };
+		this.boxKontext.set(box, ktx);
 
 		if (this.options.onVorschlagWaehlen) {
 			box.addClass('is-selectable');
 			box.addEventListener('click', (e) => {
-				// Knöpfe haben eigene Aufgaben; „Quelltext zeigen" auch.
-				if ((e.target as HTMLElement).closest('button, .anki-suggestion-source-toggle')) return;
+				const ziel = e.target as HTMLElement;
+				if (ziel.closest('button, textarea, input, .anki-vs-zu')) return;
 				// Wer Text markiert, will kopieren, nicht den Vergleich wechseln.
 				if (window.getSelection()?.toString()) return;
+				if (ktx.bearbeiten) return;
+				const aktuell = this.aktuellerVorschlag(ktx);
+				const diagramme = mermaidAusVorschlag(aktuell);
 				this.markiereGewaehlt(box);
 				this.options.onVorschlagWaehlen && this.options.onVorschlagWaehlen(aktuell,
 					diagramme.length ? () => this.bearbeiteDiagramm(box, diagramme[0]) : undefined);
 			});
 		}
 
-		// Was „Übernehmen" anwendet. „Als neue Karte" stellt das um.
-		let aktuell: Suggestion = suggestion;
-		this.boxZustand.set(box, () => aktuell);
-		const applyBtn = new ButtonComponent(actions);
-		applyBtn.setButtonText('Übernehmen').setCta();
-		applyBtn.onClick(async () => {
-			applyBtn.setDisabled(true);
-			const result = await applySuggestion(this.plugin.app, this.sourcePath, aktuell, this.plugin.settings.mainDeck);
-			if (result.ok) {
-				this.markiereUebernommen(box, applyBtn);
-				// Jede andere offene Ansicht derselben Notiz mitziehen.
-				this.plugin.app.workspace.trigger(
-					'anki:suggestion-applied', this.sourcePath, schluessel
-				);
-			} else {
-				applyBtn.setDisabled(false);
-				box.addClass('is-missing');
-				box.createDiv({ cls: 'anki-suggestion-note', text: result.message });
+		this.zeichneBox(ktx);
+		return box;
+	}
+
+	private zustand(ktx: BoxKontext): VorschlagZustand {
+		return ktx.msg?.vorschlaege?.[ktx.schluessel] ?? ktx.fluechtig ?? {};
+	}
+
+	/** Was „Übernehmen" anwenden würde: die bearbeitete Fassung oder das Original. */
+	private aktuellerVorschlag(ktx: BoxKontext): Suggestion {
+		return (this.zustand(ktx).bearbeitet as Suggestion | undefined) ?? ktx.original;
+	}
+
+	/**
+	 * Zustand einer Box aendern und im Verlauf speichern – bearbeitete
+	 * Fassungen, Übernahmen und Verwerfen ueberstehen so den Neustart.
+	 */
+	private setzeZustand(ktx: BoxKontext, aenderung: Partial<VorschlagZustand>) {
+		const neu: VorschlagZustand = { ...this.zustand(ktx), ...aenderung };
+		(Object.keys(neu) as (keyof VorschlagZustand)[]).forEach((k) => { if (neu[k] === undefined) delete neu[k]; });
+
+		if (ktx.msg) {
+			const alle = ktx.msg.vorschlaege ?? (ktx.msg.vorschlaege = {});
+			if (Object.keys(neu).length) alle[ktx.schluessel] = neu;
+			else delete alle[ktx.schluessel];
+			if (!Object.keys(alle).length) delete ktx.msg.vorschlaege;
+			setHistory(this.plugin, this.sourcePath, this.history);
+		} else {
+			ktx.fluechtig = neu;
+		}
+
+		this.zeichneBox(ktx);
+		const blase = ktx.box.closest('.anki-chat-bubble') as HTMLElement | null;
+		if (blase) this.aktualisiereLeiste(blase);
+		this.plugin.app.workspace.trigger('anki:vorschlag-zustand', this.sourcePath, ktx.schluessel, ktx.msg, neu);
+	}
+
+	/** Kurze Beschreibung für die zugeklappte Zeile. */
+	private kurz(v: Suggestion): string {
+		const k = (t: string) => {
+			const s = t.replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, '$1').replace(/\[\[([^\]]*)\]\]/g, '$1').replace(/\s+/g, ' ').trim();
+			return s.length > 70 ? s.slice(0, 69) + '…' : s;
+		};
+		switch (v.kind) {
+			case 'card': {
+				const art = v.op === 'add' ? 'Neue Karte' : v.op === 'delete' ? 'Karte gelöscht' : 'Karte geändert';
+				return `${art}: „${k(v.op === 'delete' ? (v.bezug?.q ?? `Karte ${v.ref ?? v.id}`) : v.q)}“`;
 			}
+			case 'edit': return `Textänderung: „${k(v.find)}“`;
+			case 'insert': return `Eingefügt nach „${k(v.after)}“`;
+			case 'quelle': return `Quelle: „${k(v.titel)}“`;
+			default: return 'Nicht anwendbarer Vorschlag';
+		}
+	}
+
+	/** Die Box komplett neu zeichnen – nach jeder Zustandsänderung. */
+	private zeichneBox(ktx: BoxKontext) {
+		const { box } = ktx;
+		const z = this.zustand(ktx);
+		const v = this.aktuellerVorschlag(ktx);
+		this.pruefungen.delete(box);
+
+		box.empty();
+		box.className = 'anki-suggestion' + (box.hasClass('is-selected') ? ' is-selected' : '');
+		if (this.options.onVorschlagWaehlen) box.addClass('is-selectable');
+		box.addClass(artKlasse(v));
+
+		// --- Zugeklappt: übernommen oder verworfen -------------------------
+		if (z.status) {
+			box.addClass(z.status === 'applied' ? 'is-applied' : 'is-dismissed');
+			const zeile = box.createDiv({ cls: 'anki-vs-zu' });
+			const icon = zeile.createSpan({ cls: 'anki-vs-zu-icon' });
+			setIcon(icon, z.status === 'applied' ? 'check' : 'x');
+			zeile.createSpan({ cls: 'anki-vs-zu-status', text: z.status === 'applied' ? 'Übernommen' : 'Verworfen' });
+			zeile.createSpan({ cls: 'anki-vs-zu-text', text: this.kurz(v) });
+			const rechts = zeile.createDiv({ cls: 'anki-vs-rechts' });
+			if (z.status === 'applied') {
+				if (RUECKGAENGIG.has(this.undoSchluessel(ktx))) {
+					const b = rechts.createEl('button', { cls: 'anki-vs-leise', text: 'Rückgängig' });
+					b.addEventListener('click', () => void this.macheRueckgaengig(ktx));
+				}
+			} else {
+				const b = rechts.createEl('button', { cls: 'anki-vs-leise', text: 'Wiederherstellen' });
+				b.addEventListener('click', () => this.setzeZustand(ktx, { status: undefined }));
+			}
+			return;
+		}
+
+		// --- Kopf ------------------------------------------------------------
+		const kopf = box.createDiv({ cls: 'anki-vs-kopf' });
+		const chip = kopf.createSpan({ cls: 'anki-vs-chip' });
+		setIcon(chip.createSpan({ cls: 'anki-vs-chip-icon' }), artIcon(v));
+		chip.createSpan({ text: artLabel(v) });
+		const bezugEl = kopf.createSpan({ cls: 'anki-vs-bezug' });
+		if (z.bearbeitet) kopf.createSpan({ cls: 'anki-vs-badge', text: 'bearbeitet' });
+
+		const warumText = ktx.warum || (v.kind === 'quelle' ? v.grund ?? '' : '');
+		if (warumText) {
+			const warum = box.createDiv({ cls: 'anki-vs-warum' });
+			setIcon(warum.createSpan({ cls: 'anki-vs-warum-icon' }), 'message-square');
+			const text = warum.createDiv({ cls: 'anki-vs-warum-text' });
+			void MarkdownRenderer.render(this.plugin.app, warumText, text, this.sourcePath || '', this);
+		}
+
+		if (v.kind === 'card' && v.op !== 'add') {
+			bezugEl.setText(v.bezug ? `„${einzeilig(v.bezug.q)}“` : (v.ref !== null ? `Karte ${v.ref}` : `ID ${v.id}`));
+		}
+
+		if (ktx.bearbeiten) {
+			this.zeichneFormular(ktx, v);
+			return;
+		}
+
+		const felder = box.createDiv({ cls: 'anki-vs-felder' });
+		const notizen = box.createDiv({ cls: 'anki-vs-notizen' });
+		const quelle = box.createEl('pre', { cls: 'anki-vs-quelle', text: vorschlagAlsBlock(v) });
+		quelle.toggleClass('is-collapsed', !ktx.quelltext);
+		const notiz = (text: string, info = false) =>
+			notizen.createDiv({ cls: 'anki-suggestion-note' + (info ? ' is-info' : ''), text });
+
+		// --- Aktionen --------------------------------------------------------
+		const aktionen = box.createDiv({ cls: 'anki-suggestion-actions' });
+		const haupt = new ButtonComponent(aktionen);
+		const hauptText = v.kind === 'card' && v.op === 'add' ? 'Hinzufügen'
+			: v.kind === 'card' && v.op === 'delete' ? 'Löschen'
+				: v.kind === 'quelle' ? 'In Notiz eintragen' : 'Übernehmen';
+		haupt.setButtonText(hauptText).setCta();
+		if (v.kind === 'card' && v.op === 'delete') haupt.buttonEl.addClass('mod-warning');
+		if (v.kind === 'invalid') haupt.buttonEl.remove();
+		haupt.onClick(() => void this.uebernehme(ktx, haupt, notizen));
+
+		if (v.kind === 'invalid') {
+			const b = new ButtonComponent(aktionen);
+			b.setButtonText('Als Textänderung bearbeiten');
+			b.onClick(() => {
+				ktx.bearbeiten = true;
+				this.setzeZustand(ktx, { bearbeitet: { kind: 'edit', find: v.raw, replace: v.raw } });
+			});
+		} else if (!(v.kind === 'card' && v.op === 'delete')) {
+			const b = new ButtonComponent(aktionen);
+			b.setButtonText('Bearbeiten');
+			b.onClick(() => { ktx.bearbeiten = true; this.zeichneBox(ktx); });
+		}
+
+		if (v.kind === 'edit' || v.kind === 'insert') {
+			const anker = v.kind === 'edit' ? v.find : v.after;
+			const b = new ButtonComponent(aktionen);
+			b.setButtonText('Zeigen');
+			b.onClick(() => void this.revealInNote(anker));
+		}
+
+		const diagramme = mermaidAusVorschlag(v);
+		diagramme.forEach((code, k) => {
+			const b = new ButtonComponent(aktionen);
+			b.setIcon('pencil').setButtonText(diagramme.length > 1 ? `Diagramm ${k + 1}` : 'Diagramm');
+			b.setTooltip('Mermaid-Editor: Richtung, Kanten, Abstände, Quelltext');
+			b.onClick(() => this.bearbeiteDiagramm(box, code));
 		});
 
-		// Diagramme gezeichnet zeigen und vorab pruefen: ein Syntaxfehler soll
-		// hier auffallen, nicht erst als leere Flaeche in der Notiz oder in Anki.
+		const rechts = aktionen.createDiv({ cls: 'anki-vs-rechts' });
+		if (z.bearbeitet) {
+			const b = rechts.createEl('button', { cls: 'anki-vs-leise', attr: { 'aria-label': 'Bearbeitung verwerfen, Vorschlag der KI wiederherstellen' } });
+			setIcon(b.createSpan({ cls: 'anki-vs-leise-icon' }), 'rotate-ccw');
+			b.createSpan({ text: 'Original' });
+			b.addEventListener('click', () => this.setzeZustand(ktx, { bearbeitet: undefined }));
+		}
+		const qb = rechts.createEl('button', { cls: 'anki-vs-leise', text: ktx.quelltext ? 'Quelltext aus' : 'Quelltext' });
+		qb.addEventListener('click', () => {
+			ktx.quelltext = !ktx.quelltext;
+			quelle.toggleClass('is-collapsed', !ktx.quelltext);
+			qb.setText(ktx.quelltext ? 'Quelltext aus' : 'Quelltext');
+		});
+		const vb = rechts.createEl('button', { cls: 'anki-vs-leise', text: 'Verwerfen' });
+		vb.addEventListener('click', () => this.setzeZustand(ktx, { status: 'dismissed' }));
+
+		// --- Inhalt je Art ---------------------------------------------------
+		if (v.kind === 'invalid') {
+			box.addClass('is-missing');
+			felder.createEl('pre', { cls: 'anki-vs-roh', text: v.raw });
+			notiz(v.reason);
+			return;
+		}
+
 		if (diagramme.length) {
-			diagramme.forEach((code, k) => {
-				const b = new ButtonComponent(actions);
-				b.setIcon('pencil').setButtonText(diagramme.length > 1 ? `Diagramm ${k + 1}` : 'Diagramm bearbeiten');
-				b.setTooltip('Mermaid-Editor: Richtung, Kanten, Abstände, Quelltext');
-				b.onClick(() => this.bearbeiteDiagramm(box, code));
-			});
-			diff.addClass('is-collapsed');
-			const toggle = box.createDiv({ cls: 'anki-suggestion-source-toggle', text: 'Quelltext zeigen' });
-			toggle.addEventListener('click', () => {
-				diff.toggleClass('is-collapsed', !diff.hasClass('is-collapsed'));
-				toggle.setText(diff.hasClass('is-collapsed') ? 'Quelltext zeigen' : 'Quelltext verbergen');
-			});
-			box.insertBefore(toggle, diff);
+			// Diagramme gezeichnet zeigen und vorab pruefen: ein Syntaxfehler
+			// soll hier auffallen, nicht erst als leere Flaeche in der Notiz.
+			felder.addClass('is-collapsed');
 			const vorschau = box.createDiv({ cls: 'anki-suggestion-preview' });
-			box.insertBefore(vorschau, toggle);
+			box.insertBefore(vorschau, felder);
+			const toggle = box.createDiv({ cls: 'anki-suggestion-source-toggle', text: 'Text zeigen' });
+			box.insertBefore(toggle, felder);
+			toggle.addEventListener('click', () => {
+				felder.toggleClass('is-collapsed', !felder.hasClass('is-collapsed'));
+				toggle.setText(felder.hasClass('is-collapsed') ? 'Text zeigen' : 'Text verbergen');
+			});
 			void this.zeichneDiagramme(vorschau, diagramme).then((fehler) => {
 				if (!fehler) return;
-				applyBtn.setDisabled(true);
-				applyBtn.setButtonText('Diagramm fehlerhaft');
+				haupt.setDisabled(true);
+				haupt.setButtonText('Diagramm fehlerhaft');
 				box.addClass('is-missing');
-				box.createDiv({ cls: 'anki-suggestion-note', text: 'Mermaid-Syntaxfehler: ' + fehler });
+				notiz('Mermaid-Syntaxfehler: ' + fehler);
 			});
 		}
 
-		if (suggestion.kind === 'edit' || suggestion.kind === 'insert') {
-			const anker = suggestion.kind === 'edit' ? suggestion.find : suggestion.after;
-			const showBtn = new ButtonComponent(actions);
-			showBtn.setButtonText('Zeigen');
-			showBtn.onClick(() => void this.revealInNote(anker));
-
-			// Früh melden, wenn der zitierte Text gar nicht auffindbar ist.
-			// Erneut nach jeder Übernahme: ein Einfügen nach einem Callout, das
-			// erst ein anderer Vorschlag anlegt, wird dann gültig.
-			const pruefe = () => void canLocateEdit(this.plugin.app, this.sourcePath, suggestion).then((found) => {
-				box.querySelectorAll('.anki-suggestion-note.is-locate').forEach((el) => el.remove());
-				if (box.hasClass('is-applied')) return;
-				if (!box.querySelector('.anki-suggestion-note:not(.is-locate)')) box.toggleClass('is-missing', !found);
-				if (!found) {
-					box.createDiv({
-						cls: 'anki-suggestion-note is-locate',
-						text: suggestion.kind === 'insert'
-							? 'Ankerzeile nicht in der Notiz gefunden – evtl. erst einen anderen Vorschlag übernehmen.'
-							: 'Textstelle nicht in der Notiz gefunden - bitte manuell prüfen.'
-					});
-				}
+		if (v.kind === 'edit') {
+			feld(felder, '', wortDiff(v.find, v.replace));
+			const pruefe = () => void this.notizInhalt().then((content) => {
+				if (!box.isConnected || this.zustand(ktx).status) return;
+				notizen.querySelectorAll('.is-locate').forEach((el) => el.remove());
+				const hit = content !== null ? locate(content, v.find) : null;
+				box.toggleClass('is-missing', !hit);
+				if (hit && content !== null) bezugEl.setText(abschnittVor(content, hit.start));
+				else notiz('Textstelle nicht in der Notiz gefunden. Passe „Wird ersetzt“ über „Bearbeiten“ an oder prüfe die Stelle über „Zeigen“.').addClass('is-locate');
 			});
 			this.pruefungen.set(box, pruefe);
 			pruefe();
+			return;
 		}
 
-		if (suggestion.kind === 'card' && suggestion.op !== 'add') {
-			// Erfundene oder veraltete Bezuege vor dem Klick zeigen.
-			let alsNeuBtn: ButtonComponent | null = null;
-			const pruefe = () => void pruefeKartenVorschlag(this.plugin.app, this.sourcePath, suggestion).then((r) => {
-				box.querySelectorAll('.anki-suggestion-note.is-locate').forEach((el) => el.remove());
-				if (!r || box.hasClass('is-applied') || aktuell !== suggestion) return;
-				if (r.ok) {
-					box.removeClass('is-missing');
-					applyBtn.setDisabled(false);
-					if (r.treffer.weg === 'frage') {
-						box.createDiv({
-							cls: 'anki-suggestion-note is-locate is-info',
-							text: 'Die genannte ID passt zu keiner Karte – zugeordnet über die Frage. Bitte im Vergleich prüfen.'
-						});
-					}
-					return;
-				}
-				box.addClass('is-missing');
-				applyBtn.setDisabled(true);
-				box.createDiv({ cls: 'anki-suggestion-note is-locate', text: r.message });
-				if (suggestion.op === 'update' && !alsNeuBtn) {
-					const knopf = new ButtonComponent(actions);
-					alsNeuBtn = knopf;
-					knopf.setButtonText('Als neue Karte');
-					knopf.setTooltip('Den Vorschlag als neue Karte in den anki-cards-Block übernehmen');
-					actions.insertBefore(knopf.buttonEl, applyBtn.buttonEl.nextSibling);
-					knopf.onClick(() => {
-						aktuell = { ...suggestion, op: 'add', id: null, ref: null };
-						knopf.buttonEl.remove();
-						box.querySelectorAll('.anki-suggestion-note.is-locate').forEach((el) => el.remove());
-						box.removeClass('is-missing');
-						applyBtn.setDisabled(false);
-						applyBtn.setButtonText('Als neue Karte übernehmen');
-						if (this.options.onVorschlagWaehlen) {
-							this.markiereGewaehlt(box);
-							this.options.onVorschlagWaehlen(aktuell);
-						}
-					});
-				}
+		if (v.kind === 'insert') {
+			bezugEl.setText(`nach „${einzeilig(v.after)}“`);
+			feld(felder, '', [{ art: 'neu', text: v.text }]);
+			const pruefe = () => void this.notizInhalt().then((content) => {
+				if (!box.isConnected || this.zustand(ktx).status) return;
+				notizen.querySelectorAll('.is-locate').forEach((el) => el.remove());
+				const hit = content !== null ? locate(content, v.after) : null;
+				box.toggleClass('is-missing', !hit);
+				if (!hit) notiz('Ankerzeile nicht in der Notiz gefunden – evtl. erst einen anderen Vorschlag übernehmen.').addClass('is-locate');
 			});
 			this.pruefungen.set(box, pruefe);
 			pruefe();
+			return;
 		}
 
-		const dismissBtn = new ButtonComponent(actions);
-		dismissBtn.setButtonText('Verwerfen');
-		dismissBtn.onClick(() => box.remove());
-		return box;
+		if (v.kind === 'quelle') {
+			this.zeichneQuelle(ktx, v, { felder, notizen, aktionen, haupt, bezugEl });
+			return;
+		}
+
+		// Karten: erst ohne Vergleich zeichnen, dann mit der aktuellen Karte.
+		const zeichneKarte = (alt: { q: string; a: string } | null) => {
+			felder.empty();
+			if (v.op === 'delete') {
+				const q = alt?.q ?? v.bezug?.q ?? '';
+				if (q) feld(felder, 'Frage', [{ art: 'weg', text: q }]);
+				if (alt?.a) feld(felder, 'Antwort', [{ art: 'weg', text: alt.a }]);
+				return;
+			}
+			const typ = v.typeIn ? 'Antwort (Eintippen)' : 'Antwort';
+			if (v.op === 'add' || !alt) {
+				feld(felder, 'Frage', [{ art: v.op === 'add' ? 'neu' : 'gleich', text: v.q }]);
+				if (v.a) feld(felder, typ, [{ art: v.op === 'add' ? 'neu' : 'gleich', text: v.a }]);
+				return;
+			}
+			// Die Frage steht schon im Kopf – nur zeigen, wenn sie sich aendert.
+			if (alt.q !== v.q) feld(felder, 'Frage', wortDiff(alt.q, v.q));
+			if (v.a || alt.a) feld(felder, typ, wortDiff(alt.a, v.a));
+			if (alt.q === v.q && alt.a === v.a) {
+				felder.createDiv({ cls: 'anki-suggestion-note is-info', text: 'Keine Änderung gegenüber der Karte in der Notiz.' });
+			}
+		};
+		zeichneKarte(null);
+
+		const pruefe = () => void ladeKartenKontext(this.plugin.app, this.sourcePath, v).then((r) => {
+			if (!box.isConnected || this.zustand(ktx).status) return;
+			notizen.querySelectorAll('.is-locate').forEach((el) => el.remove());
+			if (v.op === 'add') {
+				bezugEl.setText(r.deck ? `in „${r.deck}“` : 'neuer Kartenblock');
+				return;
+			}
+			const s = r.suche;
+			if (s && s.ok && r.karte) {
+				box.removeClass('is-missing');
+				haupt.setDisabled(false);
+				bezugEl.setText(`„${einzeilig(r.karte.q)}“`);
+				zeichneKarte({ q: r.karte.q, a: r.karte.a });
+				if (s.treffer.weg === 'frage') {
+					notiz('Zugeordnet über die Ähnlichkeit der Frage – bitte prüfen.', true).addClass('is-locate');
+				}
+				return;
+			}
+			box.addClass('is-missing');
+			haupt.setDisabled(true);
+			notiz(s && !s.ok ? s.message : 'Karte nicht gefunden.').addClass('is-locate');
+			if (v.op === 'update' && !aktionen.querySelector('.anki-vs-als-neu')) {
+				const knopf = new ButtonComponent(aktionen);
+				knopf.buttonEl.addClass('anki-vs-als-neu');
+				knopf.setButtonText('Als neue Karte');
+				knopf.setTooltip('Den Vorschlag als neue Karte in den anki-cards-Block übernehmen');
+				aktionen.insertBefore(knopf.buttonEl, haupt.buttonEl.nextSibling);
+				knopf.onClick(() => {
+					this.setzeZustand(ktx, { bearbeitet: { ...v, op: 'add', id: null, ref: null, bezug: null } });
+					if (this.options.onVorschlagWaehlen) box.click();
+				});
+			}
+		});
+		this.pruefungen.set(box, pruefe);
+		pruefe();
+	}
+
+	/** Formular zum Bearbeiten – ändert nur die Fassung im Chat, nicht die Notiz. */
+	private zeichneFormular(ktx: BoxKontext, v: Suggestion) {
+		const form = ktx.box.createDiv({ cls: 'anki-vs-formular' });
+		const eingaben: { name: string; el: HTMLTextAreaElement }[] = [];
+		const feldEingabe = (label: string, name: string, wert: string, zeilen = 3) => {
+			const f = form.createDiv({ cls: 'anki-vs-feld' });
+			f.createDiv({ cls: 'anki-vs-feldname', text: label });
+			const ta = f.createEl('textarea', { cls: 'anki-vs-eingabe' });
+			ta.value = wert;
+			ta.rows = Math.min(14, Math.max(zeilen, wert.split('\n').length + 1));
+			eingaben.push({ name, el: ta });
+			return ta;
+		};
+
+		if (v.kind === 'card') {
+			feldEingabe('Frage', 'q', v.q, 2);
+			feldEingabe(v.typeIn ? 'Antwort (Eintippen)' : 'Antwort', 'a', v.a, 3);
+		} else if (v.kind === 'edit') {
+			feldEingabe('Wird ersetzt (exakt wie in der Notiz)', 'find', v.find, 2);
+			feldEingabe('Neuer Text', 'replace', v.replace, 3);
+		} else if (v.kind === 'insert') {
+			feldEingabe('Nach dieser Zeile', 'after', v.after, 1);
+			feldEingabe('Einzufügender Text', 'text', v.text, 4);
+		} else if (v.kind === 'quelle') {
+			feldEingabe('Zitat (so kommt es unter „## Quellen“)', 'zitat', v.zitat, 3);
+			feldEingabe('Titel', 'titel', v.titel, 1);
+			feldEingabe('URL', 'url', v.url ?? '', 1);
+			feldEingabe('PDF-URL (optional)', 'pdf_url', v.pdf_url ?? '', 1);
+			feldEingabe('Zotero-Sammlung', 'sammlung', this.zoteroZiel(v), 1);
+		}
+
+		const wert = (name: string) => eingaben.find((e) => e.name === name)?.el.value ?? '';
+		const speichern = () => {
+			let neu: Suggestion = v;
+			if (v.kind === 'card') neu = { ...v, q: wert('q').trim(), a: wert('a').trim() };
+			else if (v.kind === 'edit') neu = { ...v, find: wert('find'), replace: wert('replace') };
+			else if (v.kind === 'insert') neu = { ...v, after: wert('after'), text: wert('text') };
+			else if (v.kind === 'quelle') {
+				const sammlung = wert('sammlung').trim();
+				neu = {
+					...v, zitat: wert('zitat').trim(), titel: wert('titel').trim() || v.titel,
+					url: wert('url').trim() || undefined, pdf_url: wert('pdf_url').trim() || undefined,
+					sammlung: sammlung && sammlung !== zoteroZielFuer(this.sourcePath || '') ? sammlung : undefined
+				};
+			}
+			ktx.bearbeiten = false;
+			const gleichOriginal = schluesselFuer(neu) === schluesselFuer(ktx.original)
+				&& JSON.stringify((neu as any).bezug ?? null) === JSON.stringify((ktx.original as any).bezug ?? null);
+			this.setzeZustand(ktx, { bearbeitet: gleichOriginal ? undefined : neu });
+			if (this.options.onVorschlagWaehlen && ktx.box.hasClass('is-selected')) ktx.box.click();
+		};
+		const abbrechen = () => { ktx.bearbeiten = false; this.zeichneBox(ktx); };
+
+		// Obsidian belegt Mod+Enter global und verschluckt das keydown, bevor
+		// das Textfeld es sieht (gemessen 11.10.2026). keyup kommt trotzdem an.
+		let erledigt = false;
+		const einmal = (f: () => void) => { if (erledigt) return; erledigt = true; f(); };
+		const taste = (e: KeyboardEvent) => {
+			if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); einmal(speichern); }
+			else if (e.key === 'Escape' && e.type === 'keydown') { e.preventDefault(); e.stopPropagation(); einmal(abbrechen); }
+		};
+		form.addEventListener('keydown', taste, true);
+		form.addEventListener('keyup', taste, true);
+		window.setTimeout(() => eingaben[eingaben.length - 1]?.el.focus(), 0);
+
+		const aktionen = ktx.box.createDiv({ cls: 'anki-suggestion-actions' });
+		const s = new ButtonComponent(aktionen);
+		s.setButtonText('Speichern').setCta().setTooltip('Strg+Enter');
+		s.onClick(() => einmal(speichern));
+		const a = new ButtonComponent(aktionen);
+		a.setButtonText('Abbrechen').setTooltip('Esc');
+		a.onClick(() => einmal(abbrechen));
+		aktionen.createDiv({ cls: 'anki-vs-hinweis', text: 'Ändert nur den Vorschlag – erst „Übernehmen“ schreibt in die Notiz.' });
+	}
+
+	private undoSchluessel(ktx: BoxKontext): string {
+		return `${this.sourcePath}\n${ktx.schluessel}`;
+	}
+
+	private async notizInhalt(): Promise<string | null> {
+		const file = this.sourcePath && this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+		return file instanceof TFile ? await this.plugin.app.vault.read(file) : null;
+	}
+
+	private async uebernehme(ktx: BoxKontext, knopf: ButtonComponent, notizen: HTMLElement) {
+		knopf.setDisabled(true);
+		const v = this.aktuellerVorschlag(ktx);
+		const vorher = await this.notizInhalt();
+		const result = await applySuggestion(this.plugin.app, this.sourcePath, v, this.plugin.settings.mainDeck);
+		if (!result.ok) {
+			knopf.setDisabled(false);
+			ktx.box.addClass('is-missing');
+			notizen.createDiv({ cls: 'anki-suggestion-note', text: result.message });
+			return;
+		}
+		const nachher = await this.notizInhalt();
+		if (vorher !== null && nachher !== null) RUECKGAENGIG.set(this.undoSchluessel(ktx), { vorher, nachher });
+		if (v.kind === 'quelle') {
+			// Zugeklappt erst, wenn sie auch in Zotero liegt.
+			const erledigt = Array.from(new Set([...(this.zustand(ktx).erledigt ?? []), 'notiz']));
+			this.setzeZustand(ktx, { erledigt, status: erledigt.includes('zotero') ? 'applied' : undefined });
+		} else {
+			this.setzeZustand(ktx, { status: 'applied' });
+		}
+		// Kartenlisten und andere Ansichten mitziehen.
+		this.plugin.app.workspace.trigger('anki:suggestion-applied', this.sourcePath, ktx.schluessel);
+	}
+
+	/**
+	 * Eine Übernahme zurücknehmen. Nur solange die Notiz genau so aussieht wie
+	 * direkt danach – sonst würde jede spätere Änderung mit überschrieben.
+	 */
+	private async macheRueckgaengig(ktx: BoxKontext) {
+		const key = this.undoSchluessel(ktx);
+		const stand = RUECKGAENGIG.get(key);
+		const file = this.sourcePath && this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+		if (!stand || !(file instanceof TFile)) return;
+		let ok = false;
+		await this.plugin.app.vault.process(file, (c) => {
+			if (c !== stand.nachher) return c;
+			ok = true;
+			return stand.vorher;
+		});
+		if (!ok) {
+			new Notice('Die Notiz wurde seitdem geändert – Rückgängig ist nicht mehr möglich. Nimm zuerst die spätere Übernahme zurück.', 7000);
+			return;
+		}
+		RUECKGAENGIG.delete(key);
+		new Notice('Rückgängig gemacht.');
+		const rest = (this.zustand(ktx).erledigt ?? []).filter((e) => e !== 'notiz');
+		this.setzeZustand(ktx, { status: undefined, erledigt: rest.length ? rest : undefined });
+		this.plugin.app.workspace.trigger('anki:suggestion-applied', this.sourcePath, '');
+	}
+
+	private zoteroZiel(v: QuelleSuggestion): string {
+		return v.sammlung || zoteroZielFuer(this.sourcePath || '');
+	}
+
+	/** Inhalt und Knöpfe einer Quellen-Box. */
+	private zeichneQuelle(ktx: BoxKontext, v: QuelleSuggestion, el: {
+		felder: HTMLElement; notizen: HTMLElement; aktionen: HTMLElement; haupt: ButtonComponent; bezugEl: HTMLElement;
+	}) {
+		const erledigt = this.zustand(ktx).erledigt ?? [];
+		el.bezugEl.setText(`Zotero: ${this.zoteroZiel(v)}`);
+
+		const f = el.felder.createDiv({ cls: 'anki-vs-feld' });
+		f.createDiv({ cls: 'anki-vs-feldname', text: 'Zitat' });
+		const zitat = f.createDiv({ cls: 'anki-vs-inhalt anki-vs-zitat' });
+		void MarkdownRenderer.render(this.plugin.app, v.zitat, zitat, this.sourcePath || '', this);
+
+		const meta = el.felder.createDiv({ cls: 'anki-vs-meta' });
+		const typen: Record<string, string> = {
+			webpage: 'Webseite', document: 'Dokument', journalArticle: 'Artikel',
+			bookSection: 'Buchkapitel', book: 'Buch', report: 'Bericht'
+		};
+		if (v.typ) meta.createSpan({ text: typen[v.typ] ?? v.typ });
+		if (v.url) meta.createEl('a', { text: einzeilig(v.url.replace(/^https?:\/\//, ''), 50), href: v.url });
+		if (v.pdf_url) meta.createEl('a', { text: 'PDF', href: v.pdf_url });
+		if (v.doi) meta.createSpan({ text: 'DOI ' + v.doi });
+
+		const fertig = (wo: string) => {
+			const chip = createSpan({ cls: 'anki-vs-fertig' });
+			setIcon(chip.createSpan({ cls: 'anki-vs-leise-icon' }), 'check');
+			chip.createSpan({ text: wo });
+			return chip;
+		};
+
+		if (erledigt.includes('notiz')) {
+			el.aktionen.insertBefore(fertig('in der Notiz'), el.haupt.buttonEl);
+			el.haupt.buttonEl.remove();
+		}
+
+		const nachHaupt = el.haupt.buttonEl.isConnected ? el.haupt.buttonEl.nextSibling : el.aktionen.firstChild?.nextSibling ?? null;
+		if (erledigt.includes('zotero')) {
+			el.aktionen.insertBefore(fertig('in Zotero'), nachHaupt);
+		} else {
+			const z = new ButtonComponent(el.aktionen);
+			z.setButtonText('In Zotero ablegen');
+			z.setTooltip(`Als Eintrag in die Sammlung „${this.zoteroZiel(v)}“ (über den Fitness-Manager-Server, Datei wird angehängt)`);
+			el.aktionen.insertBefore(z.buttonEl, nachHaupt);
+			z.onClick(() => void this.inZotero(ktx, v, z, el.notizen));
+		}
+	}
+
+	/** Quelle ueber das Backend nach Zotero – derselbe Weg wie der Medikamenten-Assistent. */
+	private async inZotero(ktx: BoxKontext, v: QuelleSuggestion, knopf: ButtonComponent, notizen: HTMLElement) {
+		const basis = (this.plugin.settings.fitnessManagerUrl || '').replace(/\/$/, '');
+		if (!basis) {
+			new Notice('Keine Fitness-Manager-Adresse in den Einstellungen.');
+			return;
+		}
+		knopf.setDisabled(true);
+		knopf.setButtonText('Lege in Zotero ab …');
+		const name = (this.sourcePath || '').split('/').pop()?.replace(/\.md$/i, '') || 'Notiz';
+		const { kind, zitat, sammlung, ...daten } = v;
+		try {
+			const res = await requestUrl({
+				url: `${basis}/api/zotero/medikamente/anlegen`,
+				method: 'POST',
+				contentType: 'application/json',
+				body: JSON.stringify({
+					wirkstoff: name,
+					sammlung: this.zoteroZiel(v),
+					quellen: [{ ...daten, art: 'neu', kategorie: 'Chat' }]
+				}),
+				throw: false
+			});
+			if (res.status !== 200) throw new Error(res.json?.detail || `HTTP ${res.status}`);
+			const e = res.json?.ergebnisse?.[0];
+			if (!e || e.status === 'fehler') throw new Error(e?.grund || 'Zotero hat den Eintrag abgelehnt.');
+			new Notice(`Zotero: ${e.status}${e.anhang ? ' · ' + e.anhang : ''} – ${this.zoteroZiel(v)}`);
+			const erledigt = Array.from(new Set([...(this.zustand(ktx).erledigt ?? []), 'zotero']));
+			this.setzeZustand(ktx, { erledigt, status: erledigt.includes('notiz') ? 'applied' : undefined });
+		} catch (err: any) {
+			knopf.setDisabled(false);
+			knopf.setButtonText('In Zotero ablegen');
+			ktx.box.addClass('is-missing');
+			notizen.createDiv({ cls: 'anki-suggestion-note', text: 'Zotero: ' + (err?.message || err) });
+		}
 	}
 
 	/**
@@ -531,8 +981,8 @@ export class ChatPanel extends Component {
 	 *
 	 * Dasselbe Diagramm steht meist zweimal in einer Antwort: im Callout fuer
 	 * die Notiz und in der Karte, die es abfragt. Die Aenderung geht deshalb an
-	 * jede Box der Nachricht mit demselben Diagramm – und in den gespeicherten
-	 * Verlauf, sonst waere sie nach einem Neustart wieder weg.
+	 * jede offene Box der Nachricht mit demselben Diagramm – als bearbeitete
+	 * Fassung, damit „Original" sie wieder zuruecknehmen kann.
 	 */
 	private bearbeiteDiagramm(box: HTMLElement, alt: string) {
 		new MermaidEditorModal(this.plugin.app, alt, (neu) => {
@@ -540,22 +990,15 @@ export class ChatPanel extends Component {
 			if (!blase) return;
 			const ersetze = (t: string) => ersetzeGleicheMermaid(t, alt, neu, diagrammNorm);
 
-			const msg = this.blaseNachricht.get(blase);
-			if (msg) {
-				msg.content = ersetze(msg.content);
-				setHistory(this.plugin, this.sourcePath, this.history);
-			}
-
 			const warGewaehlt = blase.querySelector('.anki-suggestion.is-selected');
 			blase.querySelectorAll<HTMLElement>('.anki-suggestion').forEach((b) => {
-				const zustand = this.boxZustand.get(b);
-				if (!zustand || b.hasClass('is-applied')) return;
-				const vorher = zustand();
+				const ktx = this.boxKontext.get(b);
+				if (!ktx || this.zustand(ktx).status) return;
+				const vorher = this.aktuellerVorschlag(ktx);
 				const nachher = mapVorschlagText(vorher, ersetze);
 				if (JSON.stringify(nachher) === JSON.stringify(vorher)) return;
-				this.pruefungen.delete(b);
-				const neueBox = this.renderSuggestion(blase, nachher, b);
-				if (b === warGewaehlt || (!warGewaehlt && b === box)) neueBox.click();
+				this.setzeZustand(ktx, { bearbeitet: nachher });
+				if (b === warGewaehlt || (!warGewaehlt && b === box)) b.click();
 			});
 		}).open();
 	}
@@ -629,11 +1072,11 @@ export class ChatPanel extends Component {
 	// --- Kontext ----------------------------------------------------------
 
 	/** Notizinhalt über sourcePath lesen - nicht über den gerade aktiven View. */
-	private async readNote(): Promise<{ content: string; cards: string }> {
-		if (!this.sourcePath) return { content: '', cards: '' };
+	private async readNote(): Promise<{ content: string; cards: string; karten: KartenBezug[] }> {
+		if (!this.sourcePath) return { content: '', cards: '', karten: [] };
 
 		const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
-		if (!(file instanceof TFile)) return { content: '', cards: '' };
+		if (!(file instanceof TFile)) return { content: '', cards: '', karten: [] };
 
 		const content = await this.plugin.app.vault.read(file);
 		const cards = getAnkiBlocks(content)
@@ -641,57 +1084,61 @@ export class ChatPanel extends Component {
 			.reduce((acc, list) => acc.concat(list), []);
 
 		// Alte Legacy-Karten nicht mitschicken – siehe legacyStrip.ts.
-		return { content: ohneAlteKarten(content), cards: formatCardsToExistingCardsString(cards) };
+		return {
+			content: ohneAlteKarten(content),
+			cards: formatCardsToExistingCardsString(cards),
+			// Merken, welche Karte hinter welcher CARD-Nummer steht – siehe kartenSuche.ts.
+			karten: cards.map((c) => ({ id: c.id, q: c.q }))
+		};
 	}
 
 	// --- Senden -----------------------------------------------------------
 
-	/** Eine Vorschlagsbox als erledigt kennzeichnen. */
-	private markiereUebernommen(box: HTMLElement, knopf?: ButtonComponent) {
-		if (box.hasClass('is-applied')) return;
-		box.addClass('is-applied');
-		box.removeClass('is-missing');
-		if (knopf) {
-			knopf.setDisabled(true);
-			knopf.setButtonText('Übernommen');
-			return;
-		}
-		// Kam die Meldung aus einer anderen Ansicht, haben wir den
-		// ButtonComponent nicht – dann ueber das DOM.
-		const btn = box.querySelector('.anki-suggestion-actions button') as HTMLButtonElement | null;
-		if (btn) {
-			btn.disabled = true;
-			btn.setText('Übernommen');
-		}
-	}
-
 	/**
-	 * Uebernahmen aus einer anderen Ansicht nachziehen.
+	 * Zustandsaenderungen aus anderen Ansichten nachziehen.
 	 *
-	 * Seitenleiste und Tab zeigen denselben Chat. Ohne das bleibt der
-	 * Vorschlag drueben anklickbar, und der zweite Klick meldet "Textstelle
+	 * Seitenleiste, Block und Modal zeigen denselben Chat. Ohne das bliebe ein
+	 * Vorschlag drueben anklickbar, und der zweite Klick meldete „Textstelle
 	 * nicht gefunden" – der Text ist ja bereits ersetzt.
 	 */
 	private lauscheAufUebernahmen() {
 		this.registerEvent(
-			this.plugin.app.workspace.on('anki:suggestion-applied' as any, ((
-				sourcePath: string, schluessel: string
-			) => {
-				if (!schluessel || sourcePath !== this.sourcePath) return;
+			this.plugin.app.workspace.on('anki:suggestion-applied' as any, ((sourcePath: string) => {
+				if (sourcePath !== this.sourcePath) return;
 				// Die Notiz hat sich geaendert: offene Vorschlaege neu pruefen.
 				window.setTimeout(() => {
 					this.pruefungen.forEach((pruefe, box) => {
 						if (!box.isConnected) this.pruefungen.delete(box);
-						else if (!box.hasClass('is-applied')) pruefe();
+						else pruefe();
 					});
 				}, 50);
-				const boxen = this.log.querySelectorAll('.anki-suggestion');
-				boxen.forEach((el) => {
-					if (el instanceof HTMLElement && el.dataset.ankiVorschlag === schluessel) {
-						this.markiereUebernommen(el);
-					}
+			}) as any)
+		);
+		this.registerEvent(
+			this.plugin.app.workspace.on('anki:vorschlag-zustand' as any, ((
+				sourcePath: string, schluessel: string, msg: ChatMessage | undefined, zustand: VorschlagZustand
+			) => {
+				if (sourcePath !== this.sourcePath || !schluessel) return;
+				this.log.querySelectorAll<HTMLElement>('.anki-suggestion').forEach((box) => {
+					if (box.dataset.ankiVorschlag !== schluessel) return;
+					const ktx = this.boxKontext.get(box);
+					if (!ktx) return;
+					if (ktx.msg && ktx.msg === msg) {
+						if (ktx.bearbeiten) return;
+					} else if (zustand.status === 'applied' && !this.zustand(ktx).status) {
+						// Derselbe Vorschlag in einer anderen Antwort: er ist ja
+						// angewendet, ein zweiter Klick wuerde nur scheitern.
+						this.setzeZustand(ktx, { status: 'applied' });
+						return;
+					} else return;
+					this.zeichneBox(ktx);
+					const blase = box.closest('.anki-chat-bubble') as HTMLElement | null;
+					if (blase) this.aktualisiereLeiste(blase);
 				});
 			}) as any)
+		);
+		this.registerEvent(
+			this.plugin.app.workspace.on('anki:chat-modell' as any, (() => this.zeichneModellChip()) as any)
 		);
 	}
 
@@ -727,8 +1174,8 @@ export class ChatPanel extends Component {
 		const text = this.input.value.trim();
 		if (!text) return;
 
-		const provider = resolveProvider(this.plugin.settings);
-		if (!provider) {
+		const modell = this.gewaehltesModell();
+		if (!modell) {
 			new Notice('Kein KI-Modell konfiguriert.');
 			return;
 		}
@@ -736,13 +1183,19 @@ export class ChatPanel extends Component {
 		this.input.value = '';
 		this.input.style.height = 'auto';
 
+		if (modell === 'claude-agent') {
+			await this.agentChat(text);
+			return;
+		}
+		const provider = modell;
+
 		const historyForRequest = this.history.slice();
 		this.history.push({ role: 'user', content: text });
 		this.appendPending();
 		this.scrollToBottom();
 
 		// Platzhalter für die Antwort, der live befüllt wird.
-		const placeholder: ChatMessage = { role: 'ai', content: '' };
+		const placeholder: ChatMessage = { role: 'ai', content: '', modell: this.modellName(provider) };
 		const wrapper = await this.renderMessage(placeholder);
 		const bubble = wrapper.querySelector('.anki-chat-bubble') as HTMLElement;
 		const typing = bubble.createDiv({ cls: 'anki-chat-typing' });
@@ -762,7 +1215,8 @@ export class ChatPanel extends Component {
 		};
 
 		try {
-			const { content, cards } = await this.readNote();
+			const { content, cards, karten } = await this.readNote();
+			placeholder.karten = karten;
 
 			streamed = await streamChatResponse(
 				this.plugin.app,
@@ -806,6 +1260,107 @@ export class ChatPanel extends Component {
 			this.setBusy(false);
 			if (this.sourcePath) this.plugin.removeActiveGeneration(this.sourcePath + '::chat');
 
+			setHistory(this.plugin, this.sourcePath, this.history);
+			this.plugin.app.workspace.trigger('anki:chat-update', this.sourcePath, this.history);
+			this.scrollToBottom();
+		}
+	}
+
+	/**
+	 * Eine Chat-Frage an den Claude-Agenten (Claude CLI).
+	 *
+	 * Gedacht fuer Rueckfragen nach einem Zotero-Abgleich und fuer alles, was
+	 * Quellen braucht: der Agent darf in Zotero lesen und im Web suchen. Er
+	 * bekommt denselben Systemkontext wie der normale Chat – also auch das
+	 * Vorschlagsformat – und den bisherigen Verlauf als Text, weil jeder
+	 * Aufruf eine frische Sitzung ist.
+	 */
+	private async agentChat(text: string) {
+		const verlauf = this.history.slice();
+		this.history.push({ role: 'user', content: text });
+		this.appendPending();
+
+		const placeholder: ChatMessage = { role: 'ai', content: '', modell: this.modellName('claude-agent') };
+		const wrapper = await this.renderMessage(placeholder);
+		const bubble = wrapper.querySelector('.anki-chat-bubble') as HTMLElement;
+		const status = bubble.createDiv({ cls: 'anki-agent-progress' });
+		const statusHead = status.createDiv({ cls: 'anki-agent-progress-head', text: 'Claude denkt nach …' });
+		const statusLines = status.createDiv({ cls: 'anki-agent-progress-lines' });
+		const typing = bubble.createDiv({ cls: 'anki-chat-typing' });
+		typing.createSpan(); typing.createSpan(); typing.createSpan();
+		this.scrollToBottom();
+
+		this.controller = new AbortController();
+		this.setBusy(true);
+		const genKey = this.sourcePath + '::agent';
+		if (this.sourcePath) this.plugin.addActiveGeneration(genKey, this.controller, 'Claude-Agent', this.sourcePath);
+
+		const started = Date.now();
+		let schritte = 0;
+		const ticker = window.setInterval(() => {
+			const sek = Math.round((Date.now() - started) / 1000);
+			statusHead.setText(`Claude arbeitet … ${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')} · ${schritte} Schritte`);
+		}, 1000);
+
+		try {
+			const { content, cards, karten } = await this.readNote();
+			placeholder.karten = karten;
+			const gespraech = verlauf
+				.filter((m) => m.content.trim())
+				.map((m) => `### ${m.role === 'user' ? 'Nutzer' : 'Assistent'}\n${m.content}`)
+				.join('\n\n');
+			const prompt = [
+				buildChatSystemPrompt(content, cards),
+				'## Werkzeuge',
+				'Du darfst im Zotero-Datenverzeichnis (Arbeitsverzeichnis, Unterordner storage/) lesen und suchen und im Web recherchieren, wenn die Frage Quellen braucht. Nenne verwendete Quellen kurz. Du änderst keine Dateien – Änderungen schlägst du ausschließlich in den Vorschlagsblöcken vor.',
+				gespraech ? '## Bisheriges Gespräch\n\n' + gespraech : '',
+				'## Neue Nachricht des Nutzers\n\n' + text
+			].filter(Boolean).join('\n\n');
+
+			const dataDir = this.plugin.settings.zoteroDataDir || defaultZoteroDataDir();
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const fs = require('fs');
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const storage = require('path').join(dataDir, 'storage');
+			const hatZotero = !!dataDir && fs.existsSync(dataDir);
+
+			const result = await runClaudeAgent({
+				cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
+				prompt,
+				cwd: hatZotero ? dataDir : require('os').tmpdir(),
+				addDirs: hatZotero && fs.existsSync(storage) ? [storage] : [],
+				research: true,
+				model: this.plugin.settings.claudeAgentModel,
+				signal: this.controller.signal,
+				onEvent: (ev: AgentEvent) => {
+					if (ev.kind !== 'tool') return;
+					schritte++;
+					statusLines.createDiv({ cls: 'anki-agent-progress-line', text: beschreibeWerkzeug(ev) });
+					while (statusLines.childElementCount > 8) statusLines.firstElementChild?.remove();
+					this.scrollToBottom();
+				}
+			});
+			placeholder.content = result.text.trim();
+			const info = [`${result.turns ?? schritte} Schritte`, `${Math.round((Date.now() - started) / 1000)} s`];
+			if (result.costUsd !== null) info.push(`${result.costUsd.toFixed(2)} $`);
+			placeholder.content += `\n\n> [!info]- Claude-Agent\n> ${info.join(' · ')}`;
+		} catch (e: any) {
+			const aborted = e?.name === 'AbortError' || e?.message === 'Aborted by user';
+			placeholder.content = aborted ? '_(Abgebrochen)_' : 'Fehler beim Claude-Agenten: ' + (e?.message || String(e));
+			if (!aborted) {
+				wrapper.addClass('is-error');
+				new Notice('Claude-Agent fehlgeschlagen: ' + (e?.message || e));
+			}
+		} finally {
+			window.clearInterval(ticker);
+			this.history.push(placeholder);
+			this.renderedCount = this.history.length;
+			await this.renderBody(bubble, placeholder.content, true);
+			this.waehleErsten(bubble);
+
+			this.controller = null;
+			this.setBusy(false);
+			if (this.sourcePath) this.plugin.removeActiveGeneration(genKey);
 			setHistory(this.plugin, this.sourcePath, this.history);
 			this.plugin.app.workspace.trigger('anki:chat-update', this.sourcePath, this.history);
 			this.scrollToBottom();
@@ -897,7 +1452,9 @@ export class ChatPanel extends Component {
 				[at.fullTextPath, at.filePath].forEach((p) => p && titelZuPfad.set(norm(p), s.title));
 			}));
 
-			const { content, cards } = await this.readNote();
+			const { content, cards, karten } = await this.readNote();
+			placeholder.karten = karten;
+			placeholder.modell = 'Claude-Agent';
 			const prompt = buildAbgleichPrompt({
 				noteTitle: title,
 				noteContent: content,
@@ -956,7 +1513,9 @@ export class ChatPanel extends Component {
 
 	/** "Feedback einholen" - eine einmalige Analyse der Notiz. */
 	private async requestFeedback() {
-		const provider = resolveProvider(this.plugin.settings);
+		// Feedback laeuft ueber die API; ist der Agent gewaehlt, der Standard.
+		const gewaehlt = this.gewaehltesModell();
+		const provider = gewaehlt === 'claude-agent' ? resolveProvider(this.plugin.settings) : gewaehlt;
 		if (!provider) {
 			new Notice('Kein KI-Modell konfiguriert.');
 			return;
@@ -984,7 +1543,7 @@ export class ChatPanel extends Component {
 		this.scrollToBottom();
 
 		try {
-			const { content, cards } = await this.readNote();
+			const { content, cards, karten } = await this.readNote();
 			const feedback = await generateFeedbackOnly(
 				this.plugin.app, content, provider, this.plugin.settings, controller.signal as any, cards
 			);
@@ -995,6 +1554,11 @@ export class ChatPanel extends Component {
 
 			if (feedback) {
 				this.history = appendFeedbackToCache(this.plugin, this.sourcePath, feedback);
+				const neu = this.history[this.history.length - 1];
+				if (neu) {
+					neu.karten = karten;
+					neu.modell = this.modellName(provider);
+				}
 				this.appendPending();
 				this.scrollToBottom();
 				// Auch die Sidebar/den Block-Chat informieren.
@@ -1024,4 +1588,101 @@ function beschreibeWerkzeug(ev: { name: string; detail: string }, quelle?: strin
 		case 'WebFetch': return `🌐 öffnet: ${ev.detail}`;
 		default: return `⚙️ ${ev.name} ${ev.detail}`.trim();
 	}
+}
+
+// --- Vorschlagsboxen: Hilfen ----------------------------------------------
+
+interface BoxKontext {
+	box: HTMLElement;
+	/** Der Vorschlag, wie die KI ihn geschrieben hat (mit Kartenbezug). */
+	original: Suggestion;
+	schluessel: string;
+	msg: ChatMessage | undefined;
+	warum: string;
+	bearbeiten: boolean;
+	quelltext: boolean;
+	/** Zustand ohne Nachricht (sollte nicht vorkommen) – nur im Speicher. */
+	fluechtig?: VorschlagZustand;
+}
+
+/**
+ * Notizstand vor und nach jeder Übernahme, fuer „Rückgängig". Bewusst nur im
+ * Speicher und modulweit: jede offene Ansicht soll zuruecknehmen koennen, aber
+ * ganze Notizfassungen gehoeren nicht in chat-history.json.
+ */
+const RUECKGAENGIG = new Map<string, { vorher: string; nachher: string }>();
+
+function artKlasse(v: Suggestion): string {
+	if (v.kind === 'card') return v.op === 'add' ? 'is-art-neu' : v.op === 'delete' ? 'is-art-loeschen' : 'is-art-karte';
+	if (v.kind === 'edit') return 'is-art-text';
+	if (v.kind === 'insert') return 'is-art-einfuegen';
+	if (v.kind === 'quelle') return 'is-art-quelle';
+	return 'is-art-kaputt';
+}
+
+function artIcon(v: Suggestion): string {
+	if (v.kind === 'card') return v.op === 'add' ? 'square-plus' : v.op === 'delete' ? 'trash-2' : 'layers';
+	if (v.kind === 'edit') return 'pencil';
+	if (v.kind === 'insert') return 'list-plus';
+	if (v.kind === 'quelle') return 'book-open';
+	return 'alert-triangle';
+}
+
+function artLabel(v: Suggestion): string {
+	if (v.kind === 'card') return v.op === 'add' ? 'Neue Karte' : v.op === 'delete' ? 'Karte löschen' : 'Karte ändern';
+	if (v.kind === 'edit') return 'Textänderung';
+	if (v.kind === 'insert') return 'Einfügen';
+	if (v.kind === 'quelle') return 'Quelle';
+	return 'Nicht anwendbar';
+}
+
+function einzeilig(t: string, max = 80): string {
+	const s = t
+		.replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, '$1')
+		.replace(/\[\[([^\]]*)\]\]/g, '$1')
+		.replace(/^[\s>#*-]+/, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+	return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+/** Die naechste Ueberschrift ueber einer Textstelle – als Ortsangabe im Kopf. */
+function abschnittVor(content: string, offset: number): string {
+	const davor = content.slice(0, offset).split('\n');
+	for (let i = davor.length - 1; i >= 0; i--) {
+		const m = davor[i].match(/^[ \t>]*#{1,6}\s+(.+?)\s*#*\s*$/);
+		if (m) return `Abschnitt „${einzeilig(m[1], 50)}“`;
+	}
+	return 'Notiztext';
+}
+
+/** Ein Feld (Frage, Antwort, Text) mit Wort-Diff zeichnen. */
+function feld(parent: HTMLElement, name: string, teile: DiffTeil[]): HTMLElement {
+	const f = parent.createDiv({ cls: 'anki-vs-feld' });
+	if (name) f.createDiv({ cls: 'anki-vs-feldname', text: name });
+	const inhalt = f.createDiv({ cls: 'anki-vs-inhalt' });
+	const nurNeu = teile.length > 0 && teile.every((t) => t.art === 'neu');
+	const nurWeg = teile.length > 0 && teile.every((t) => t.art === 'weg');
+	if (nurNeu) inhalt.addClass('is-ganz-neu');
+	if (nurWeg) inhalt.addClass('is-ganz-weg');
+	teile.forEach((t) => {
+		const ziel = t.art === 'gleich' || nurNeu || nurWeg
+			? inhalt
+			: inhalt.createSpan({ cls: t.art === 'weg' ? 'anki-vs-weg' : 'anki-vs-neu' });
+		schreibe(ziel, t.text);
+	});
+	return f;
+}
+
+/** Text schreiben, Wikilinks als Begriff im Linkstil (Quelltext steht unter „Quelltext"). */
+function schreibe(el: HTMLElement, text: string) {
+	const re = /\[\[[^\]]*\]\]/g;
+	let pos = 0;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(text))) {
+		if (m.index > pos) el.appendText(text.slice(pos, m.index));
+		el.createSpan({ cls: 'anki-vs-link', text: linkText(m[0]) ?? m[0], attr: { title: m[0] } });
+		pos = m.index + m[0].length;
+	}
+	if (pos < text.length) el.appendText(text.slice(pos));
 }
