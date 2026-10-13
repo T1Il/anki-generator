@@ -1,6 +1,6 @@
 {
 	"name": "t1il-anki-creator",
-	"version": "1.18.1",
+	"version": "1.19.0",
 	"description": "This obsidian automatically generates anki cards using Google Gemini",
 	"main": "main.js",
 	"scripts": {
