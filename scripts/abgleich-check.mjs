@@ -151,6 +151,26 @@ check('ohne JSON klare Meldung', wirft);
 const zwei = m.parseQuellenPlan('```json\n{"quellen":[]}\n```\nkorrigiert:\n```json\n{"quellen":[{"titel":"neu","url":"u"}]}\n```');
 check('letzter JSON-Block zaehlt', zwei.quellen.length === 1);
 
+console.log('Quellensuche: Aequivalente, Thieme, Tipps, Nachsuchen');
+check('Aequivalent Methylprednisolon -> Prednisolon', m.aequivalenteVon('Methylprednisolon').includes('Prednisolon'));
+check('Aequivalent rueckwaerts', m.aequivalenteVon('Prednisolon').includes('Methylprednisolon'));
+check('kein Aequivalent -> leer', m.aequivalenteVon('Ondansetron').length === 0);
+check('Kapitelnummer aus URL', m.thiemeKapitelNr('http://www.thieme-connect.de/products/ebooks/lookinside/10.1055/f-0002-0031-b000001024') === 31);
+check('fremde URL -> null', m.thiemeKapitelNr('https://x.de') === null);
+const mp = m.buildQuellenPrompt({
+	wirkstoff: 'Methylprednisolon', treffer: [], standardwerke: [], schonImOrdner: [],
+	thiemeKapitel: [{ nr: 36, titel: 'Morphin' }, { nr: 31, titel: 'Magnesiumsulfat' }],
+	notizAuszug: '[!medikament] Übersicht\n**Handelsnamen**: Urbason solubile forte', tipps: 'Präparat: Urbason 250 mg'
+});
+check('ERC im Auftrag', mp.includes('ERC-Leitlinien'));
+check('Aequivalente im Auftrag', mp.includes('Prednisolon, Prednison'));
+check('Thieme-Kapitel sortiert', mp.indexOf('31: Magnesiumsulfat') > 0 && mp.indexOf('31: Magnesiumsulfat') < mp.indexOf('36: Morphin'));
+check('kein Inhaltsverzeichnis-Versuch mehr', !mp.includes('Ermittle NN über das'));
+check('Tipps und Notizauszug im Auftrag', mp.includes('Urbason 250 mg') && mp.includes('Urbason solubile forte'));
+check('ohne Tipps kein leerer Abschnitt', !qp.includes('Tipps des Lernenden'));
+const ns = m.buildNachsuchePrompt('Nimm ERC dazu', [{ kategorie: 'Eigene', art: 'neu', titel: 'X', url: 'https://x' }]);
+check('Nachsuchen: Wunsch und bisherige Liste', ns.includes('Nimm ERC dazu') && ns.includes('"url": "https://x"') && /VOLLSTÄNDIGEN/.test(ns));
+
 if (failed) {
 	console.log(`\n${failed} Prüfung(en) fehlgeschlagen.`);
 	process.exit(1);

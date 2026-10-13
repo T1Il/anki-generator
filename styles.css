@@ -1224,6 +1224,21 @@ textarea.schema-hintergrund {
 .anki-quellen-hinweise { font-size: var(--font-ui-small); color: var(--text-muted); margin-top: var(--size-4-2); }
 .anki-quellen-hinweise ul { margin: var(--size-4-1) 0 0; padding-left: var(--size-4-5); }
 
+/* Tipps vor der Suche, eigene Quelle, Nachsuchen */
+.anki-quellen-eingabe { width: 100%; box-sizing: border-box; resize: vertical; font-family: inherit; }
+.anki-quellen-zusatz {
+	margin-top: var(--size-4-3);
+	padding: var(--size-4-2) var(--size-4-3);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+}
+.anki-quellen-zusatz > summary { cursor: pointer; font-weight: var(--font-semibold); }
+.anki-quellen-zusatz[open] > summary { margin-bottom: var(--size-4-2); }
+.anki-quellen-zusatz > input { display: block; width: 100%; box-sizing: border-box; margin-bottom: var(--size-4-2); }
+.anki-quellen-zusatz-knopf { display: flex; justify-content: flex-end; margin-top: var(--size-4-2); }
+.anki-quellen-fehler { color: var(--text-error); font-size: var(--font-ui-small); }
+.anki-quellen-fehler:empty { display: none; }
+
 /* --- Chat groß im Modal: links Chat, rechts Vergleich --- */
 
 .modal.anki-chat-modal {

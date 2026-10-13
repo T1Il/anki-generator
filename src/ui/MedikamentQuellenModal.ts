@@ -1,8 +1,16 @@
-import { App, ButtonComponent, Modal, Notice, requestUrl, setIcon } from 'obsidian';
+import { App, ButtonComponent, Modal, Notice, requestUrl, setIcon, TFile } from 'obsidian';
 import type AnkiGeneratorPlugin from '../main';
 import { ZoteroClient, ZoteroSource } from '../zotero/zoteroClient';
-import { buildQuellenPrompt, parseQuellenPlan, QuellenPlan, QuellenVorschlag, STANDARDWERK_SUCHE } from '../agent/quellenPrompt';
-import { runClaudeAgent, defaultCliPath, defaultZoteroDataDir } from '../agent/claudeAgent';
+import {
+	buildNachsuchePrompt, buildQuellenPrompt, parseQuellenPlan, QuellenAuftrag, QuellenPlan, QuellenVorschlag,
+	STANDARDWERK_SUCHE, ThiemeKapitel, thiemeKapitelNr
+} from '../agent/quellenPrompt';
+import {
+	AgentEvent, AgentResult, runClaudeAgent, runMitSitzung, defaultCliPath, defaultZoteroDataDir
+} from '../agent/claudeAgent';
+
+/** Eine Quelle wiedererkennen – ueber Nachsuchen und Neuzeichnen hinweg. */
+const ident = (q: QuellenVorschlag) => q.key || q.url || q.titel;
 import type { QuellenSitzung } from '../settings';
 
 /**
@@ -42,11 +50,41 @@ export class MedikamentQuellenModal extends Modal {
 		await this.plugin.saveSettings();
 	}
 
+	/** Sitzung der Suche – „Nachsuchen" knuepft daran an. */
+	private sitzungId: string | null = null;
+	/** Fuer einen frischen Lauf, falls die Sitzung weg ist. */
+	private auftrag: QuellenAuftrag | null = null;
+	private plan: QuellenPlan = { quellen: [], hinweise: [] };
+	/** Abgewaehlte Quellen, ueber ident() – ueberlebt Nachsuchen und Neuzeichnen. */
+	private abgewaehlt = new Set<string>();
+	/** Selbst eingetragene Quellen: gehen nie verloren, auch wenn der Agent sie weglaesst. */
+	private eigene: QuellenVorschlag[] = [];
+	private kostenGesamt = 0;
+
 	onOpen() {
 		this.modalEl.addClass('anki-zotero-modal', 'anki-quellen-modal');
 		this.titleEl.setText(`Zotero-Quellen: ${this.wirkstoff}`);
 		this.body = this.contentEl.createDiv();
-		void this.suchen();
+		this.start();
+	}
+
+	/** Vor dem Lauf: Tipps fuer die Suche, alles optional. */
+	private start() {
+		this.body.empty();
+		this.body.createEl('p', {
+			cls: 'anki-zotero-hint',
+			text: 'Claude sucht Fachinformation, Gelbe Liste, Thieme-Kapitel, SAA/BPR, DBRD, ERC, Karow und weitere Quellen. ' +
+				'Tipps sind optional – z. B. welches Präparat auf eurem RTW liegt oder eine Quelle, die unbedingt dabei sein soll.'
+		});
+		const feld = this.body.createEl('textarea', {
+			cls: 'anki-quellen-eingabe',
+			attr: { rows: '4', placeholder: 'Tipps für die Suche (optional), z. B. „Bei uns: Urbason solubile forte 250 mg"' }
+		});
+		const footer = this.body.createDiv({ cls: 'anki-zotero-footer' });
+		footer.createSpan({ cls: 'anki-zotero-count', text: 'Die Suche dauert ein paar Minuten.' });
+		new ButtonComponent(footer).setButtonText('Suche starten').setCta()
+			.onClick(() => void this.suchen(feld.value));
+		window.setTimeout(() => feld.focus(), 0);
 	}
 
 	onClose() {
@@ -60,7 +98,8 @@ export class MedikamentQuellenModal extends Modal {
 
 	// --- 1 + 2: suchen ------------------------------------------------------
 
-	private async suchen() {
+	private async suchen(tipps: string) {
+		this.body.empty();
 		const status = this.body.createDiv({ cls: 'anki-agent-progress' });
 		const kopf = status.createDiv({ cls: 'anki-agent-progress-head', text: 'Prüfe den Server…' });
 		const zeilen = status.createDiv({ cls: 'anki-agent-progress-lines' });
@@ -90,35 +129,19 @@ export class MedikamentQuellenModal extends Modal {
 			const dataDir = this.plugin.settings.zoteroDataDir || defaultZoteroDataDir();
 			const client = new ZoteroClient(this.plugin.settings.zoteroApiUrl || 'http://localhost:23119/api', dataDir);
 			const kontext = await this.bibliothek(client);
-			zeile(`${kontext.schonImOrdner.length} schon im Ordner · ${kontext.standardwerke.length} Standardwerke · ${kontext.treffer.length} Treffer`);
+			zeile(`${kontext.schonImOrdner.length} schon im Ordner · ${kontext.standardwerke.length} Standardwerke · ${kontext.treffer.length} Treffer` +
+				` · ${kontext.thiemeKapitel.length} Thieme-Kapitel bekannt`);
 
 			kopf.setText('Claude sucht Quellen…');
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
-			const storage = require('path').join(dataDir, 'storage');
+			this.auftrag = { wirkstoff: this.wirkstoff, ...kontext, notizAuszug: await this.notizAuszug(), tipps };
 			const ergebnis = await runClaudeAgent({
-				cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
-				prompt: buildQuellenPrompt({ wirkstoff: this.wirkstoff, ...kontext }),
-				cwd: dataDir,
-				addDirs: [storage],
-				research: true,
-				model: this.plugin.settings.claudeAgentModel,
-				signal: this.controller.signal,
-				onEvent: (ev) => {
-					if (ev.kind !== 'tool') return;
-					schritte++;
-					const icon = ev.name.startsWith('Web') ? '🌐' : ev.name === 'Grep' ? '🔍' : '📖';
-					zeile(`${icon} ${ev.name}: ${ev.detail.split(/[\\/]/).slice(-2).join('/')}`);
-				}
+				...this.agentOptionen(dataDir, (n) => { schritte = n; }, zeile),
+				prompt: buildQuellenPrompt(this.auftrag)
 			});
 			window.clearInterval(ticker);
-			if (ergebnis.sessionId) {
-				await this.merkeSitzung({
-					id: ergebnis.sessionId, datum: new Date().toISOString(), wirkstoff: this.wirkstoff, abgelegt: undefined
-				});
-			}
-			const plan = parseQuellenPlan(ergebnis.text);
-			if (!plan.quellen.length) throw new Error('Der Agent hat keine Quellen gefunden.');
-			this.pruefen(plan, ergebnis.costUsd);
+			await this.uebernimmErgebnis(ergebnis);
+			if (!this.plan.quellen.length) throw new Error('Der Agent hat keine Quellen gefunden.');
+			this.pruefen();
 		} catch (e: any) {
 			window.clearInterval(ticker);
 			if (e?.name === 'AbortError') return;
@@ -139,31 +162,95 @@ export class MedikamentQuellenModal extends Modal {
 		const standardwerke: ZoteroSource[] = [];
 		for (const q of STANDARDWERK_SUCHE) standardwerke.push(...sammle(await client.search(q, 6)));
 		const treffer = sammle(await client.search(this.wirkstoff, 25));
-		return { schonImOrdner, standardwerke, treffer };
+
+		// Thieme-Kapitel mit Nummer: das Buch ist alphabetisch nummeriert, die
+		// bekannten Nummern grenzen die gesuchte ein (das Inhaltsverzeichnis
+		// sperrt Thieme fuer Skripte).
+		const thiemeKapitel: ThiemeKapitel[] = [];
+		const nrGesehen = new Set<number>();
+		for (const s of await client.search('Wanka', 100)) {
+			const nr = thiemeKapitelNr(s.url);
+			if (nr !== null && !nrGesehen.has(nr)) { nrGesehen.add(nr); thiemeKapitel.push({ nr, titel: s.title }); }
+		}
+		return { schonImOrdner, standardwerke, treffer, thiemeKapitel };
+	}
+
+	/** Uebersicht der Notiz (Handelsname, Darreichung) – sagt, welches Praeparat gemeint ist. */
+	private async notizAuszug(): Promise<string> {
+		if (!this.notizPfad) return '';
+		const f = this.app.vault.getAbstractFileByPath(this.notizPfad);
+		if (!(f instanceof TFile)) return '';
+		const text = await this.app.vault.cachedRead(f);
+		const kopf = text.search(/^>\s*\[![^\]]+\][-+]?\s*(Übersicht|Steckbrief)/im);
+		if (kopf < 0) return '';
+		const zeilen: string[] = [];
+		for (const z of text.slice(kopf).split('\n')) {
+			if (!/^\s*>/.test(z)) break;
+			zeilen.push(z.replace(/^\s*>\s?/, '').replace(/\s\^[A-Za-z0-9-]+\s*$/, ''));
+		}
+		// Ohne ausgefuellte Felder (frische Vorlage) hilft der Auszug nicht.
+		const inhalt = zeilen.slice(1).filter((z) => /:\s*\S/.test(z) || /^\s*-\s*\S/.test(z));
+		return inhalt.length ? zeilen.join('\n').slice(0, 1200) : '';
+	}
+
+	private agentOptionen(dataDir: string, schritt: (n: number) => void, zeile: (t: string) => void) {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const storage = require('path').join(dataDir, 'storage');
+		let n = 0;
+		return {
+			cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
+			cwd: dataDir,
+			addDirs: [storage],
+			research: true,
+			model: this.plugin.settings.claudeAgentModel,
+			signal: this.controller.signal,
+			onEvent: (ev: AgentEvent) => {
+				if (ev.kind !== 'tool') return;
+				schritt(++n);
+				const icon = ev.name.startsWith('Web') ? '🌐' : ev.name === 'Grep' ? '🔍' : '📖';
+				zeile(`${icon} ${ev.name}: ${ev.detail.split(/[\\/]/).slice(-2).join('/')}`);
+			}
+		};
+	}
+
+	/** Ergebnis eines Laufs: Sitzung merken, Plan uebernehmen, eigene Quellen sichern. */
+	private async uebernimmErgebnis(ergebnis: AgentResult) {
+		if (ergebnis.costUsd !== null) this.kostenGesamt += ergebnis.costUsd;
+		if (ergebnis.sessionId) {
+			this.sitzungId = ergebnis.sessionId;
+			await this.merkeSitzung({
+				id: ergebnis.sessionId, datum: new Date().toISOString(), wirkstoff: this.wirkstoff, abgelegt: undefined
+			});
+		}
+		const plan = parseQuellenPlan(ergebnis.text);
+		const da = new Set(plan.quellen.map(ident));
+		for (const q of this.eigene) if (!da.has(ident(q))) plan.quellen.push(q);
+		this.plan = plan;
 	}
 
 	// --- 3: pruefen ---------------------------------------------------------
 
-	private pruefen(plan: QuellenPlan, kosten: number | null) {
+	private pruefen() {
 		this.body.empty();
-		const gewaehlt = new Set(plan.quellen.map((_, i) => i));
+		const plan = this.plan;
+		const gewaehlt = () => plan.quellen.filter((q) => !this.abgewaehlt.has(ident(q)));
 
 		this.body.createEl('p', {
 			cls: 'anki-zotero-hint',
 			text: `Vorschläge für Medikamente/${this.wirkstoff}. „Vorhanden" wird nur einsortiert, „Neu" wird angelegt` +
-				' – mit PDF oder Seitenkopie, wo möglich.' + (kosten !== null ? ` (Suche: ${kosten.toFixed(2)} $)` : '')
+				' – mit PDF oder Seitenkopie, wo möglich.' +
+				(this.kostenGesamt ? ` (Suche bisher: ${this.kostenGesamt.toFixed(2).replace('.', ',')} $)` : '')
 		});
 
 		const liste = this.body.createDiv({ cls: 'anki-zotero-list anki-quellen-liste' });
-		const gruppen = new Map<string, number[]>();
-		plan.quellen.forEach((q, i) => {
+		const gruppen = new Map<string, QuellenVorschlag[]>();
+		plan.quellen.forEach((q) => {
 			if (!gruppen.has(q.kategorie)) gruppen.set(q.kategorie, []);
-			gruppen.get(q.kategorie)!.push(i);
+			gruppen.get(q.kategorie)!.push(q);
 		});
-
-		for (const [kategorie, idx] of gruppen) {
+		for (const [kategorie, qs] of gruppen) {
 			liste.createDiv({ cls: 'anki-quellen-gruppe', text: kategorie });
-			for (const i of idx) this.zeile(liste, plan.quellen[i], i, gewaehlt);
+			for (const q of qs) this.zeile(liste, q);
 		}
 
 		if (plan.hinweise.length) {
@@ -173,23 +260,108 @@ export class MedikamentQuellenModal extends Modal {
 			plan.hinweise.forEach((t) => ul.createEl('li', { text: t }));
 		}
 
+		this.eigeneQuelleFormular();
+		this.nachsuchenFormular();
+
 		const footer = this.body.createDiv({ cls: 'anki-zotero-footer' });
 		const zaehler = footer.createSpan({ cls: 'anki-zotero-count' });
 		const knopf = new ButtonComponent(footer).setCta();
 		const aktualisieren = () => {
-			zaehler.setText(`${gewaehlt.size} von ${plan.quellen.length} ausgewählt`);
-			knopf.setButtonText(`In Zotero anlegen (${gewaehlt.size})`).setDisabled(gewaehlt.size === 0);
+			const n = gewaehlt().length;
+			zaehler.setText(`${n} von ${plan.quellen.length} ausgewählt`);
+			knopf.setButtonText(`In Zotero anlegen (${n})`).setDisabled(n === 0);
 		};
-		this.body.addEventListener('change', aktualisieren);
+		liste.addEventListener('change', aktualisieren);
 		aktualisieren();
-		knopf.onClick(() => void this.anlegen(plan.quellen.filter((_, i) => gewaehlt.has(i))));
+		knopf.onClick(() => void this.anlegen(gewaehlt()));
 	}
 
-	private zeile(into: HTMLElement, q: QuellenVorschlag, i: number, gewaehlt: Set<number>) {
+	/** Eine Quelle selbst eintragen – der Agent hat sie nicht gefunden oder nicht vorgeschlagen. */
+	private eigeneQuelleFormular() {
+		const box = this.body.createEl('details', { cls: 'anki-quellen-zusatz' });
+		box.createEl('summary', { text: 'Quelle selbst hinzufügen' });
+		const url = box.createEl('input', { type: 'url', attr: { placeholder: 'https://… (Webseite oder PDF)' } });
+		const titel = box.createEl('input', { type: 'text', attr: { placeholder: 'Titel' } });
+		const kategorie = box.createEl('input', { type: 'text', attr: { placeholder: 'Kategorie, z. B. ERC oder Leitlinie' } });
+		const grund = box.createEl('input', { type: 'text', attr: { placeholder: 'Warum sie dazugehört (optional)' } });
+		const fehler = box.createDiv({ cls: 'anki-quellen-fehler' });
+		new ButtonComponent(box.createDiv({ cls: 'anki-quellen-zusatz-knopf' })).setButtonText('Hinzufügen').onClick(() => {
+			const u = url.value.trim();
+			if (!/^https?:\/\//i.test(u)) { fehler.setText('Bitte eine vollständige URL (https://…) eintragen.'); return; }
+			const istPdf = /\.pdf(\?|#|$)/i.test(u);
+			const q: QuellenVorschlag = {
+				kategorie: kategorie.value.trim() || 'Eigene',
+				art: 'neu',
+				typ: istPdf ? 'document' : 'webpage',
+				titel: titel.value.trim() || u.replace(/^https?:\/\//, '').replace(/\/$/, ''),
+				url: u,
+				pdf_url: istPdf ? u : undefined,
+				grund: grund.value.trim() || 'Selbst hinzugefügt.'
+			};
+			if (this.plan.quellen.some((x) => ident(x) === ident(q))) { fehler.setText('Diese URL steht schon in der Liste.'); return; }
+			this.eigene.push(q);
+			this.plan.quellen.push(q);
+			this.pruefen();
+		});
+	}
+
+	/** Tipp oder Ergaenzung an den Agenten – er arbeitet in derselben Sitzung weiter. */
+	private nachsuchenFormular() {
+		const box = this.body.createEl('details', { cls: 'anki-quellen-zusatz' });
+		box.createEl('summary', { text: 'Claude nachsuchen lassen' });
+		const feld = box.createEl('textarea', {
+			cls: 'anki-quellen-eingabe',
+			attr: { rows: '3', placeholder: 'z. B. „Nimm die ERC-Leitlinie Anaphylaxie dazu" oder „Präparat ist Urbason solubile forte 250 mg"' }
+		});
+		new ButtonComponent(box.createDiv({ cls: 'anki-quellen-zusatz-knopf' })).setButtonText('Nachsuchen').setCta()
+			.onClick(() => { if (feld.value.trim()) void this.nachsuchen(feld.value); });
+	}
+
+	private async nachsuchen(wunsch: string) {
+		if (!this.auftrag) return;
+		this.body.empty();
+		const status = this.body.createDiv({ cls: 'anki-agent-progress' });
+		const kopf = status.createDiv({ cls: 'anki-agent-progress-head', text: 'Claude sucht nach …' });
+		const zeilen = status.createDiv({ cls: 'anki-agent-progress-lines' });
+		const zeile = (t: string) => {
+			zeilen.createDiv({ cls: 'anki-agent-progress-line', text: t });
+			while (zeilen.childElementCount > 10) zeilen.firstElementChild?.remove();
+		};
+		const footer = this.body.createDiv({ cls: 'anki-zotero-footer' });
+		footer.createSpan();
+		new ButtonComponent(footer).setButtonText('Abbrechen').onClick(() => this.close());
+
+		const vorher = this.plan;
+		const nachsuche = buildNachsuchePrompt(wunsch, vorher.quellen);
+		const auftrag = this.auftrag;
+		try {
+			const dataDir = this.plugin.settings.zoteroDataDir || defaultZoteroDataDir();
+			const ergebnis = await runMitSitzung({
+				...this.agentOptionen(dataDir, (n) => kopf.setText(`Claude sucht nach … ${n} Schritte`), zeile),
+				prompt: nachsuche,
+				fortsetzen: this.sitzungId ?? undefined,
+				// Sitzung weg: alles neu, mit dem Wunsch als Tipp und der bisherigen Liste.
+				frisch: () => buildQuellenPrompt(auftrag) + '\n\n' + nachsuche
+			});
+			if (!ergebnis.fortgesetzt && this.sitzungId) zeile('Alte Sitzung nicht mehr da – neu gesucht.');
+			await this.uebernimmErgebnis(ergebnis);
+			if (!this.plan.quellen.length) this.plan = vorher;
+			this.pruefen();
+		} catch (e: any) {
+			if (e?.name === 'AbortError') return;
+			this.plan = vorher;
+			this.pruefen();
+			this.body.prepend(createDiv({ cls: 'anki-zotero-list is-error', text: 'Nachsuchen fehlgeschlagen: ' + (e?.message || e) }));
+		}
+	}
+
+	private zeile(into: HTMLElement, q: QuellenVorschlag) {
 		const row = into.createEl('label', { cls: 'anki-zotero-row anki-quellen-row' });
 		const box = row.createEl('input', { type: 'checkbox' });
-		box.checked = true;
-		box.addEventListener('change', () => { box.checked ? gewaehlt.add(i) : gewaehlt.delete(i); });
+		box.checked = !this.abgewaehlt.has(ident(q));
+		box.addEventListener('change', () => {
+			if (box.checked) this.abgewaehlt.delete(ident(q)); else this.abgewaehlt.add(ident(q));
+		});
 
 		const text = row.createDiv({ cls: 'anki-quellen-text' });
 		const titel = text.createDiv({ cls: 'anki-quellen-titel' });
