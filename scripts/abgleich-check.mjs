@@ -36,6 +36,7 @@ fs.writeFileSync(entry, [
 	`export * from ${src('src/agent/abgleichPrompt.ts')};`,
 	`export * from ${src('src/agent/claudeAgent.ts')};`,
 	`export * from ${src('src/agent/quellenPrompt.ts')};`,
+	`export * from ${src('src/agent/verstehenPrompt.ts')};`,
 	`export * from ${src('src/zotero/zoteroClient.ts')};`,
 	`export * from ${src('src/chat/suggestions.ts')};`,
 	`export * from ${src('src/anki/ankiParser.ts')};`
@@ -117,6 +118,45 @@ const vor = m.anknuepfungAnQuellensuche({ datum: '2026-10-03T10:00:00Z', wirksto
 check('nennt Wirkstoff und abgelegte Quellen', vor.includes('Ondansetron') && vor.includes('- Gelbe Liste') && vor.includes('- DBRD 2026'), vor);
 check('kein neuer Quellenplan', /KEINEN Quellenplan/.test(vor));
 check('ohne Ablage: Hinweis statt Liste', /nicht bekannt/.test(m.anknuepfungAnQuellensuche({ datum: '', wirkstoff: 'X' })));
+
+console.log('Konzeptkarte');
+const hinweise = m.rechercheHinweise({ vaultDir: 'C:/Vault', zoteroStorage: storage });
+check('Recherche: Vault, Zotero-Volltexte, Web', hinweise.includes('C:/Vault') && hinweise.includes('**/.zotero-ft-cache') && hinweise.includes('WebSearch'));
+check('Recherche: keine Dateiänderungen', /KEINE Dateien ändern/.test(hinweise));
+const ohneVault = m.rechercheHinweise({ vaultDir: null, zoteroStorage: null });
+check('ohne Vault/Zotero nur Web', !ohneVault.includes('**Vault**') && !ohneVault.includes('**Zotero**') && ohneVault.includes('**Web**'));
+const karte = m.buildKonzeptkartenAuftrag('Glukokortikoide, Mineralkortikoide', 'Addison-Krise');
+check('Auftrag: Notiz und Schwerpunkt', karte.includes('„Glukokortikoide, Mineralkortikoide"') && karte.includes('Schwerpunkt des Lernenden: Addison-Krise'));
+check('Auftrag: keine Karten, Klasse neu, beschriftete Kanten', /KEINE Anki-Karten/.test(karte) && karte.includes('classDef neu') && karte.includes('-->|"steigert"|'));
+check('Auftrag ohne Schwerpunkt', !m.buildKonzeptkartenAuftrag('X', '  ').includes('Schwerpunkt des Lernenden'));
+// So soll die Antwort aussehen: der Vorschlag muss sich parsen lassen und die
+// Mermaid-Reparatur darf Kantenbeschriftungen und die Klasse neu nicht anfassen.
+const antwort = [
+	'Die Karte verbindet beide Gruppen.',
+	'````anki-insert',
+	'NACH:',
+	'>[!medikament] Übersicht',
+	'TEXT:',
+	'> [!info]- 🗺️ Zusammenhänge',
+	'> ```mermaid',
+	'> flowchart TD',
+	'>     subgraph gk["Glukokortikoide"]',
+	'>         A["💊 Cortisol"] -->|"steigert"| B["① Glukoneogenese"]',
+	'>     end',
+	'>     A -.->|"hemmt"| C["ACTH"]',
+	'>     A -->|"Folge"| D["Hypokaliämie"]',
+	'>     classDef neu fill:#fff8dc,stroke:#b8860b,stroke-width:2px,stroke-dasharray:5 3,color:#000',
+	'>     class C neu',
+	'> ```',
+	'````'
+].join('\n');
+const vs = m.parseSuggestions(antwort);
+check('Kartenvorschlag ist ein anki-insert', vs.length === 1 && vs[0].kind === 'insert', JSON.stringify(vs.map((v) => v.kind)));
+const code = m.mermaidAusVorschlag(vs[0])[0] || '';
+const norm = m.diagrammNorm(code);
+check('Mermaid erkannt', code.includes('flowchart TD'), code);
+check('Kantenbeschriftungen bleiben', norm.includes('-->|"steigert"|') && norm.includes('-.->|"hemmt"|'), norm);
+check('Klasse neu bleibt', norm.includes('stroke-dasharray:5 3') && norm.includes('class C neu'), norm);
 
 console.log('stream-json');
 const ev = m.describeStreamLine({ type: 'assistant', message: { content: [

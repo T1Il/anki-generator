@@ -19,6 +19,7 @@ import { ZoteroAbgleichModal, AbgleichAuswahl } from '../ZoteroAbgleichModal';
 import { MedikamentQuellenModal } from '../MedikamentQuellenModal';
 import { anknuepfungAnQuellensuche, buildAbgleichPrompt, readableDirs } from '../../agent/abgleichPrompt';
 import { runMitSitzung, defaultCliPath, defaultZoteroDataDir, AgentEvent } from '../../agent/claudeAgent';
+import { buildKonzeptkartenAuftrag, rechercheHinweise } from '../../agent/verstehenPrompt';
 
 export interface ChatPanelOptions {
 	/** Im Notiz-Block statt in der Sidebar: begrenzte Höhe, keine Kopfzeilen-Aktionen. */
@@ -157,6 +158,10 @@ export class ChatPanel extends Component {
 			const zoteroBtn = new ButtonComponent(controls);
 			zoteroBtn.setIcon('library').setTooltip('Mit Zotero-Quellen abgleichen (Claude-Agent)');
 			zoteroBtn.onClick(() => this.openZoteroAbgleich());
+
+			const karteBtn = new ButtonComponent(controls);
+			karteBtn.setIcon('network').setTooltip('Konzeptkarte: Zusammenhänge erklären (Claude-Agent). Text im Eingabefeld = Schwerpunkt');
+			karteBtn.onClick(() => void this.konzeptkarte());
 
 			const quellenBtn = new ButtonComponent(controls);
 			quellenBtn.setIcon('folder-plus').setTooltip('Medikament: Zotero-Quellen zusammenstellen');
@@ -1281,7 +1286,7 @@ export class ChatPanel extends Component {
 	 * koennen sie inzwischen veraendert haben. Gibt es die Sitzung nicht mehr,
 	 * geht der ganze Verlauf als Text an eine frische.
 	 */
-	private async agentChat(text: string) {
+	private async agentChat(text: string, auftrag = text) {
 		const verlauf = this.history.slice();
 		this.history.push({ role: 'user', content: text });
 		this.appendPending();
@@ -1315,14 +1320,22 @@ export class ChatPanel extends Component {
 				.filter((m) => m.content.trim())
 				.map((m) => `### ${m.role === 'user' ? 'Nutzer' : 'Assistent'}\n${m.content}`)
 				.join('\n\n');
-			const werkzeuge = '## Werkzeuge\n\nDu darfst im Zotero-Datenverzeichnis (Arbeitsverzeichnis, Unterordner storage/) lesen und suchen und im Web recherchieren, wenn die Frage Quellen braucht. Nenne verwendete Quellen kurz. Du änderst keine Dateien – Änderungen schlägst du ausschließlich in den Vorschlagsblöcken vor.';
+			const dataDir = this.plugin.settings.zoteroDataDir || defaultZoteroDataDir();
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const fs = require('fs');
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const storage = require('path').join(dataDir, 'storage');
+			const hatZotero = !!dataDir && fs.existsSync(dataDir);
+			const hatStorage = hatZotero && fs.existsSync(storage);
+			const vaultDir = this.vaultDir();
+			const werkzeuge = rechercheHinweise({ vaultDir, zoteroStorage: hatStorage ? storage : null });
 			const frisch = () => {
 				const gespraech = alsText(verlauf);
 				return [
 					buildChatSystemPrompt(content, cards),
 					werkzeuge,
 					gespraech ? '## Bisheriges Gespräch\n\n' + gespraech : '',
-					'## Neue Nachricht des Nutzers\n\n' + text
+					'## Neue Nachricht des Nutzers\n\n' + auftrag
 				].filter(Boolean).join('\n\n');
 			};
 
@@ -1336,21 +1349,14 @@ export class ChatPanel extends Component {
 				'## Aktueller Stand (ersetzt frühere Fassungen der Notiz und der Kartenliste)\n\n' + buildChatSystemPrompt(content, cards),
 				werkzeuge,
 				seitdem ? '## Seit deiner letzten Antwort im Chat\n\n' + seitdem : '',
-				'## Neue Nachricht des Nutzers\n\n' + text
+				'## Neue Nachricht des Nutzers\n\n' + auftrag
 			].filter(Boolean).join('\n\n') : frisch();
-
-			const dataDir = this.plugin.settings.zoteroDataDir || defaultZoteroDataDir();
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
-			const fs = require('fs');
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
-			const storage = require('path').join(dataDir, 'storage');
-			const hatZotero = !!dataDir && fs.existsSync(dataDir);
 
 			const result = await runMitSitzung({
 				cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
 				prompt,
 				cwd: hatZotero ? dataDir : require('os').tmpdir(),
-				addDirs: hatZotero && fs.existsSync(storage) ? [storage] : [],
+				addDirs: [...(hatStorage ? [storage] : []), ...(vaultDir ? [vaultDir] : [])],
 				research: true,
 				model: this.plugin.settings.claudeAgentModel,
 				fortsetzen: sitzung,
@@ -1391,6 +1397,31 @@ export class ChatPanel extends Component {
 			this.plugin.app.workspace.trigger('anki:chat-update', this.sourcePath, this.history);
 			this.scrollToBottom();
 		}
+	}
+
+	/** Wurzel des Vaults auf der Platte – fuer Querverweise des Agenten. */
+	private vaultDir(): string | null {
+		const adapter = this.plugin.app.vault.adapter as any;
+		return typeof adapter.getBasePath === 'function' ? adapter.getBasePath() : null;
+	}
+
+	/**
+	 * Konzeptkarte: der Agent erklaert die Zusammenhaenge der Notiz als
+	 * Begriffsnetz und recherchiert, was darin fehlt. Laeuft als gewoehnliche
+	 * Agenten-Frage – Rueckfragen dazu knuepfen an dieselbe Sitzung an.
+	 */
+	private async konzeptkarte() {
+		if (this.controller) {
+			new Notice('Es läuft schon eine Anfrage in diesem Chat.');
+			return;
+		}
+		const file = this.sourcePath && this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+		if (!(file instanceof TFile)) { new Notice('Keine Notiz.'); return; }
+		const schwerpunkt = this.input.value.trim();
+		this.input.value = '';
+		this.input.style.height = 'auto';
+		const anzeige = '🗺️ **Konzeptkarte**' + (schwerpunkt ? `\n> Schwerpunkt: ${schwerpunkt.replace(/\n/g, '\n> ')}` : '');
+		await this.agentChat(anzeige, buildKonzeptkartenAuftrag(file.basename, schwerpunkt));
 	}
 
 	// --- Zotero-Abgleich ----------------------------------------------------
