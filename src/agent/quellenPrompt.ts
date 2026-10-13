@@ -148,12 +148,18 @@ ${kapitel.length ? kapitel.map((k) => `     - ${String(k.nr).padStart(2, '0')}: 
    Paediatric Life Support, Special Circumstances/Anaphylaxie). Erst in der Bibliothek
    suchen, sonst über Resuscitation (DOI) oder grc-org.de. Kommt er im ERC nicht vor, weglassen.
 7. **Karow** (Allgemeine und spezielle Pharmakologie) – immer.
-8. **RD-Factsheets** (rd-factsheets.de) und/oder **Notfallguru** (notfallguru.de), falls es
+8. **Embryotox** (embryotox.de, Charité) – IMMER: die Wirkstoffseite zu Schwangerschaft und
+   Stillzeit (https://www.embryotox.de/arzneimittel/details/ansicht/medikament/…). Über die
+   Websuche finden („embryotox <Wirkstoff>"). Hat Embryotox keine eigene Seite, die eines
+   Äquivalents bzw. der Wirkstoffgruppe, mit Hinweis im \`grund\`; gibt es gar keine, sag das in
+   den Hinweisen. \`typ: "webpage"\`, \`herausgeber: "Charité – Universitätsmedizin Berlin,
+   Pharmakovigilanz- und Beratungszentrum für Embryonaltoxikologie"\`.
+9. **RD-Factsheets** (rd-factsheets.de) und/oder **Notfallguru** (notfallguru.de), falls es
    dort eine Seite zum Wirkstoff gibt – bei einem Äquivalent dessen Seite, mit Hinweis
    im \`grund\`. \`typ: "webpage"\`.
-9. **Weitere**, höchstens 3: nur wissenschaftlich belastbare Quellen mit Bezug zur
-   präklinischen Anwendung – Leitlinien (AWMF, ESC …), Cochrane-Reviews, systematische
-   Reviews/Metaanalysen, große RCTs. Mit DOI, wenn vorhanden. Keine Blogs, keine Foren.
+10. **Weitere**, höchstens 3: nur wissenschaftlich belastbare Quellen mit Bezug zur
+    präklinischen Anwendung – Leitlinien (AWMF, ESC …), Cochrane-Reviews, systematische
+    Reviews/Metaanalysen, große RCTs. Mit DOI, wenn vorhanden. Keine Blogs, keine Foren.
 
 # Regeln
 

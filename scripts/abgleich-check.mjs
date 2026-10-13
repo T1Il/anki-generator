@@ -180,7 +180,7 @@ check('HTML entfernt', m.stripHtml('<p>a&amp;b</p><p>c</p>') === 'a&b\nc');
 
 console.log('Medikament-Quellen');
 const qp = m.buildQuellenPrompt({ wirkstoff: 'Ondansetron', treffer: [sources[1]], standardwerke: [sources[0]], schonImOrdner: [] });
-check('Auftrag nennt alle Pflichtquellen', ['Fachinformation', 'Gelbe Liste', 'Medikamente im Rettungsdienst', 'SAA/BPR', 'DBRD', 'Karow', 'RD-Factsheets', 'Notfallguru'].every((w) => qp.includes(w)));
+check('Auftrag nennt alle Pflichtquellen', ['Fachinformation', 'Gelbe Liste', 'Medikamente im Rettungsdienst', 'SAA/BPR', 'DBRD', 'Karow', 'RD-Factsheets', 'Notfallguru', 'Embryotox'].every((w) => qp.includes(w)));
 check('Auftrag mit ISBN', qp.includes('978-3-13-245794-2') && qp.includes('978-3-13-245797-3'));
 check('Auftrag listet Bibliothek mit key und Volltext', qp.includes('key A ') && qp.includes('.zotero-ft-cache'));
 const plan = m.parseQuellenPlan('Text\n```json\n{"quellen":[{"kategorie":"Karow","art":"vorhanden","key":"K1","titel":"Karow"},{"art":"vorhanden","titel":"ohne key"},{"kategorie":"Gelbe Liste","titel":"GL","url":"https://x"}],"hinweise":["MiR-Kapitel unklar"]}\n```');

@@ -73,7 +73,7 @@ export class MedikamentQuellenModal extends Modal {
 		this.body.empty();
 		this.body.createEl('p', {
 			cls: 'anki-zotero-hint',
-			text: 'Claude sucht Fachinformation, Gelbe Liste, Thieme-Kapitel, SAA/BPR, DBRD, ERC, Karow und weitere Quellen. ' +
+			text: 'Claude sucht Fachinformation, Gelbe Liste, Thieme-Kapitel, SAA/BPR, DBRD, ERC, Karow, Embryotox und weitere Quellen. ' +
 				'Tipps sind optional – z. B. welches Präparat auf eurem RTW liegt oder eine Quelle, die unbedingt dabei sein soll.'
 		});
 		const feld = this.body.createEl('textarea', {
