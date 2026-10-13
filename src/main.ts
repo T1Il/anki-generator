@@ -218,7 +218,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!file || file.extension !== 'md' || !Platform.isDesktopApp) return false;
-				if (!checking) new MedikamentQuellenModal(this.app, this, file.basename).open();
+				if (!checking) new MedikamentQuellenModal(this.app, this, file.basename, file.path).open();
 				return true;
 			}
 		});

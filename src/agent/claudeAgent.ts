@@ -18,6 +18,13 @@ export interface AgentOptions {
 	addDirs: string[];
 	research: boolean;
 	model?: string;
+	/**
+	 * Sitzung, an die angeknuepft wird (`--resume … --fork-session`). Der
+	 * Agent weiss dann noch, was er gelesen und warum er etwas gewaehlt hat.
+	 * Abgezweigt wird immer: die alte Sitzung bleibt unveraendert, ein zweiter
+	 * Abgleich auf derselben Recherche faengt nicht beim ersten wieder an.
+	 */
+	fortsetzen?: string;
 	signal?: AbortSignal;
 	onEvent?: (e: AgentEvent) => void;
 }
@@ -31,12 +38,22 @@ export interface AgentResult {
 	text: string;
 	costUsd: number | null;
 	turns: number | null;
+	/** Kennung der (neuen) Sitzung – zum Anknuepfen beim naechsten Aufruf. */
+	sessionId: string | null;
+}
+
+/** Die Sitzung zum Anknuepfen gibt es nicht mehr (aufgeraeumt, anderer Rechner). */
+export class SitzungFehlt extends Error {
+	constructor(id: string) {
+		super(`Claude-Sitzung ${id} nicht mehr vorhanden.`);
+		this.name = 'SitzungFehlt';
+	}
 }
 
 export const LESE_WERKZEUGE = ['Read', 'Grep', 'Glob'];
 export const RECHERCHE_WERKZEUGE = ['WebSearch', 'WebFetch'];
 
-export function agentArgs(o: Pick<AgentOptions, 'addDirs' | 'research' | 'model'>): string[] {
+export function agentArgs(o: Pick<AgentOptions, 'addDirs' | 'research' | 'model' | 'fortsetzen'>): string[] {
 	const tools = o.research ? [...LESE_WERKZEUGE, ...RECHERCHE_WERKZEUGE] : LESE_WERKZEUGE;
 	const args = [
 		'-p',
@@ -46,13 +63,34 @@ export function agentArgs(o: Pick<AgentOptions, 'addDirs' | 'research' | 'model'
 		// Rueckfrage, die im Druckmodus ohnehin niemand beantworten kann.
 		'--tools', ...tools,
 		'--allowedTools', ...tools,
-		'--no-session-persistence',
+		// Sitzungen bleiben gespeichert (frueher --no-session-persistence):
+		// Rueckfragen im Chat und der Abgleich nach der Quellensuche knuepfen
+		// daran an, statt alles noch einmal zu lesen.
 		// Keine MCP-Server des Nutzers (Browser, Mail …) in diesem Auftrag.
 		'--strict-mcp-config'
 	];
+	if (o.fortsetzen) args.push('--resume', o.fortsetzen, '--fork-session');
 	if (o.model && o.model.trim()) args.push('--model', o.model.trim());
 	for (const d of o.addDirs) args.push('--add-dir', d);
 	return args;
+}
+
+/**
+ * Mit Anknuepfen an `o.fortsetzen` starten; gibt es die Sitzung nicht mehr,
+ * frisch mit `o.frisch()` – der Prompt muss dann den noetigen Kontext als
+ * Text mitbringen. `fortgesetzt` sagt, welcher Weg gegriffen hat.
+ */
+export async function runMitSitzung(o: AgentOptions & { frisch: () => string }):
+	Promise<AgentResult & { fortgesetzt: boolean }> {
+	if (o.fortsetzen) {
+		try {
+			return { ...(await runClaudeAgent(o)), fortgesetzt: true };
+		} catch (e) {
+			if (!(e instanceof SitzungFehlt)) throw e;
+		}
+	}
+	const prompt = o.fortsetzen ? o.frisch() : o.prompt;
+	return { ...(await runClaudeAgent({ ...o, fortsetzen: undefined, prompt })), fortgesetzt: false };
 }
 
 /** Eine Zeile stream-json → Ereignis fuer die Fortschrittsanzeige (oder null). */
@@ -93,6 +131,7 @@ export function runClaudeAgent(o: AgentOptions): Promise<AgentResult> {
 		let result: AgentResult | null = null;
 		let errorText: string | null = null;
 		let lastText = '';
+		let sessionId: string | null = null;
 
 		const onAbort = () => {
 			child.kill();
@@ -107,6 +146,7 @@ export function runClaudeAgent(o: AgentOptions): Promise<AgentResult> {
 			if (!line.trim()) return;
 			let obj: any;
 			try { obj = JSON.parse(line); } catch { return; }
+			if (typeof obj?.session_id === 'string' && obj.session_id) sessionId = obj.session_id;
 
 			for (const ev of describeStreamLine(obj)) {
 				if (ev.kind === 'text') lastText = ev.text;
@@ -119,7 +159,8 @@ export function runClaudeAgent(o: AgentOptions): Promise<AgentResult> {
 					result = {
 						text: obj.result ?? lastText,
 						costUsd: typeof obj.total_cost_usd === 'number' ? obj.total_cost_usd : null,
-						turns: typeof obj.num_turns === 'number' ? obj.num_turns : null
+						turns: typeof obj.num_turns === 'number' ? obj.num_turns : null,
+						sessionId
 					};
 				}
 			}
@@ -154,6 +195,8 @@ export function runClaudeAgent(o: AgentOptions): Promise<AgentResult> {
 			if (o.signal?.aborted) return;
 			if (buffer.trim()) handleLine(buffer);
 			if (result) resolve(result);
+			// CLI 2.1: „No conversation found with session ID: …" auf stderr.
+			else if (o.fortsetzen && /No conversation found/i.test(stderr)) reject(new SitzungFehlt(o.fortsetzen));
 			else reject(new Error(errorText
 				? `Claude-Agent meldet einen Fehler: ${errorText}`
 				: `Claude CLI endete ohne Ergebnis (Code ${code}). ${stderr.trim().slice(-400)}`));

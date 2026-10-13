@@ -107,6 +107,16 @@ check('add-dir', ohne.join(' ').includes('--add-dir ' + storage));
 const mit = m.agentArgs({ addDirs: [], research: true, model: 'opus' });
 check('mit Recherche Web', mit.includes('WebSearch') && mit.includes('WebFetch'));
 check('Modell', mit.join(' ').includes('--model opus'));
+check('Sitzung bleibt gespeichert', !mit.includes('--no-session-persistence'));
+check('ohne Anknuepfen kein --resume', !mit.includes('--resume'));
+const weiter = m.agentArgs({ addDirs: [], research: false, model: '', fortsetzen: 'abc-123' });
+check('Anknuepfen mit Abzweig', weiter.join(' ').includes('--resume abc-123 --fork-session'), weiter.join(' '));
+
+console.log('Anknuepfung an die Quellensuche');
+const vor = m.anknuepfungAnQuellensuche({ datum: '2026-10-03T10:00:00Z', wirkstoff: 'Ondansetron', abgelegt: ['Gelbe Liste', 'DBRD 2026'] });
+check('nennt Wirkstoff und abgelegte Quellen', vor.includes('Ondansetron') && vor.includes('- Gelbe Liste') && vor.includes('- DBRD 2026'), vor);
+check('kein neuer Quellenplan', /KEINEN Quellenplan/.test(vor));
+check('ohne Ablage: Hinweis statt Liste', /nicht bekannt/.test(m.anknuepfungAnQuellensuche({ datum: '', wirkstoff: 'X' })));
 
 console.log('stream-json');
 const ev = m.describeStreamLine({ type: 'assistant', message: { content: [

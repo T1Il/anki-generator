@@ -57,6 +57,21 @@ export interface AnkiGeneratorSettings {
 	zoteroDataDir: string;
 	/** Fitness-Manager-Backend, legt Zotero-Ordner und Anhaenge an (WebDAV). */
 	fitnessManagerUrl: string;
+	/**
+	 * Letzte Quellensuche je Notizpfad: an ihre Claude-Sitzung knuepft der
+	 * Zotero-Abgleich an, sobald die Notiz geschrieben ist. Keine Einstellung
+	 * im eigentlichen Sinn – liegt hier, weil es data.json ohnehin gibt.
+	 */
+	quellenSitzungen: Record<string, QuellenSitzung>;
+}
+
+export interface QuellenSitzung {
+	id: string;
+	/** ISO-Zeitpunkt der Suche. */
+	datum: string;
+	wirkstoff: string;
+	/** Titel der Quellen, die Till danach wirklich abgelegt hat. */
+	abgelegt?: string[];
 }
 
 /**
@@ -239,7 +254,8 @@ Hier ist der Lerninhalt:
 	chatProvider: '',
 	zoteroApiUrl: 'http://localhost:23119/api',
 	zoteroDataDir: '',
-	fitnessManagerUrl: 'https://fitness-manager.tail0d1239.ts.net'
+	fitnessManagerUrl: 'https://fitness-manager.tail0d1239.ts.net',
+	quellenSitzungen: {}
 };
 
 export class AnkiGeneratorSettingTab extends PluginSettingTab {

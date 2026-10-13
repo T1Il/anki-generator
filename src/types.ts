@@ -24,6 +24,8 @@ export interface ChatMessage {
 	vorschlaege?: Record<string, VorschlagZustand>;
 	/** Welches Modell geantwortet hat (Anzeige). */
 	modell?: string;
+	/** Claude-CLI-Sitzung dieser Antwort – Rueckfragen knuepfen daran an. */
+	agentSitzung?: string;
 }
 
 /** Eine Karte, wie sie zum Zeitpunkt einer Anfrage im Block stand. */

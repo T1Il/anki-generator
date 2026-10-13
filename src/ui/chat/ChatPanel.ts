@@ -17,8 +17,8 @@ import { getAnkiBlocks,parseCardsFromBlockSource, formatCardsToExistingCardsStri
 import { ZoteroClient, ZoteroSource, collectionPath } from '../../zotero/zoteroClient';
 import { ZoteroAbgleichModal, AbgleichAuswahl } from '../ZoteroAbgleichModal';
 import { MedikamentQuellenModal } from '../MedikamentQuellenModal';
-import { buildAbgleichPrompt, readableDirs } from '../../agent/abgleichPrompt';
-import { runClaudeAgent, defaultCliPath, defaultZoteroDataDir, AgentEvent } from '../../agent/claudeAgent';
+import { anknuepfungAnQuellensuche, buildAbgleichPrompt, readableDirs } from '../../agent/abgleichPrompt';
+import { runMitSitzung, defaultCliPath, defaultZoteroDataDir, AgentEvent } from '../../agent/claudeAgent';
 
 export interface ChatPanelOptions {
 	/** Im Notiz-Block statt in der Sidebar: begrenzte Höhe, keine Kopfzeilen-Aktionen. */
@@ -163,7 +163,7 @@ export class ChatPanel extends Component {
 			quellenBtn.onClick(() => {
 				const file = this.sourcePath && this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
 				if (!(file instanceof TFile)) { new Notice('Keine Notiz.'); return; }
-				new MedikamentQuellenModal(this.plugin.app, this.plugin, file.basename).open();
+				new MedikamentQuellenModal(this.plugin.app, this.plugin, file.basename, file.path).open();
 			});
 		}
 
@@ -1272,8 +1272,14 @@ export class ChatPanel extends Component {
 	 * Gedacht fuer Rueckfragen nach einem Zotero-Abgleich und fuer alles, was
 	 * Quellen braucht: der Agent darf in Zotero lesen und im Web suchen. Er
 	 * bekommt denselben Systemkontext wie der normale Chat – also auch das
-	 * Vorschlagsformat – und den bisherigen Verlauf als Text, weil jeder
-	 * Aufruf eine frische Sitzung ist.
+	 * Vorschlagsformat.
+	 *
+	 * Stammt eine fruehere Antwort von einem Agenten (Abgleich oder Rueckfrage),
+	 * knuepft die Frage an dessen Sitzung an: er weiss dann noch, was er in den
+	 * Quellen gelesen hat, und muss es nicht neu oeffnen. Mit kommt nur, was
+	 * seitdem im Chat stand, plus der aktuelle Stand der Notiz – Vorschlaege
+	 * koennen sie inzwischen veraendert haben. Gibt es die Sitzung nicht mehr,
+	 * geht der ganze Verlauf als Text an eine frische.
 	 */
 	private async agentChat(text: string) {
 		const verlauf = this.history.slice();
@@ -1305,17 +1311,33 @@ export class ChatPanel extends Component {
 		try {
 			const { content, cards, karten } = await this.readNote();
 			placeholder.karten = karten;
-			const gespraech = verlauf
+			const alsText = (ms: ChatMessage[]) => ms
 				.filter((m) => m.content.trim())
 				.map((m) => `### ${m.role === 'user' ? 'Nutzer' : 'Assistent'}\n${m.content}`)
 				.join('\n\n');
-			const prompt = [
-				buildChatSystemPrompt(content, cards),
-				'## Werkzeuge',
-				'Du darfst im Zotero-Datenverzeichnis (Arbeitsverzeichnis, Unterordner storage/) lesen und suchen und im Web recherchieren, wenn die Frage Quellen braucht. Nenne verwendete Quellen kurz. Du änderst keine Dateien – Änderungen schlägst du ausschließlich in den Vorschlagsblöcken vor.',
-				gespraech ? '## Bisheriges Gespräch\n\n' + gespraech : '',
+			const werkzeuge = '## Werkzeuge\n\nDu darfst im Zotero-Datenverzeichnis (Arbeitsverzeichnis, Unterordner storage/) lesen und suchen und im Web recherchieren, wenn die Frage Quellen braucht. Nenne verwendete Quellen kurz. Du änderst keine Dateien – Änderungen schlägst du ausschließlich in den Vorschlagsblöcken vor.';
+			const frisch = () => {
+				const gespraech = alsText(verlauf);
+				return [
+					buildChatSystemPrompt(content, cards),
+					werkzeuge,
+					gespraech ? '## Bisheriges Gespräch\n\n' + gespraech : '',
+					'## Neue Nachricht des Nutzers\n\n' + text
+				].filter(Boolean).join('\n\n');
+			};
+
+			let letzte = -1;
+			for (let i = verlauf.length - 1; i >= 0; i--) if (verlauf[i].agentSitzung) { letzte = i; break; }
+			const sitzung = letzte >= 0 ? verlauf[letzte].agentSitzung : undefined;
+			const seitdem = alsText(verlauf.slice(letzte + 1));
+			const prompt = sitzung ? [
+				'# Rückfrage im selben Chat',
+				'Du arbeitest an deinem bisherigen Auftrag weiter. Was du gelesen hast, weißt du noch – öffne Quellen nur erneut, wenn du eine Stelle genau brauchst.',
+				'## Aktueller Stand (ersetzt frühere Fassungen der Notiz und der Kartenliste)\n\n' + buildChatSystemPrompt(content, cards),
+				werkzeuge,
+				seitdem ? '## Seit deiner letzten Antwort im Chat\n\n' + seitdem : '',
 				'## Neue Nachricht des Nutzers\n\n' + text
-			].filter(Boolean).join('\n\n');
+			].filter(Boolean).join('\n\n') : frisch();
 
 			const dataDir = this.plugin.settings.zoteroDataDir || defaultZoteroDataDir();
 			// eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -1324,13 +1346,15 @@ export class ChatPanel extends Component {
 			const storage = require('path').join(dataDir, 'storage');
 			const hatZotero = !!dataDir && fs.existsSync(dataDir);
 
-			const result = await runClaudeAgent({
+			const result = await runMitSitzung({
 				cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
 				prompt,
 				cwd: hatZotero ? dataDir : require('os').tmpdir(),
 				addDirs: hatZotero && fs.existsSync(storage) ? [storage] : [],
 				research: true,
 				model: this.plugin.settings.claudeAgentModel,
+				fortsetzen: sitzung,
+				frisch,
 				signal: this.controller.signal,
 				onEvent: (ev: AgentEvent) => {
 					if (ev.kind !== 'tool') return;
@@ -1341,8 +1365,10 @@ export class ChatPanel extends Component {
 				}
 			});
 			placeholder.content = result.text.trim();
+			if (result.sessionId) placeholder.agentSitzung = result.sessionId;
 			const info = [`${result.turns ?? schritte} Schritte`, `${Math.round((Date.now() - started) / 1000)} s`];
-			if (result.costUsd !== null) info.push(`${result.costUsd.toFixed(2)} $`);
+			if (result.costUsd !== null) info.push(`${result.costUsd.toFixed(2).replace('.', ',')} $`);
+			if (sitzung) info.push(result.fortgesetzt ? 'knüpft an die letzte Agenten-Sitzung an' : 'alte Sitzung nicht mehr da – neu gestartet');
 			placeholder.content += `\n\n> [!info]- Claude-Agent\n> ${info.join(' · ')}`;
 		} catch (e: any) {
 			const aborted = e?.name === 'AbortError' || e?.message === 'Aborted by user';
@@ -1463,16 +1489,23 @@ export class ChatPanel extends Component {
 				research: a.research,
 				extra: a.extra
 			});
+			// Hat derselbe Agent die Quellen fuer diese Notiz zusammengestellt,
+			// pruefen wir in seiner Sitzung: er kennt dann noch, was er gelesen
+			// und warum er welche Quelle gewaehlt hat.
+			const suche = this.sourcePath ? this.plugin.settings.quellenSitzungen?.[this.sourcePath] : undefined;
+			if (suche) zeile(`Knüpfe an die Quellensuche vom ${new Date(suche.datum).toLocaleDateString('de-DE')} an`);
 
 			// eslint-disable-next-line @typescript-eslint/no-var-requires
 			const storage = require('path').join(dataDir, 'storage');
-			const result = await runClaudeAgent({
+			const result = await runMitSitzung({
 				cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
-				prompt,
+				prompt: suche ? anknuepfungAnQuellensuche(suche) + '\n\n' + prompt : prompt,
 				cwd: dataDir,
 				addDirs: readableDirs(sources, storage),
 				research: a.research,
 				model: this.plugin.settings.claudeAgentModel,
+				fortsetzen: suche?.id,
+				frisch: () => prompt,
 				signal: this.controller.signal,
 				onEvent: (ev: AgentEvent) => {
 					if (ev.kind !== 'tool') return;
@@ -1483,11 +1516,15 @@ export class ChatPanel extends Component {
 
 			// Quellen als nummerierte Liste – als eine mit „·" verkettete Zeile
 			// war das bei elf Quellen ein unlesbarer Block (Glucose, 13.10.2026).
+			if (result.sessionId) placeholder.agentSitzung = result.sessionId;
 			const details = [
 				'',
 				'> [!info]- Abgleich-Details',
 				`> ${result.turns ?? schritte} Schritte · ${Math.round((Date.now() - started) / 1000)} s` +
 				(result.costUsd !== null ? ` · ${result.costUsd.toFixed(2).replace('.', ',')} $` : ''),
+				...(suche ? ['>', result.fortgesetzt
+					? `> Knüpft an die Quellensuche vom ${new Date(suche.datum).toLocaleDateString('de-DE')} an.`
+					: '> Die Sitzung der Quellensuche war nicht mehr da – neu gestartet.'] : []),
 				'>',
 				'> **Quellen**',
 				...sources.map((s, i) => `> ${i + 1}. ${s.title.replace(/\s+/g, ' ').trim()}`)

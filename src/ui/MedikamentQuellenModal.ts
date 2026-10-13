@@ -3,6 +3,7 @@ import type AnkiGeneratorPlugin from '../main';
 import { ZoteroClient, ZoteroSource } from '../zotero/zoteroClient';
 import { buildQuellenPrompt, parseQuellenPlan, QuellenPlan, QuellenVorschlag, STANDARDWERK_SUCHE } from '../agent/quellenPrompt';
 import { runClaudeAgent, defaultCliPath, defaultZoteroDataDir } from '../agent/claudeAgent';
+import type { QuellenSitzung } from '../settings';
 
 /**
  * Quellen fuer ein Medikament zusammenstellen und in Zotero ablegen.
@@ -19,8 +20,26 @@ export class MedikamentQuellenModal extends Modal {
 	private body!: HTMLElement;
 	private fertig = false;
 
-	constructor(app: App, private plugin: AnkiGeneratorPlugin, private wirkstoff: string) {
+	/**
+	 * @param notizPfad unter diesem Pfad merkt sich das Plugin die Sitzung der
+	 *   Suche – der spaetere Zotero-Abgleich dieser Notiz knuepft daran an.
+	 */
+	constructor(app: App, private plugin: AnkiGeneratorPlugin, private wirkstoff: string,
+		private notizPfad?: string) {
 		super(app);
+	}
+
+	private async merkeSitzung(aenderung: Partial<QuellenSitzung> & { id?: string }) {
+		if (!this.notizPfad) return;
+		const s = this.plugin.settings;
+		const alt = s.quellenSitzungen?.[this.notizPfad];
+		if (!aenderung.id && !alt) return;
+		// Neues Objekt statt Mutation: DEFAULT_SETTINGS teilt sonst dieselbe Referenz.
+		s.quellenSitzungen = {
+			...(s.quellenSitzungen || {}),
+			[this.notizPfad]: { ...(alt || { datum: '', wirkstoff: this.wirkstoff }), ...aenderung } as QuellenSitzung
+		};
+		await this.plugin.saveSettings();
 	}
 
 	onOpen() {
@@ -92,6 +111,11 @@ export class MedikamentQuellenModal extends Modal {
 				}
 			});
 			window.clearInterval(ticker);
+			if (ergebnis.sessionId) {
+				await this.merkeSitzung({
+					id: ergebnis.sessionId, datum: new Date().toISOString(), wirkstoff: this.wirkstoff, abgelegt: undefined
+				});
+			}
 			const plan = parseQuellenPlan(ergebnis.text);
 			if (!plan.quellen.length) throw new Error('Der Agent hat keine Quellen gefunden.');
 			this.pruefen(plan, ergebnis.costUsd);
@@ -214,6 +238,9 @@ export class MedikamentQuellenModal extends Modal {
 			});
 			if (res.status !== 200) throw new Error(res.json?.detail || `HTTP ${res.status}`);
 			this.fertig = true;
+			// Der Abgleich soll wissen, was davon wirklich in Zotero liegt.
+			const ok = (res.json?.ergebnisse || []).filter((e: any) => e.status !== 'fehler').map((e: any) => String(e.titel));
+			await this.merkeSitzung({ abgelegt: ok });
 			this.ergebnis(res.json);
 		} catch (e: any) {
 			this.body.empty();

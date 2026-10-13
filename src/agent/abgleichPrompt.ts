@@ -14,6 +14,28 @@ export interface AbgleichAuftrag {
 }
 
 /**
+ * Vorspann, wenn der Abgleich in der Sitzung der Quellensuche laeuft: dort
+ * hat derselbe Agent die Quellen gesucht und bewertet. Jetzt ist die Notiz
+ * geschrieben, und er soll sie mit diesem Wissen pruefen – aber nicht seine
+ * damalige Ausgabe (den JSON-Plan) wiederholen.
+ */
+export function anknuepfungAnQuellensuche(s: { datum: string; wirkstoff: string; abgelegt?: string[] }): string {
+	const tag = s.datum ? new Date(s.datum).toLocaleDateString('de-DE') : 'früher';
+	const abgelegt = s.abgelegt?.length
+		? `Davon hat der Lernende diese Quellen tatsächlich in Zotero abgelegt:\n${s.abgelegt.map((t) => `- ${t}`).join('\n')}`
+		: 'Welche davon er tatsächlich abgelegt hat, ist nicht bekannt – maßgeblich ist die Quellenliste unten.';
+	return `# Neuer Auftrag in derselben Sitzung
+
+Am ${tag} hast du in dieser Sitzung die Quellen zu „${s.wirkstoff}“ recherchiert.
+${abgelegt}
+
+Inzwischen ist die Notiz dazu geschrieben. Nutze, was du bei der Recherche
+gelesen und bewertet hast – öffne eine Quelle nur erneut, wenn du eine Stelle
+genau brauchst. Gib KEINEN Quellenplan (JSON) mehr aus; es gilt ausschließlich
+der folgende Auftrag mit seinem Antwortformat.`;
+}
+
+/**
  * Der Auftrag an den Claude-Agenten.
  *
  * Der Agent bekommt die Notiz im Prompt, die Quellen nur als Dateipfade: ein

@@ -52,7 +52,7 @@ reload Obsidian.
 - `src/anki/legacyStrip.ts` — `ohneAlteKarten()`: strips legacy cards (plain `TARGET DECK` blocks, archived callouts, `<!--ID-->` lines) from note text before it goes to any LLM. Every new AI entry point must use it, otherwise the model treats old cards as existing and reuses their IDs
 - `src/zotero/zoteroClient.ts` — Zotero local API (collections, items, attachment/full-text paths)
 - `src/ui/MedikamentQuellenModal.ts` + `src/agent/quellenPrompt.ts` — drug sources: agent proposes a JSON plan, user ticks, Fitness-Manager backend writes to Zotero
-- `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable)
+- `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable). Sessions persist: `runMitSitzung()` resumes (`--resume … --fork-session`) and falls back to a fresh run with the history as text when the session is gone. Chat answers keep their session in `ChatMessage.agentSitzung`; the drug-source search stores its session per note in `settings.quellenSitzungen`, and the Zotero cross-check of that note continues it
 - `src/ui/` — Modal/view components (preview, edit, deck selection, drift review, decorations)
 - `src/lang/` — i18n (German `de.ts`, English `en.ts`)
 - `src/types.ts` — `Card`, `ChatMessage`, `ChatTurn`, `ImageInput`, `AiProvider`
