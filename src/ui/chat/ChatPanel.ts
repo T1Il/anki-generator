@@ -1481,12 +1481,16 @@ export class ChatPanel extends Component {
 				}
 			});
 
+			// Quellen als nummerierte Liste – als eine mit „·" verkettete Zeile
+			// war das bei elf Quellen ein unlesbarer Block (Glucose, 13.10.2026).
 			const details = [
 				'',
 				'> [!info]- Abgleich-Details',
-				`> Quellen: ${sources.map((s, i) => `${i + 1}. ${s.title}`).join(' · ')}`,
 				`> ${result.turns ?? schritte} Schritte · ${Math.round((Date.now() - started) / 1000)} s` +
-				(result.costUsd !== null ? ` · ${result.costUsd.toFixed(2)} $` : '')
+				(result.costUsd !== null ? ` · ${result.costUsd.toFixed(2).replace('.', ',')} $` : ''),
+				'>',
+				'> **Quellen**',
+				...sources.map((s, i) => `> ${i + 1}. ${s.title.replace(/\s+/g, ' ').trim()}`)
 			].join('\n');
 			placeholder.content = result.text.trim() + '\n' + details;
 		} catch (e: any) {

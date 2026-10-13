@@ -349,6 +349,19 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 
 	check('fehlender Anker ergibt null', C.insertAfterAnchor(note, 'gibt es nicht', 'x') === null);
 
+	// Zitat-Text gehoert INS Callout, direkt unter den Anker, ohne Leerzeile (Glucose 13.10.2026).
+	const d = C.insertAfterAnchor(note, '>- Antagonismus (Frage: auch Übelkeit?)', '>- NEU\n>\n>- NEU2\n>');
+	check('Zitat-Text: direkt unter dem Anker im Callout',
+		d.includes('>- Antagonismus (Frage: auch Übelkeit?)\n>- NEU\n>\n>- NEU2\n>- Area postrema\n\n### Dosierung'), d);
+
+	const mitId = ['> [!dosierung] Dosierung', '> **Kinder**: 0,2 g/kgKG ^dosierung', '', '### Weiter'].join('\n');
+	const e = C.insertAfterAnchor(mitId, '> **Kinder**: 0,2 g/kgKG', '> (entspricht 1 ml G 20 %)');
+	check('Zitat-Text am Callout-Ende: Block-ID wandert mit',
+		e === '> [!dosierung] Dosierung\n> **Kinder**: 0,2 g/kgKG\n> (entspricht 1 ml G 20 %) ^dosierung\n\n### Weiter', e);
+
+	const crlf = C.insertAfterAnchor('> [!info] K\r\n> eins\r\n\r\nX', '> eins', '> zwei');
+	check('Zitat-Text: CRLF bleibt CRLF', crlf === '> [!info] K\r\n> eins\r\n> zwei\r\n\r\nX', JSON.stringify(crlf));
+
 	const sec = C.newAnkiSection('TARGET DECK: X\n\nQ: a\nA: ```mermaid\nflowchart TD\n```');
 	check('neuer Block mit vier Backticks bei innerem ```', sec.startsWith('## Anki\n````anki-cards') && sec.endsWith('\n````'), sec);
 	check('neuer Block ohne Code mit drei', C.newAnkiSection('Q: a').includes('```anki-cards') && !C.newAnkiSection('Q: a').includes('````'));
@@ -478,6 +491,20 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 	const k = C.berechneVergleich(note, [{ cards: [{ type: 'Basic', q: 'Alt?', a: 'alt', id: 5 }] }],
 		{ kind: 'card', op: 'update', id: 5, ref: null, q: 'Neu?', a: 'neu', typeIn: false });
 	check('Vergleich: Karte vorher/nachher', k.art === 'karte' && k.vorher.q === 'Alt?' && k.nachher.q === 'Neu?', k);
+
+	// Markierung: nur die wirklich neue Zeile, nicht der Rest des Callouts.
+	const ins = C.berechneVergleich(note, [], { kind: 'insert', after: '> eins', text: '> NEU' });
+	const nz = ins.nachher.split('\n');
+	check('Vergleich: genau die neue Zeile markiert',
+		ins.geaendertNachher.length === 1 && nz[ins.geaendertNachher[0]] === '> NEU' && ins.geaendertVorher.length === 0, ins);
+	const m = C.markiereZeilen(ins.nachher, ins.geaendertNachher, 'is-add');
+	check('Markierung: Zitatzeichen bleibt vor dem span', m.includes('> <span class="anki-diff-mark is-add">NEU</span>'), m);
+	check('Markierung: Callout-Kopf bleibt Callout-Kopf',
+		C.markiereZeilen('> [!dosierung]- Dosierung', [0], 'is-add') === '> [!dosierung]- <span class="anki-diff-mark is-add">Dosierung</span>');
+	check('Markierung: Liste und Block-ID bleiben draussen',
+		C.markiereZeilen('>- Hypoglykämie ^indikation', [0], 'is-remove') === '>- <span class="anki-diff-mark is-remove">Hypoglykämie</span> ^indikation');
+	const code = '> ```mermaid\n> flowchart TD\n> ```';
+	check('Markierung: Codeblock unangetastet', C.markiereZeilen(code, [0, 1, 2], 'is-add') === code);
 }
 
 {

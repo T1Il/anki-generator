@@ -1345,6 +1345,20 @@ textarea.schema-hintergrund {
 .anki-vergleich-spalte.is-vorher { border-top: 3px solid var(--text-error); }
 .anki-vergleich-spalte.is-nachher { border-top: 3px solid var(--text-success, var(--interactive-accent)); }
 
+/* Geaenderte Zeilen in der gerenderten Vorschau (chat/vergleich.ts → markiereZeilen). */
+.anki-diff-mark {
+	border-radius: 3px;
+	padding: 0 2px;
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+.anki-diff-mark.is-add { background-color: rgba(var(--color-green-rgb), 0.22); }
+.anki-diff-mark.is-remove {
+	background-color: rgba(var(--color-red-rgb), 0.22);
+	text-decoration: line-through;
+	text-decoration-color: rgba(var(--color-red-rgb), 0.7);
+}
+
 .anki-vergleich-spalteninhalt {
 	padding: var(--size-4-2) var(--size-4-3);
 	overflow-x: auto;

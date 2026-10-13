@@ -238,6 +238,11 @@ TEXT:
 Der neue Text, der danach eingefügt wird.
 \`\`\`
 
+- Ergänzung INNERHALB eines Callouts: \`NACH:\` ist die Callout-Zeile, unter
+  die der Text soll, und jede \`TEXT:\`-Zeile beginnt mit \`>\` – dann landet er
+  direkt darunter im Callout. Ohne \`>\` wird er ein eigener Absatz hinter dem
+  Callout.
+
 Bevorzuge \`anki-card\`, wenn es um Karten geht - das ist zuverlässiger als
 Textsuche. Benutze \`anki-edit\` für Änderungen am Fließtext und
 \`anki-insert\` für Ergänzungen.

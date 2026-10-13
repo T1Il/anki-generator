@@ -3,7 +3,7 @@ import AnkiGeneratorPlugin from '../../main';
 import { ChatMessage } from '../../types';
 import { ChatPanel } from './ChatPanel';
 import { Suggestion, entschaerfePluginFences } from '../../chat/suggestions';
-import { berechneVergleich, Vergleich } from '../../chat/vergleich';
+import { berechneVergleich, markiereZeilen, Vergleich } from '../../chat/vergleich';
 import { getAnkiBlocks, parseCardsFromBlockSource } from '../../anki/ankiParser';
 import { renderMermaidInElement } from '../../mermaidRenderer';
 import { klappbareCallouts } from '../callouts';
@@ -193,9 +193,11 @@ export class ChatModal extends Modal {
 		const nachher = spalte('Nachher', 'is-nachher', v.art === 'text' ? v.nachher : quelle(v.nachher));
 
 		if (v.art === 'text') {
-			if (v.vorher) await this.inhaltOderQuelle(vorher, v.vorher);
+			// Kopieren nimmt den unmarkierten Text (oben in spalte()); gerendert
+			// wird mit Markierung, damit man sieht, was sich aendert.
+			if (v.vorher) await this.markdown(vorher, markiereZeilen(v.vorher, v.geaendertVorher, 'is-remove'));
 			else vorher.createDiv({ cls: 'anki-vergleich-leer', text: '—' });
-			await this.inhaltOderQuelle(nachher, v.nachher);
+			await this.markdown(nachher, markiereZeilen(v.nachher, v.geaendertNachher, 'is-add'));
 			return;
 		}
 
