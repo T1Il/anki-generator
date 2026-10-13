@@ -1569,3 +1569,14 @@ textarea.schema-hintergrund {
 	max-width: 100% !important;
 	height: auto !important;
 }
+
+/*
+ * Dasselbe fuer Diagramme in Notizen, die Obsidian selbst zeichnet: in einem
+ * Callout schnitt es breite Diagramme rechts einfach ab (Konzeptkarte
+ * Glukokortikoide, 13.10.2026).
+ */
+.markdown-rendered .callout .mermaid > svg,
+.markdown-source-view .callout .mermaid > svg {
+	max-width: 100% !important;
+	height: auto !important;
+}

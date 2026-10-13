@@ -64,13 +64,21 @@ ${schwerpunkt.trim() ? `\nSchwerpunkt des Lernenden: ${schwerpunkt.trim()}\n` : 
 \`> [!info]- 🗺️ Zusammenhänge\` mit einem Mermaid-Diagramm, eingefügt hinter dem Übersichts-Callout
 (oder hinter der ersten Überschrift). Für diese Karte gelten die allgemeinen Diagrammregeln mit
 diesen Abweichungen – es ist ausdrücklich ein Begriffsnetz, keine Kaskade:
-- \`flowchart TD\`, 10–20 Knoten, Themenblöcke als Subgraphen (\`subgraph gk["Glukokortikoide"]\`).
-- JEDE Kante trägt ihre Beziehung als Beschriftung: \`A -->|"steigert"| B\`, \`A -->|"deshalb"| B\`,
-  \`A -->|"Folge"| B\`; Hemmung gestrichelt: \`A -.->|"hemmt"| B\`.
+- Sie muss in eine Notizspalte (~650 px) passen, ohne dass die Schrift winzig wird. Deshalb:
+  höchstens 12 Knoten und 14 Kanten, KEINE Subgraphen (Kanten zwischen Subgraphen machen das
+  Diagramm doppelt so breit) – Themen unterscheiden die Farbklassen. Höchstens 3 Knoten
+  nebeneinander auf einer Ebene; lieber eine Ebene mehr.
+- Reicht das nicht, dann ZWEI Karten im selben Callout (z. B. „Wirkung" und „Klinik"), jede für
+  sich höchstens 10 Knoten – nie eine große.
+- Kopfzeile genau so (kompakte Abstände):
+  \`%%{init: {'flowchart': {'curve': 'basis', 'nodeSpacing': 25, 'rankSpacing': 30}}}%%\`
+  und darunter \`flowchart TD\`.
+- JEDE Kante trägt ihre Beziehung als Beschriftung aus 1–2 Wörtern: \`A -->|"steigert"| B\`,
+  \`A -->|"deshalb"| B\`, \`A -->|"Folge"| B\`; Hemmung gestrichelt: \`A -.->|"hemmt"| B\`.
 - Klassen wie in den Diagrammregeln (\`drug\`, \`msg\`, \`eff\`, \`res\`), dazu für alles, was NICHT in
   der Notiz steht, sondern aus deiner Recherche kommt:
   \`classDef neu fill:#fff8dc,stroke:#b8860b,stroke-width:2px,stroke-dasharray:5 3,color:#000\`
-- Knotentexte kurz (höchstens ~6 Wörter). Die Erklärung steht in den Warum-Ketten, nicht im Knoten.
+- Knotentexte kurz (höchstens ~4 Wörter, notfalls mit \`<br/>\` umbrochen). Die Erklärung steht in den Warum-Ketten, nicht im Knoten.
 - Hängen Knoten an nummerierten Warum-Ketten, setz die Nummer in den Knoten: \`["① Hypokaliämie"]\`.
 
 **Warum-Ketten**: nummeriert (①, ②, …), je 1–3 Sätze, die eine Verbindung der Karte erklären.

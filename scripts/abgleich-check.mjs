@@ -128,6 +128,7 @@ check('ohne Vault/Zotero nur Web', !ohneVault.includes('**Vault**') && !ohneVaul
 const karte = m.buildKonzeptkartenAuftrag('Glukokortikoide, Mineralkortikoide', 'Addison-Krise');
 check('Auftrag: Notiz und Schwerpunkt', karte.includes('„Glukokortikoide, Mineralkortikoide"') && karte.includes('Schwerpunkt des Lernenden: Addison-Krise'));
 check('Auftrag: keine Karten, Klasse neu, beschriftete Kanten', /KEINE Anki-Karten/.test(karte) && karte.includes('classDef neu') && karte.includes('-->|"steigert"|'));
+check('Auftrag: kompakt (Knotengrenze, keine Subgraphen, enge Abstände)', karte.includes('höchstens 12 Knoten') && karte.includes('KEINE Subgraphen') && karte.includes("'nodeSpacing': 25"));
 check('Auftrag ohne Schwerpunkt', !m.buildKonzeptkartenAuftrag('X', '  ').includes('Schwerpunkt des Lernenden'));
 // So soll die Antwort aussehen: der Vorschlag muss sich parsen lassen und die
 // Mermaid-Reparatur darf Kantenbeschriftungen und die Klasse neu nicht anfassen.
