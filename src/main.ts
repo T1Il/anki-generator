@@ -21,6 +21,8 @@ import { loadHistory, saveHistory } from './chat/chatHistory';
 import { checkDrift } from './anki/driftCheck';
 import { DriftReviewModal } from './ui/DriftReviewModal';
 import { MedikamentQuellenModal } from './ui/MedikamentQuellenModal';
+import { FlaggenDienst } from './flaggen/dienst';
+import { FlaggenModal } from './ui/FlaggenModal';
 import {
 	schemaNotizErstellen,
 	schemaTabelleAktualisieren,
@@ -33,6 +35,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	activeGenerations: Map<string, { controller: AbortController, description: string, path: string }> = new Map(); // Stores active generations
 	legacyFileDecorator: LegacyFileDecorator | null = null;
 	ankiFileDecorationProvider: AnkiFileDecorationProvider | null = null;
+	flaggen: FlaggenDienst = new FlaggenDienst(this);
 
 	async onload() {
 		await this.loadSettings();
@@ -142,6 +145,24 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		// Register Editor Extension (CM6)
 		this.registerEditorExtension(legacyAnkiStateField);
+
+		// Geflaggte Karten: Fenster, Befehl, Prüfung beim Start und stündlich.
+		this.flaggen.oeffneFenster = () => new FlaggenModal(this).open();
+		this.addRibbonIcon('flag', 'Geflaggte Anki-Karten', () => new FlaggenModal(this).open());
+		this.addCommand({
+			id: 'geflaggte-karten',
+			name: 'Geflaggte Karten',
+			callback: () => new FlaggenModal(this).open()
+		});
+		this.app.workspace.onLayoutReady(() => {
+			// Anki braucht nach dem Hochfahren einen Moment, bis AnkiConnect lauscht.
+			window.setTimeout(() => {
+				if (this.settings.flaggenAutomatisch) void this.flaggen.pruefeBeiBedarf(true).catch((e) => console.warn('[Flaggen]', e));
+			}, 20000);
+		});
+		this.registerInterval(window.setInterval(() => {
+			if (this.settings.flaggenAutomatisch) void this.flaggen.pruefeBeiBedarf(false).catch((e) => console.warn('[Flaggen]', e));
+		}, 60 * 60 * 1000));
 
 		// Command Registrierung
 

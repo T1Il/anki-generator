@@ -63,6 +63,12 @@ export interface AnkiGeneratorSettings {
 	 * im eigentlichen Sinn – liegt hier, weil es data.json ohnehin gibt.
 	 */
 	quellenSitzungen: Record<string, QuellenSitzung>;
+	/** Geflaggte Karten: beim Start und stündlich prüfen. */
+	flaggenAutomatisch: boolean;
+	/** Ab so vielen ungeprüften Flaggen startet die KI-Prüfung selbst. */
+	flaggenSchwelle: number;
+	/** Wer prüft: 'claude-agent', ein Anbieter, oder leer = Modell des Chats. */
+	flaggenModell: string;
 }
 
 export interface QuellenSitzung {
@@ -252,6 +258,9 @@ Hier ist der Lerninhalt:
 	claudeCliPath: '',
 	claudeAgentModel: '',
 	chatProvider: '',
+	flaggenAutomatisch: true,
+	flaggenSchwelle: 10,
+	flaggenModell: 'claude-agent',
 	zoteroApiUrl: 'http://localhost:23119/api',
 	zoteroDataDir: '',
 	fitnessManagerUrl: 'https://fitness-manager.tail0d1239.ts.net',
@@ -625,6 +634,42 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 					this.plugin.settings.fitnessManagerUrl = value.trim();
 					await this.plugin.saveSettings();
 				}));
+
+		containerEl.createEl('h3', { text: 'Geflaggte Karten' });
+
+		new Setting(containerEl)
+			.setName('Automatisch prüfen')
+			.setDesc('Beim Start von Obsidian und stündlich.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.flaggenAutomatisch)
+				.onChange(async (value) => {
+					this.plugin.settings.flaggenAutomatisch = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Schwelle')
+			.setDesc('Ab so vielen ungeprüften Flaggen startet die KI-Prüfung.')
+			.addText(text => text
+				.setValue(String(this.plugin.settings.flaggenSchwelle))
+				.onChange(async (value) => {
+					const n = parseInt(value, 10);
+					this.plugin.settings.flaggenSchwelle = Number.isFinite(n) && n > 0 ? n : 10;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Modell der Prüfung')
+			.addDropdown(dd => {
+				dd.addOption('claude-agent', 'Claude-Agent (Zotero, Vault, Web)');
+				dd.addOption('', 'Modell des Chats');
+				PROVIDER_ORDER.forEach((p) => dd.addOption(p, PROVIDERS[p].label));
+				dd.setValue(this.plugin.settings.flaggenModell)
+					.onChange(async (value) => {
+						this.plugin.settings.flaggenModell = value;
+						await this.plugin.saveSettings();
+					});
+			});
 
 		containerEl.createEl('h3', { text: t('settings.prompts') });
 

@@ -119,6 +119,23 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
     - Click **Sync** to push cards to Anki.
     - Use the magnifier in the chat header for content analysis.
 
+### Flagged cards (Geflaggte Karten)
+- Flag a card while reviewing (e.g. in AnkiDroid); after the next sync the plugin finds it
+  via AnkiConnect and maps it to its note through the `ID:` line.
+- Flag colours: red/pink = something is wrong, orange = badly phrased question,
+  green = split, blue = delete, turquoise = explain / make precise, purple = check source.
+- A rule-based pre-check runs first: Anki behind the vault (Mermaid error text, raw LaTeX on
+  type-in cards), attachments Anki cannot show (PDF, Excalidraw, missing media, landscape images),
+  leftover `**` / `^block-id`, broken cloze cards. Cards that only need a re-sync skip the AI.
+- From a configurable threshold (default 10) the AI checks all flagged cards in the background
+  (default: Claude agent with Zotero, vault and web search). Its answer lands in the note's
+  chat history, so suggestions use the normal diff / apply / undo UI.
+- On Obsidian start a window lists notes with ready suggestions. **Abschließen** syncs the note
+  to Anki, deletes cards removed in the vault, clears the flags and triggers an AnkiWeb sync.
+  Cards without a note are corrected directly in Anki.
+- PDF and Excalidraw embeds are now converted to PNG before upload (first pages of a PDF are
+  stacked vertically for portrait screens).
+
 ## Commands
 
 Available from the command palette:
@@ -127,6 +144,7 @@ Available from the command palette:
 - *AI Chat öffnen (Seitenleiste)* / *AI Chat in neuem Tab öffnen*
 - *Abweichungen zu Anki prüfen (aktuelle Notiz)*
 - *Abweichungen zu Anki prüfen (ganzer Vault)*
+- *Geflaggte Karten*
 
 ## Configuration
 

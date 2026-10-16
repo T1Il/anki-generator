@@ -1580,3 +1580,65 @@ textarea.schema-hintergrund {
 	max-width: 100% !important;
 	height: auto !important;
 }
+
+/* --- Geflaggte Karten ------------------------------------------------------ */
+
+.anki-flaggen-modal { width: min(860px, 94vw); }
+.anki-flaggen-kopf {
+	display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+	padding-bottom: 10px; border-bottom: 1px solid var(--background-modifier-border);
+}
+.anki-flaggen-zahlen { flex: 1; color: var(--text-muted); }
+.anki-flaggen-zahl { font-size: 1.4em; font-weight: 600; color: var(--text-normal); }
+.anki-flaggen-offen { color: var(--text-accent); }
+.anki-flaggen-knoepfe { display: flex; gap: 6px; }
+.anki-flaggen-lauf { flex-basis: 100%; font-size: 0.9em; color: var(--text-muted); }
+.anki-flaggen-liste { max-height: 70vh; overflow-y: auto; padding-top: 6px; }
+.anki-flaggen-leer { padding: 24px 0; text-align: center; color: var(--text-muted); }
+
+.anki-flaggen-gruppe { padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.anki-flaggen-gruppe-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.anki-flaggen-notiz { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-flaggen-gruppe-knoepfe { display: flex; gap: 6px; }
+
+.anki-flaggen-status {
+	font-size: 0.8em; padding: 1px 8px; border-radius: 10px;
+	background: var(--background-modifier-hover); color: var(--text-muted);
+}
+.anki-flaggen-status.is-bereit { background: rgba(48, 164, 108, 0.15); color: #30a46c; }
+.anki-flaggen-status.is-nurUebertragen { background: rgba(0, 144, 255, 0.15); color: #0090ff; }
+.anki-flaggen-status.is-fehler { background: rgba(229, 72, 77, 0.15); color: #e5484d; }
+.anki-flaggen-fehler { flex-basis: 100%; font-size: 0.85em; color: #e5484d; }
+
+.anki-flaggen-karte { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0 6px 4px; }
+.anki-flaggen-flagge { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 2px; }
+.anki-flaggen-karte-text { flex: 1; min-width: 0; }
+.anki-flaggen-frage { line-height: 1.4; }
+.anki-flaggen-nummer {
+	display: inline-block; min-width: 1.6em; margin-right: 6px; padding: 0 4px;
+	font-size: 0.8em; text-align: center; border-radius: 4px;
+	background: var(--background-modifier-hover); color: var(--text-muted);
+}
+.anki-flaggen-bedeutung { font-size: 0.85em; color: var(--text-muted); }
+.anki-flaggen-befunde { margin: 4px 0 0; padding-left: 18px; font-size: 0.85em; }
+.anki-flaggen-befunde li.is-veraltet { color: #0090ff; }
+.anki-flaggen-befunde li.is-anhang,
+.anki-flaggen-befunde li.is-querformat { color: #f76b15; }
+.anki-flaggen-befunde li.is-rest,
+.anki-flaggen-befunde li.is-lueckentext { color: var(--text-normal); }
+.anki-flaggen-karte-knoepfe { flex: none; }
+
+.anki-flaggen-waise { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.anki-flaggen-vorschlag {
+	width: 100%; padding: 8px; border-radius: 6px;
+	border: 1px solid var(--background-modifier-border); background: var(--background-secondary);
+}
+.anki-flaggen-vorschlag-feld { white-space: pre-wrap; margin-bottom: 4px; }
+.anki-flaggen-vorschlag-art { font-weight: 600; color: #e5484d; margin-bottom: 4px; }
+.anki-flaggen-link { font-size: 0.85em; cursor: pointer; }
+
+@media (max-width: 600px) {
+	.anki-flaggen-karte { flex-wrap: wrap; }
+	.anki-flaggen-gruppe-knoepfe { flex-basis: 100%; }
+}
+.anki-flaggen-begruendung { font-size: 0.85em; line-height: 1.4; color: var(--text-normal); }

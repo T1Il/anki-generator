@@ -4,6 +4,7 @@ import { Card } from '../types';
 import { deleteAnkiNotes, createAnkiDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './AnkiConnect';
 import { arrayBufferToBase64, basicMarkdownToHtml, convertObsidianLatexToAnki, convertObsidianLinks } from '../utils';
 import { latexZuKlartext } from '../latexPlain';
+import { alsPng, brauchtUmwandlung, pngName } from './anhangBild';
 import { containsMermaid, processMermaidBlocks } from '../mermaidRenderer';
 import { findSpecificAnkiBlock, formatCardsToString, buildFullBlock, hasCloze, parseBlockHeader, cleanBlockInner } from './ankiParser';
 
@@ -84,8 +85,22 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         if (uniqueImageNames.size > 0) {
             notice.setMessage(`Verarbeite ${uniqueImageNames.size} Bilder...`);
             for (const name of uniqueImageNames) {
-                const imgFile = plugin.app.metadataCache.getFirstLinkpathDest(normalizePath(name), file.path);
+                let imgFile = plugin.app.metadataCache.getFirstLinkpathDest(normalizePath(name), file.path);
+                // `![[Zeichnung.excalidraw]]` meint `Zeichnung.excalidraw.md`.
+                if (!imgFile && !/\.md$/i.test(name)) {
+                    imgFile = plugin.app.metadataCache.getFirstLinkpathDest(normalizePath(name + '.md'), file.path);
+                }
                 if (imgFile instanceof TFile) {
+                    // PDF und Excalidraw kann Anki nicht anzeigen – vorher zu PNG.
+                    if (brauchtUmwandlung(imgFile)) {
+                        notice.setMessage(`Wandle ${imgFile.name} in ein Bild um...`);
+                        const png = await alsPng(plugin.app, imgFile);
+                        if (png) {
+                            imageMap.set(name, imgFile);
+                            filesToUpload.push({ filename: pngName(imgFile), data: png });
+                        }
+                        continue;
+                    }
                     imageMap.set(name, imgFile);
                     try {
                         const fileData = await plugin.app.vault.readBinary(imgFile);
@@ -106,7 +121,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                         uploadedImageMap.set(f.filename, ankiName);
                         // Also map the keys from uniqueImageNames that resolved to this file
                         for (const [origName, tfile] of imageMap.entries()) {
-                            if (tfile.name === f.filename) {
+                            if (tfile.name === f.filename || (brauchtUmwandlung(tfile) && pngName(tfile) === f.filename)) {
                                 uploadedImageMap.set(origName, ankiName);
                             }
                         }

@@ -283,7 +283,7 @@ function fieldValue(note: any, preferredName: string, order: number): string {
 	return sorted[order]?.value ?? '';
 }
 
-function compareCard(card: Card, note: any, settings: AnkiGeneratorSettings): DriftField[] {
+export function compareCard(card: Card, note: any, settings: AnkiGeneratorSettings): DriftField[] {
 	if (card.type === 'Cloze') {
 		const noteValue = expectedClozeText(card);
 		const ankiValue = fieldValue(note, settings.clozeText, 0);

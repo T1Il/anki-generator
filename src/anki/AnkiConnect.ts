@@ -537,3 +537,61 @@ export async function storeAnkiMediaFiles(files: { filename: string, data: strin
 	}
 	return results;
 }
+
+// --- Flaggen ----------------------------------------------------------------
+
+/** Ist Anki mit AnkiConnect erreichbar? Wirft nie. */
+export async function ankiErreichbar(): Promise<boolean> {
+	try {
+		await ankiConnectRequest('version', {});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export async function findCards(query: string): Promise<number[]> {
+	return ankiConnectRequest('findCards', { query });
+}
+
+export async function cardsInfo(cardIds: number[]): Promise<any[]> {
+	if (cardIds.length === 0) return [];
+	return ankiConnectRequest('cardsInfo', { cards: cardIds });
+}
+
+/**
+ * Flagge einer Karte setzen (0 = keine).
+ *
+ * AnkiConnect kennt kein eigenes setFlag. `flags` steht nicht auf der
+ * Warnliste von setSpecificValueOfCard, braucht also kein warning_check.
+ * Der Wert muss eine Zahl sein – als String landet er so in der Spalte.
+ */
+export async function setzeFlagge(cardIds: number[], flagge: number): Promise<void> {
+	if (cardIds.length === 0) return;
+	const actions = cardIds.map((card) => ({
+		action: 'setSpecificValueOfCard',
+		version: 6,
+		params: { card, keys: ['flags'], newValues: [flagge] }
+	}));
+	const results = await ankiConnectRequest('multi', { actions });
+	const fehler = (results || [])
+		.map((r: any) => (r && typeof r === 'object' && 'error' in r ? r.error : null))
+		.filter(Boolean);
+	if (fehler.length) throw new Error('Flagge nicht gesetzt: ' + fehler.join('; '));
+}
+
+/** Liegt die Datei in Ankis Medienordner? Liefert die Daten (Base64) oder null. */
+export async function holeMediendatei(filename: string): Promise<string | null> {
+	const r = await ankiConnectRequest('retrieveMediaFile', { filename });
+	return typeof r === 'string' && r ? r : null;
+}
+
+/** AnkiWeb-Sync anstoßen, damit die Änderungen auf dem Handy ankommen. */
+export async function ankiSync(): Promise<void> {
+	await ankiConnectRequest('sync', {});
+}
+
+/** Karten im Browser von Anki zeigen. */
+export async function zeigeInAnki(query: string): Promise<void> {
+	await ankiConnectRequest('guiBrowse', { query });
+}
