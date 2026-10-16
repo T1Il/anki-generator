@@ -28,14 +28,18 @@ export interface FlaggenArt {
 
 const ALLGEMEIN = 'Finde selbst, was an der Karte nicht stimmt (fachlich, Formulierung, Darstellung, Kontext) und korrigiere es.';
 
+/**
+ * Die Namen beschreiben den Fehler der Karte, nicht die Abhilfe – so stehen
+ * sie auch in AnkiDroid (Kartenbrowser → Optionen → Flaggen umbenennen).
+ */
 export const FLAGGEN: Record<number, FlaggenArt> = {
-	1: { nummer: 1, farbe: 'rot', css: '#e5484d', bedeutung: 'irgendwas stimmt nicht', auftrag: ALLGEMEIN },
-	2: { nummer: 2, farbe: 'orange', css: '#f76b15', bedeutung: 'Frage schlecht gestellt', auftrag: 'Stelle die Frage so, dass sie ohne die Notiz eindeutig beantwortbar ist (Kontext nennen, eine Antwort erwartet).' },
-	3: { nummer: 3, farbe: 'grün', css: '#30a46c', bedeutung: 'aufteilen', auftrag: 'Teile die Karte in mehrere atomare Karten: die alte löschen (OP: delete), die neuen hinzufügen (OP: add).' },
-	4: { nummer: 4, farbe: 'blau', css: '#0090ff', bedeutung: 'löschen', auftrag: 'Die Karte soll gelöscht werden (OP: delete). Steckt darin Wissen, das sonst fehlt, schlage zusätzlich eine bessere Karte vor.' },
-	5: { nummer: 5, farbe: 'pink', css: '#d6409f', bedeutung: 'irgendwas stimmt nicht', auftrag: ALLGEMEIN },
-	6: { nummer: 6, farbe: 'türkis', css: '#12a594', bedeutung: 'erklären / präzisieren', auftrag: 'Die Antwort ist unklar. Präzisiere sie und ergänze eine kurze Erklärung (ein Satz, warum es so ist), ohne die Karte aufzublähen.' },
-	7: { nummer: 7, farbe: 'lila', css: '#8e4ec6', bedeutung: 'Quelle prüfen', auftrag: 'Prüfe die Aussage gegen Zotero und den Vault. Stimmt sie nicht, korrigiere Karte und Notiz und nenne die Quelle.' }
+	1: { nummer: 1, farbe: 'rot', css: '#e5484d', bedeutung: 'Fehler (unbestimmt)', auftrag: ALLGEMEIN },
+	2: { nummer: 2, farbe: 'orange', css: '#f76b15', bedeutung: 'Frage mehrdeutig', auftrag: 'Die Frage lässt mehrere Antworten zu oder ihr fehlt der Kontext. Stelle sie so, dass sie ohne die Notiz eindeutig beantwortbar ist (Thema nennen, genau eine Antwort erwartet).' },
+	3: { nummer: 3, farbe: 'grün', css: '#30a46c', bedeutung: 'Zu viel Inhalt', auftrag: 'Die Karte enthält mehrere Fakten. Teile sie in atomare Karten: die alte löschen (OP: delete), die neuen hinzufügen (OP: add).' },
+	4: { nummer: 4, farbe: 'blau', css: '#0090ff', bedeutung: 'Überflüssig', auftrag: 'Die Karte ist doppelt, irrelevant oder veraltet und soll gelöscht werden (OP: delete). Steckt darin Wissen, das sonst fehlt, schlage zusätzlich eine bessere Karte vor.' },
+	5: { nummer: 5, farbe: 'pink', css: '#d6409f', bedeutung: 'Darstellung kaputt', auftrag: 'Die Karte wird falsch dargestellt (Bild fehlt, Diagramm, Formatierung, LaTeX). Vergleiche die Anki-Darstellung mit der Notiz und behebe die Ursache in der Notiz. Steht sie dort richtig, genügt erneutes Übertragen – dann schlage nichts vor.' },
+	6: { nummer: 6, farbe: 'türkis', css: '#12a594', bedeutung: 'Antwort unpräzise', auftrag: 'Die Antwort stimmt, ist aber vage oder ohne Begründung. Präzisiere sie und ergänze eine kurze Erklärung (ein Satz, warum es so ist), ohne die Karte aufzublähen.' },
+	7: { nummer: 7, farbe: 'lila', css: '#8e4ec6', bedeutung: 'Fakt zweifelhaft', auftrag: 'Vermutlich ein fachlicher Fehler. Prüfe die Aussage gegen Zotero und den Vault. Stimmt sie nicht, korrigiere Karte und Notiz und nenne die Quelle.' }
 };
 
 export function flaggenArt(nummer: number): FlaggenArt {

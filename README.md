@@ -122,8 +122,10 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
 ### Flagged cards (Geflaggte Karten)
 - Flag a card while reviewing (e.g. in AnkiDroid); after the next sync the plugin finds it
   via AnkiConnect and maps it to its note through the `ID:` line.
-- Flag colours: red/pink = something is wrong, orange = badly phrased question,
-  green = split, blue = delete, turquoise = explain / make precise, purple = check source.
+- Flag colours (named after the card's defect; rename them the same way in AnkiDroid:
+  card browser → options): red = Fehler (unbestimmt), orange = Frage mehrdeutig,
+  green = Zu viel Inhalt, blue = Überflüssig, pink = Darstellung kaputt,
+  turquoise = Antwort unpräzise, purple = Fakt zweifelhaft.
 - A rule-based pre-check runs first: Anki behind the vault (Mermaid error text, raw LaTeX on
   type-in cards), attachments Anki cannot show (PDF, Excalidraw, missing media, landscape images),
   leftover `**` / `^block-id`, broken cloze cards. Cards that only need a re-sync skip the AI.

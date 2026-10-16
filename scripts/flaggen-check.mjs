@@ -66,9 +66,9 @@ const cloze = (q, a = '', id = 1) => ({ type: 'Cloze', q, a, id });
 const arten = (b) => b.map((x) => x.art);
 
 console.log('\nFlaggen:');
-check('rot und pink = allgemein', F.flaggenArt(1).bedeutung === F.flaggenArt(5).bedeutung);
-check('türkis = erklären / präzisieren', F.flaggenArt(6).bedeutung.includes('erklären'));
-check('blau = löschen', F.flaggenArt(4).bedeutung === 'löschen');
+check('pink = Darstellung kaputt', F.flaggenArt(5).bedeutung === 'Darstellung kaputt');
+check('türkis = Antwort unpräzise', F.flaggenArt(6).bedeutung === 'Antwort unpräzise');
+check('blau = Überflüssig, Auftrag loeschen', F.flaggenArt(4).bedeutung === 'Überflüssig' && F.flaggenArt(4).auftrag.includes('OP: delete'));
 check('unbekannte Nummer faellt auf rot', F.flaggenArt(9).nummer === 1);
 
 console.log('\nBefunde ohne KI:');
@@ -173,14 +173,14 @@ console.log('\nAuftrag:');
 			befunde: [{ art: 'anhang', text: 'PDF', neuUebertragen: true }] }
 	], true);
 	check('CARD-Nummern im Auftrag', t.includes('### CARD: 3') && t.includes('### CARD: 5'));
-	check('Flaggenbedeutung im Auftrag', t.includes('erklären / präzisieren') && t.includes('irgendwas stimmt nicht'));
+	check('Flaggenbedeutung im Auftrag', t.includes('Antwort unpräzise') && t.includes('Fehler (unbestimmt)'));
 	check('HTML wird zu Klartext', t.includes('Vorderseite: Frage X'), t);
 	check('Befund mit Hinweis auf Neu-Uebertragen', t.includes('PDF (wird beim Abschließen neu übertragen)'));
 	check('Quellen: Zotero und Vault', t.includes('Zotero') && t.includes('Vault'));
 	const ohne = F.pruefAuftrag([], false);
 	check('ohne Quellen kein Zotero-Hinweis', !ohne.includes('Zotero'));
 	const w = F.waisenAuftrag([{ cardId: 1, noteId: 555, flagge: 4, kartenNummer: null, anki: { felder: ['a', 'b'], modell: 'Basic' }, befunde: [] }], false);
-	check('Waisen werden ueber ID angesprochen', w.includes('### ID: 555') && w.includes('löschen'));
+	check('Waisen werden ueber ID angesprochen', w.includes('### ID: 555') && w.includes('Überflüssig') && w.includes('OP: delete'));
 }
 
 console.log('\nSchluessel:');
