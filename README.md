@@ -124,7 +124,7 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
   via AnkiConnect and maps it to its note through the `ID:` line.
 - Flag colours (named after the card's defect; rename them the same way in AnkiDroid:
   card browser → options): red = Fehler (unbestimmt), orange = Frage mehrdeutig,
-  green = Zu viel Inhalt, blue = Überflüssig, pink = Diagramm fehlt,
+  green = Zu viel Inhalt, blue = Überflüssig, pink = Darstellung kaputt / hinzufügen,
   turquoise = Antwort unpräzise, purple = Fakt zweifelhaft.
 - A rule-based pre-check runs first: Anki behind the vault (Mermaid error text, raw LaTeX on
   type-in cards), attachments Anki cannot show (PDF, Excalidraw, missing media, landscape images),
