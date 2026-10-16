@@ -66,7 +66,7 @@ const cloze = (q, a = '', id = 1) => ({ type: 'Cloze', q, a, id });
 const arten = (b) => b.map((x) => x.art);
 
 console.log('\nFlaggen:');
-check('pink = Darstellung kaputt', F.flaggenArt(5).bedeutung === 'Darstellung kaputt');
+check('pink = Diagramm fehlt, Auftrag Mermaid', F.flaggenArt(5).bedeutung === 'Diagramm fehlt' && F.flaggenArt(5).auftrag.includes('Mermaid'));
 check('türkis = Antwort unpräzise', F.flaggenArt(6).bedeutung === 'Antwort unpräzise');
 check('blau = Überflüssig, Auftrag loeschen', F.flaggenArt(4).bedeutung === 'Überflüssig' && F.flaggenArt(4).auftrag.includes('OP: delete'));
 check('unbekannte Nummer faellt auf rot', F.flaggenArt(9).nummer === 1);
