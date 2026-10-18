@@ -1,6 +1,30 @@
 import { requestUrl } from 'obsidian';
 
+/**
+ * Während Anki synchronisiert (oder die Sammlung schließt/öffnet), lehnt es
+ * jede Anfrage mit „Collection lifecycle operation is active“ ab. Das ist kein
+ * Fehler, sondern ein kurzes Warten – gemessen 16.10.2026 nach „Abschließen“,
+ * das selbst den AnkiWeb-Sync anstößt.
+ */
+const ANKI_BESCHAEFTIGT = /lifecycle operation is active/i;
+const WARTEN_MS = 1500;
+const WARTEN_MAX = 40;
+
 async function ankiConnectRequest(action: string, params: object): Promise<any> {
+	for (let versuch = 0; ; versuch++) {
+		try {
+			return await ankiConnectEinmal(action, params);
+		} catch (e: any) {
+			if (versuch < WARTEN_MAX && ANKI_BESCHAEFTIGT.test(String(e?.message || e))) {
+				await new Promise((r) => window.setTimeout(r, WARTEN_MS));
+				continue;
+			}
+			throw e;
+		}
+	}
+}
+
+async function ankiConnectEinmal(action: string, params: object): Promise<any> {
 	try {
 		const response = await requestUrl({
 			url: 'http://localhost:8765',

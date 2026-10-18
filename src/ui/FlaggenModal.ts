@@ -7,16 +7,20 @@ import { htmlToPlain } from '../anki/driftCheck';
 import { zeigeInAnki } from '../anki/AnkiConnect';
 import { entferneFlaggen, schliesseNotizAb, syncNachAnkiWeb, uebernimmWaise, waisenVorschlaege } from '../flaggen/abschluss';
 import { ladeStapel, speichereStapel } from '../flaggen/stapel';
-import { NotizStatus } from '../flaggen/dienst';
+import { NotizStatus, STATUS_RANG } from '../flaggen/bearbeitung';
 
 const STATUS_TEXT: Record<NotizStatus, string> = {
-	bereit: 'Vorschläge bereit',
-	nurUebertragen: 'neu übertragen',
+	unbearbeitet: 'unbearbeitet',
+	teilweise: 'teilweise bearbeitet',
+	offen: 'ungeprüft',
 	fehler: 'Fehler',
-	offen: 'ungeprüft'
+	bearbeitet: 'bearbeitet',
+	ohneVorschlag: 'keine Änderung vorgeschlagen',
+	nurUebertragen: 'neu übertragen'
 };
 
-const STATUS_RANG: Record<NotizStatus, number> = { bereit: 0, nurUebertragen: 1, fehler: 2, offen: 3 };
+/** Nur noch abschließen – Knopf hervorheben, Gruppe zurücknehmen. */
+const NUR_ABSCHLUSS = new Set<NotizStatus>(['bearbeitet', 'ohneVorschlag', 'nurUebertragen']);
 
 /**
  * Geflaggte Karten durchsehen und abschließen.
@@ -75,6 +79,9 @@ export class FlaggenModal extends Modal {
 		zahlen.createSpan({ text: stand.anzahl === 1 ? ' Karte' : ' Karten' });
 		const offen = dienst.offeneKarten();
 		if (offen) zahlen.createSpan({ cls: 'anki-flaggen-offen', text: ` · ${offen} ungeprüft` });
+		const zuTun = Array.from(stand.notizen.entries())
+			.filter(([p, e]) => { const st = dienst.status(p, e); return st === 'unbearbeitet' || st === 'teilweise'; }).length;
+		if (zuTun) zahlen.createSpan({ text: ` · ${zuTun} ${zuTun === 1 ? 'Notiz' : 'Notizen'} unbearbeitet` });
 
 		const knoepfe = this.kopf.createDiv({ cls: 'anki-flaggen-knoepfe' });
 		if (dienst.lauf) {
@@ -114,16 +121,22 @@ export class FlaggenModal extends Modal {
 			const f = this.app.vault.getAbstractFileByPath(pfad);
 			if (f instanceof TFile) void this.app.workspace.getLeaf(false).openFile(f);
 		};
-		kopf.createSpan({ cls: `anki-flaggen-status is-${status}`, text: STATUS_TEXT[status] });
+		let text = STATUS_TEXT[status];
+		if (status === 'teilweise') {
+			const b = this.plugin.flaggen.bearbeitung(pfad);
+			if (b.vorschlaege) text += ` (${b.erledigt}/${b.vorschlaege})`;
+		}
+		if (NUR_ABSCHLUSS.has(status)) gruppe.addClass('is-erledigt');
+		kopf.createSpan({ cls: `anki-flaggen-status is-${status}`, text });
 		const fehler = this.plugin.flaggen.datei.notizen[pfad]?.fehler;
 		if (status === 'fehler' && fehler) kopf.createSpan({ cls: 'anki-flaggen-fehler', text: fehler });
 
 		const k = kopf.createDiv({ cls: 'anki-flaggen-gruppe-knoepfe' });
-		if (status === 'bereit' || status === 'fehler' || status === 'offen') {
+		if (status !== 'nurUebertragen') {
 			new ButtonComponent(k).setButtonText('Ansehen').onClick(() => this.oeffneChat(pfad));
 		}
 		const ab = new ButtonComponent(k).setButtonText('Abschließen');
-		if (status === 'nurUebertragen') ab.setCta();
+		if (NUR_ABSCHLUSS.has(status)) ab.setCta();
 		ab.setDisabled(this.beschaeftigt.has(pfad));
 		ab.onClick(() => void this.schliesseAb(pfad, eintraege));
 
@@ -195,8 +208,8 @@ export class FlaggenModal extends Modal {
 						try {
 							await uebernimmWaise(e, v);
 							await this.merkeWaise(e.noteId, 'uebernommen');
-							void syncNachAnkiWeb();
 							await dienst.aktualisiere();
+							void syncNachAnkiWeb();
 						} catch (err: any) {
 							new Notice('Nicht übernommen: ' + (err?.message || err));
 						}
@@ -242,11 +255,20 @@ export class FlaggenModal extends Modal {
 			if (r.geloescht) teile.push(`${r.geloescht} gelöscht`);
 			teile.push(`${r.entflaggt} Flaggen entfernt`);
 			new Notice(teile.join(', '));
-			void syncNachAnkiWeb();
-			await this.plugin.flaggen.aktualisiere();
 		} catch (e: any) {
 			new Notice('Abschließen fehlgeschlagen: ' + (e?.message || e), 8000);
+			this.beschaeftigt.delete(pfad);
+			this.zeichne();
+			return;
+		}
+		try {
+			// Erst neu laden, dann syncen: während des Syncs lehnt Anki jede
+			// Anfrage ab („Collection lifecycle operation is active“).
+			await this.plugin.flaggen.aktualisiere();
+		} catch (e) {
+			console.warn('[Flaggen] Neu laden nach dem Abschließen', e);
 		} finally {
+			void syncNachAnkiWeb();
 			this.beschaeftigt.delete(pfad);
 			this.zeichne();
 		}

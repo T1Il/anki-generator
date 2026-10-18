@@ -24,7 +24,8 @@ fs.writeFileSync(stubFile, 'module.exports = { requestUrl: async () => ({ json: 
 const entry = path.join(os.tmpdir(), 'anki-flaggen-entry.ts');
 fs.writeFileSync(
 	entry,
-	'export * from ' + JSON.stringify(path.join(root, 'src/flaggen/flaggen.ts').replace(/\\/g, '/')) + ';\n'
+	'export * from ' + JSON.stringify(path.join(root, 'src/flaggen/flaggen.ts').replace(/\\/g, '/')) + ';\n' +
+	'export * from ' + JSON.stringify(path.join(root, 'src/flaggen/bearbeitung.ts').replace(/\\/g, '/')) + ';\n'
 );
 
 const outfile = path.join(os.tmpdir(), 'anki-flaggen-check.cjs');
@@ -225,6 +226,33 @@ console.log('\nAnzeige:');
 	check('Begruendung je Waise', F.waisenBegruendung(antwort, 5) === 'In Ordnung, weil X.', F.waisenBegruendung(antwort, 5));
 	check('Begruendung ohne Vorschlagsblock', F.waisenBegruendung(antwort, 6) === 'Weg damit.', F.waisenBegruendung(antwort, 6));
 	check('unbekannte ID = leer', F.waisenBegruendung(antwort, 7) === '');
+}
+
+console.log('\nBearbeitet?');
+{
+	const S = (v) => JSON.stringify(['card', 'update', null, v.ref, v.q, v.a, false]);
+	const antwort = '### CARD: 1\n```anki-card\nOP: update\nCARD: 1\nQ: Neu 1\nA: a\n```\n### CARD: 2\n```anki-card\nOP: update\nCARD: 2\nQ: Neu 2\nA: b\n```\n';
+	const verlauf = (vorschlaege) => [
+		{ role: 'user', content: F.AUFTRAG_KOPF + ' (2 Karten)\n\n> [!abstract]- Auftrag' },
+		{ role: 'ai', content: antwort, vorschlaege }
+	];
+	const am = '2026-10-16T10:00:00.000Z';
+	const vor = Date.parse(am) - 1000;
+	const b0 = F.bearbeitungsStand(verlauf({}), am, vor);
+	check('zwei Vorschlaege, keiner erledigt', b0.vorschlaege === 2 && b0.erledigt === 0, b0);
+	check('... = unbearbeitet', F.statusAus(b0) === 'unbearbeitet');
+	const k1 = S({ ref: 1, q: 'Neu 1', a: 'a' });
+	const b1 = F.bearbeitungsStand(verlauf({ [k1]: { status: 'applied' } }), am, vor);
+	check('einer uebernommen = teilweise', b1.erledigt === 1 && F.statusAus(b1) === 'teilweise', b1);
+	const k2 = S({ ref: 2, q: 'Neu 2', a: 'b' });
+	const b2 = F.bearbeitungsStand(verlauf({ [k1]: { status: 'applied' }, [k2]: { status: 'dismissed' } }), am, vor);
+	check('uebernommen + verworfen = bearbeitet', F.statusAus(b2) === 'bearbeitet', b2);
+	const bh = F.bearbeitungsStand(verlauf({}), am, Date.parse(am) + 60000);
+	check('Notiz von Hand geaendert = teilweise', F.statusAus(bh) === 'teilweise', bh);
+	const bo = F.bearbeitungsStand([{ role: 'user', content: F.AUFTRAG_KOPF }, { role: 'ai', content: 'In Ordnung.' }], am, vor);
+	check('Antwort ohne Vorschlag', F.statusAus(bo) === 'ohneVorschlag', bo);
+	check('ohne Verlauf = unbearbeitet', F.statusAus(F.bearbeitungsStand(undefined, am, vor)) === 'unbearbeitet');
+	check('Rang: unbearbeitet vor bearbeitet', F.STATUS_RANG.unbearbeitet < F.STATUS_RANG.bearbeitet && F.STATUS_RANG.teilweise < F.STATUS_RANG.nurUebertragen);
 }
 
 console.log('');

@@ -1,11 +1,11 @@
 import { Notice, Platform } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 import { ankiErreichbar } from '../anki/AnkiConnect';
-import { FlaggenEintrag, FlaggenStand, sammleFlaggen, zaehleFlaggen } from './sammeln';
+import { FlaggenEintrag, FlaggenStand, dateiFuer, sammleFlaggen, zaehleFlaggen } from './sammeln';
+import { Bearbeitung, NotizStatus, bearbeitungsStand, statusAus } from './bearbeitung';
 import { schonGeprueft, stapelSchluessel } from './flaggen';
 import { StapelDatei, StapelErgebnis, StapelFortschritt, istGeprueft, ladeStapel, pruefeStapel, speichereStapel, waisenGeprueft } from './stapel';
 
-export type NotizStatus = 'bereit' | 'nurUebertragen' | 'fehler' | 'offen';
 
 /**
  * Hält den Stand der geflaggten Karten, startet den Stapel und entscheidet,
@@ -50,7 +50,18 @@ export class FlaggenDienst {
 		const s = this.datei.notizen[pfad];
 		if (!s || !schonGeprueft(stapelSchluessel(eintraege), s.schluessel)) return 'offen';
 		if (s.fehler) return 'fehler';
-		return s.ohneKi ? 'nurUebertragen' : 'bereit';
+		if (s.ohneKi) return 'nurUebertragen';
+		return statusAus(this.bearbeitung(pfad));
+	}
+
+	/** Vorschläge der Flaggen-Antwort und wie viele davon erledigt sind. */
+	bearbeitung(pfad: string): Bearbeitung {
+		const datei = dateiFuer(this.plugin, pfad);
+		return bearbeitungsStand(
+			this.plugin.feedbackCache.get(pfad),
+			this.datei.notizen[pfad]?.am,
+			datei ? datei.stat.mtime : null
+		);
 	}
 
 	/** Karten, die noch keine Prüfung gesehen haben. */
@@ -68,7 +79,7 @@ export class FlaggenDienst {
 		let n = 0;
 		for (const [pfad, e] of this.stand.notizen) {
 			const s = this.status(pfad, e);
-			if (s === 'bereit' || s === 'nurUebertragen') n++;
+			if (s !== 'offen' && s !== 'fehler') n++;
 		}
 		if (this.stand.waisen.length && waisenGeprueft(this.datei, this.stand.waisen)) n++;
 		return n;

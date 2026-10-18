@@ -1642,3 +1642,8 @@ textarea.schema-hintergrund {
 	.anki-flaggen-gruppe-knoepfe { flex-basis: 100%; }
 }
 .anki-flaggen-begruendung { font-size: 0.85em; line-height: 1.4; color: var(--text-normal); }
+.anki-flaggen-status.is-unbearbeitet { background: rgba(247, 107, 21, 0.15); color: #f76b15; }
+.anki-flaggen-status.is-teilweise { background: rgba(0, 144, 255, 0.15); color: #0090ff; }
+.anki-flaggen-status.is-bearbeitet,
+.anki-flaggen-status.is-ohneVorschlag { background: rgba(48, 164, 108, 0.15); color: #30a46c; }
+.anki-flaggen-gruppe.is-erledigt .anki-flaggen-karte { opacity: 0.6; }
