@@ -1,6 +1,7 @@
 import { Notice, Platform } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 import { ankiErreichbar } from '../anki/AnkiConnect';
+import { schliesseNotizAb, syncNachAnkiWeb } from './abschluss';
 import { FlaggenEintrag, FlaggenStand, dateiFuer, sammleFlaggen, zaehleFlaggen } from './sammeln';
 import { Bearbeitung, NotizStatus, bearbeitungsStand, statusAus } from './bearbeitung';
 import { schonGeprueft, stapelSchluessel } from './flaggen';
@@ -111,6 +112,49 @@ export class FlaggenDienst {
 		}
 	}
 
+	private abschlussLaeuft = false;
+
+	/**
+	 * Fertiges ohne Klick abschließen: Notizen, deren Vorschläge alle übernommen
+	 * oder verworfen sind, und reine „neu übertragen“-Fälle. „Keine Änderung
+	 * vorgeschlagen“ bleibt stehen – die Karte hat dann noch niemand angesehen.
+	 * Gibt die Zahl der abgeschlossenen Notizen zurück.
+	 */
+	async schliesseFertigeAb(): Promise<number> {
+		if (!this.plugin.settings.flaggenAutoAbschluss || this.abschlussLaeuft || this.lauf || !this.stand) return 0;
+		const fertig = Array.from(this.stand.notizen.entries())
+			.filter(([p, e]) => { const s = this.status(p, e); return s === 'bearbeitet' || s === 'nurUebertragen'; });
+		if (!fertig.length) return 0;
+
+		this.abschlussLaeuft = true;
+		let n = 0;
+		const ergebnis = { uebertragen: 0, geloescht: 0, entflaggt: 0 };
+		try {
+			for (const [pfad, eintraege] of fertig) {
+				try {
+					const r = await schliesseNotizAb(this.plugin, pfad, eintraege);
+					ergebnis.uebertragen += r.uebertragen;
+					ergebnis.geloescht += r.geloescht;
+					ergebnis.entflaggt += r.entflaggt;
+					n++;
+				} catch (e: any) {
+					new Notice(`Abschließen fehlgeschlagen (${pfad.split('/').pop()}): ${e?.message || e}`, 8000);
+				}
+			}
+		} finally {
+			this.abschlussLaeuft = false;
+		}
+		if (n) {
+			const teile = [`${n} ${n === 1 ? 'Notiz' : 'Notizen'} abgeschlossen`, `${ergebnis.uebertragen} übertragen`];
+			if (ergebnis.geloescht) teile.push(`${ergebnis.geloescht} gelöscht`);
+			teile.push(`${ergebnis.entflaggt} Flaggen entfernt`);
+			new Notice(teile.join(', '));
+			try { await this.aktualisiere(); } catch (e) { console.warn('[Flaggen] Neu laden', e); }
+			void syncNachAnkiWeb();
+		}
+		return n;
+	}
+
 	brecheAb() {
 		this.lauf?.abort();
 	}
@@ -126,12 +170,14 @@ export class FlaggenDienst {
 		if ((await zaehleFlaggen()) === 0) return;
 
 		await this.aktualisiere();
+		await this.schliesseFertigeAb();
 		const schwelle = Math.max(1, this.plugin.settings.flaggenSchwelle || 10);
 		const offen = this.offeneKarten();
 
 		if (offen >= schwelle) {
 			new Notice(`${offen} geflaggte Karten – KI prüft im Hintergrund.`);
 			const e = await this.starteStapel();
+			await this.schliesseFertigeAb();
 			if (e && e.geprueft > 0) {
 				if (fensterErlaubt) this.oeffneFenster();
 				else new Notice(`Geflaggte Karten: ${e.geprueft} Notizen geprüft.`, 8000);

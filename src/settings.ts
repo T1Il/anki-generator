@@ -69,6 +69,8 @@ export interface AnkiGeneratorSettings {
 	flaggenSchwelle: number;
 	/** Wer prüft: 'claude-agent', ein Anbieter, oder leer = Modell des Chats. */
 	flaggenModell: string;
+	/** Bearbeitete Notizen und reine Neu-Übertragungen ohne Klick abschließen. */
+	flaggenAutoAbschluss: boolean;
 }
 
 export interface QuellenSitzung {
@@ -261,6 +263,7 @@ Hier ist der Lerninhalt:
 	flaggenAutomatisch: true,
 	flaggenSchwelle: 10,
 	flaggenModell: 'claude-agent',
+	flaggenAutoAbschluss: true,
 	zoteroApiUrl: 'http://localhost:23119/api',
 	zoteroDataDir: '',
 	fitnessManagerUrl: 'https://fitness-manager.tail0d1239.ts.net',
@@ -644,6 +647,16 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.flaggenAutomatisch)
 				.onChange(async (value) => {
 					this.plugin.settings.flaggenAutomatisch = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Fertiges selbst abschließen')
+			.setDesc('Notizen, deren Vorschläge alle übernommen oder verworfen sind, und reine Neu-Übertragungen.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.flaggenAutoAbschluss)
+				.onChange(async (value) => {
+					this.plugin.settings.flaggenAutoAbschluss = value;
 					await this.plugin.saveSettings();
 				}));
 

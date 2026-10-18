@@ -134,7 +134,8 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
   chat history, so suggestions use the normal diff / apply / undo UI.
 - On Obsidian start a window lists notes with ready suggestions. **Abschließen** syncs the note
   to Anki, deletes cards removed in the vault, clears the flags and triggers an AnkiWeb sync.
-  Cards without a note are corrected directly in Anki.
+  Cards without a note are corrected directly in Anki. Notes whose suggestions are all applied or
+  dismissed, and pure re-sync cases, are closed automatically (setting, on by default).
 - PDF and Excalidraw embeds are now converted to PNG before upload (first pages of a PDF are
   stacked vertically for portrait screens).
 

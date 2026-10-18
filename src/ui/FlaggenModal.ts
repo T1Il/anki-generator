@@ -241,7 +241,11 @@ export class FlaggenModal extends Modal {
 		const zu = chat.onClose.bind(chat);
 		chat.onClose = () => {
 			zu();
-			new FlaggenModal(this.plugin).open();
+			// Alle Vorschläge erledigt? Dann gleich abschließen, danach die Liste.
+			const dienst = this.plugin.flaggen;
+			void dienst.schliesseFertigeAb()
+				.catch((e) => console.warn('[Flaggen] Auto-Abschluss', e))
+				.finally(() => new FlaggenModal(this.plugin).open());
 		};
 		chat.open();
 	}
