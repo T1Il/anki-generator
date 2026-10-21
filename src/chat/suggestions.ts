@@ -7,7 +7,7 @@
  * anwenden lassen.
  */
 
-import { repariereMermaid, repariereMermaidImText } from './mermaidRepair';
+import { ohneDoppeltenZaun, repariereMermaid, repariereMermaidImText } from './mermaidRepair';
 import { mapMermaid } from '../mermaid/mermaidBloecke';
 import { senkrecht } from '../mermaid/mermaidEinstellungen';
 
@@ -136,6 +136,10 @@ TEXT:
 >     class D res
 > \`\`\`
 \`\`\`\`
+
+Den Code-Block genau EINMAL schließen, danach nur noch die Fence des
+Vorschlags. Keine Block-ID (\`^…\`) an eine Zaunzeile. Auch unter einer Zeile in einem
+Callout das neue Callout mit einem \`>\` schreiben – die Verschachtelung setzt das Plugin.
 
 Regeln für den Mermaid-Code:
 - Jede Zeile des Callouts beginnt mit \`> \`.
@@ -428,7 +432,7 @@ export function vorschlagAlsBlock(v: Suggestion): string {
 
 /** Mermaid-Code im Vorschlag reparieren, bevor Vorschau und Übernahme ihn sehen. */
 function repariereDiagramme<T extends Suggestion>(v: T): T {
-	return mapVorschlagText(v, (t) => mapMermaid(repariereMermaidImText(t), senkrecht));
+	return mapVorschlagText(v, (t) => mapMermaid(repariereMermaidImText(ohneDoppeltenZaun(t)), senkrecht));
 }
 
 /**

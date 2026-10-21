@@ -362,6 +362,32 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 	const crlf = C.insertAfterAnchor('> [!info] K\r\n> eins\r\n\r\nX', '> eins', '> zwei');
 	check('Zitat-Text: CRLF bleibt CRLF', crlf === '> [!info] K\r\n> eins\r\n> zwei\r\n\r\nX', JSON.stringify(crlf));
 
+	// Sepsis, 21.10.2026: Diagramm-Callout unter die letzte Zeile eines Callouts.
+	const F3 = '```';
+	const diagramm = ['> [!info]- Kompensation', '> ' + F3 + 'mermaid', '> flowchart TD', '>     A --> B', '> ' + F3].join('\n');
+	const sepsis = ['>[!severe] Globale Entzündung', '>- Blutdruckabfall', '>\t- positive Dromotropie ^globale-entzuendung', '', '>[!symptoms] Symptome'].join('\n');
+	const g = C.insertAfterAnchor(sepsis, '>\t- positive Dromotropie', diagramm);
+	check('Callout im Callout: eine Ebene tiefer, Leerzeile davor', g.includes('>\t- positive Dromotropie ^globale-entzuendung\n>\n>> [!info]- Kompensation\n>> ' + F3 + 'mermaid'), g);
+	check('... Code-Einzug bleibt', g.includes('\n>>     A --> B\n'), g);
+	check('... Block-ID nie an den Zaun', !/`{3}[ \t]*\^/.test(g) && g.includes('\n>> ' + F3 + '\n\n>[!symptoms]'), g);
+
+	// Gemischte Tiefe der KI (`>>` und `>`) unter einer Zeile in einem verschachtelten Callout.
+	const endo = ['> [!info] Pathophysiologie', '>>[!moderate] Endokrine Dysfunktion', '>>- Kortisoldefizit', '>>', '>> Weiter im Callout', '', 'Danach'].join('\n');
+	const gemischt = ['>> [!info]- Endokrin', '>> ' + F3 + 'mermaid', '> %%{init: {}}%%', '>> flowchart TD', '>> ' + F3].join('\n');
+	const h = C.insertAfterAnchor(endo, '>>- Kortisoldefizit', gemischt);
+	check('verschachtelt in Tiefe 2: Tiefe 3, alle Zeilen gleich', h.includes('>>- Kortisoldefizit\n>>\n>>> [!info]- Endokrin\n>>> ' + F3 + 'mermaid\n>>> %%{init: {}}%%\n>>> flowchart TD\n>>> ' + F3 + '\n>>\n>>'), h);
+
+	// Gewöhnlicher Zitat-Text bekommt die Tiefe des Callouts.
+	const tief = C.insertAfterAnchor(endo, '>>- Kortisoldefizit', '> - Steroidresistenz');
+	check('Zitat-Text in Tiefe 2 bleibt in Tiefe 2', tief.includes('>>- Kortisoldefizit\n>> - Steroidresistenz\n>>\n'), tief);
+
+	// Doppelter schließender Zaun – in Callout und Kartenantwort.
+	check('doppelter Zaun im Callout', C.ohneDoppeltenZaun(['> ' + F3 + 'mermaid', '> A', '> ' + F3, '> ' + F3].join('\n')) === ['> ' + F3 + 'mermaid', '> A', '> ' + F3].join('\n'));
+	check('doppelter Zaun in der Antwort', C.ohneDoppeltenZaun([F3 + 'mermaid', 'A', F3, F3].join('\n')) === [F3 + 'mermaid', 'A', F3].join('\n'));
+	check('zwei echte Bloecke bleiben', C.ohneDoppeltenZaun([F3 + 'mermaid', 'A', F3, '', F3, 'x', F3].join('\n')) === [F3 + 'mermaid', 'A', F3, '', F3, 'x', F3].join('\n'));
+	const karte = C.parseSuggestions(['````anki-card', 'OP: add', 'Q: Zeige das Schema', 'A: ' + F3 + 'mermaid', 'flowchart TD', '    A --> B', F3, F3, '````'].join('\n'))[0];
+	check('Kartenvorschlag: Antwort endet mit genau einem Zaun', karte.kind === 'card' && (karte.a.match(/`{3}/g) || []).length === 2 && karte.a.trimEnd().endsWith(F3), karte);
+
 	const sec = C.newAnkiSection('TARGET DECK: X\n\nQ: a\nA: ```mermaid\nflowchart TD\n```');
 	check('neuer Block mit vier Backticks bei innerem ```', sec.startsWith('## Anki\n````anki-cards') && sec.endsWith('\n````'), sec);
 	check('neuer Block ohne Code mit drei', C.newAnkiSection('Q: a').includes('```anki-cards') && !C.newAnkiSection('Q: a').includes('````'));

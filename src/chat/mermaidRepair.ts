@@ -83,3 +83,41 @@ export function repariereMermaidImText(text: string): string {
 	}
 	return lines.join('\n');
 }
+
+/**
+ * Ein schließender Code-Zaun, direkt gefolgt von einem zweiten nackten Zaun
+ * mit demselben Zitat-Präfix: der zweite ist zu viel. Er öffnete einen neuen,
+ * nie geschlossenen Code-Block – in der Notiz verschluckte er den Rest des
+ * Callouts, auf der Karte stand ``` unter dem Bild (Sepsis, 21.10.2026, in
+ * Notiz UND Kartenantwort). Die Modelle schließen gern einmal für den
+ * Mermaid-Block und noch einmal „für den Vorschlag".
+ */
+export function ohneDoppeltenZaun(text: string): string {
+	if (!/`{3}/.test(text)) return text;
+	const lines = text.split('\n');
+	const out: string[] = [];
+	let offen: { praefix: string; laenge: number } | null = null;
+	let geradeGeschlossen = '';
+	let geschlossenBei = -2;
+	for (let i = 0; i < lines.length; i++) {
+		const l = lines[i];
+		const m = l.match(/^((?:[ \t]*>)*[ \t]*)(?:(?:Q|A(?: \(type\))?):[ \t]*)?(`{3,})([^`]*?)[ \t]*\r?$/);
+		if (!m) { out.push(l); continue; }
+		const praefix = m[1].replace(/[ \t]+/g, '');
+		const zaun = m[2];
+		const info = m[3].trim();
+		if (offen) {
+			if (!info && praefix === offen.praefix && zaun.length >= offen.laenge) {
+				offen = null;
+				geradeGeschlossen = praefix;
+				geschlossenBei = out.length;
+			}
+			out.push(l);
+			continue;
+		}
+		if (!info && geschlossenBei === out.length - 1 && praefix === geradeGeschlossen) continue;
+		offen = { praefix, laenge: zaun.length };
+		out.push(l);
+	}
+	return out.join('\n');
+}
