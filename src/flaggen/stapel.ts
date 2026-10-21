@@ -10,6 +10,10 @@ import { Platform } from 'obsidian';
 import { PROVIDERS, resolveProvider } from '../providers';
 import { FlaggenEintrag, FlaggenStand, dateiFuer } from './sammeln';
 import { eingeklappt, nurNeuUebertragen, pruefAuftrag, schonGeprueft, stapelSchluessel, waisenAuftrag } from './flaggen';
+import { StapelDatei, ladeNotiz, ladeStapel, speichereNotiz, speichereWaisen } from './ablage';
+
+export { ladeStapel } from './ablage';
+export type { NotizStand, StapelDatei, WaisenStand } from './ablage';
 
 /**
  * Der Stapel: die KI prüft alle geflaggten Karten vorab, Till sieht danach
@@ -17,56 +21,9 @@ import { eingeklappt, nurNeuUebertragen, pruefAuftrag, schonGeprueft, stapelSchl
  *
  * Die Antwort zu einer Notiz landet in deren Chat-Verlauf – die Vorschläge
  * erscheinen damit in der gewohnten Oberfläche (Übernehmen, Bearbeiten,
- * Rückgängig, Vorher/Nachher im großen Chat). Hier steht nur, WAS geprüft ist,
- * damit ein zweiter Lauf nichts doppelt bezahlt.
+ * Rückgängig, Vorher/Nachher im großen Chat). Dieselbe Antwort steht in der
+ * Ablage im Vault (ablage.ts) – ein zweites Gerät bezahlt nichts doppelt.
  */
-
-export interface NotizStand {
-	/** stapelSchluessel der geprüften Flaggen. */
-	schluessel: string;
-	/** ISO-Zeitpunkt. */
-	am: string;
-	modell: string;
-	/** Nur Befunde, die erneutes Übertragen behebt – die KI wurde nicht gefragt. */
-	ohneKi?: boolean;
-	fehler?: string;
-}
-
-export interface WaisenStand {
-	schluessel: string;
-	am: string;
-	modell: string;
-	antwort: string;
-	/** Je Anki-Notiz-ID: schon in Anki übernommen? */
-	erledigt: Record<string, 'uebernommen' | 'verworfen'>;
-	fehler?: string;
-}
-
-export interface StapelDatei {
-	notizen: Record<string, NotizStand>;
-	waisen?: WaisenStand;
-	/** Letzter Lauf, ISO. */
-	letzterLauf?: string;
-}
-
-function dateiPfad(plugin: AnkiGeneratorPlugin): string {
-	const dir = plugin.manifest.dir || `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}`;
-	return `${dir}/flaggen-stand.json`;
-}
-
-export async function ladeStapel(plugin: AnkiGeneratorPlugin): Promise<StapelDatei> {
-	try {
-		const roh = await plugin.app.vault.adapter.read(dateiPfad(plugin));
-		const d = JSON.parse(roh);
-		return { notizen: d.notizen || {}, waisen: d.waisen, letzterLauf: d.letzterLauf };
-	} catch {
-		return { notizen: {} };
-	}
-}
-
-export async function speichereStapel(plugin: AnkiGeneratorPlugin, d: StapelDatei): Promise<void> {
-	await plugin.app.vault.adapter.write(dateiPfad(plugin), JSON.stringify(d, null, '\t'));
-}
 
 /** Ist diese Notiz mit genau diesen Flaggen schon geprüft? */
 export function istGeprueft(d: StapelDatei, pfad: string, eintraege: FlaggenEintrag[]): boolean {
@@ -128,25 +85,35 @@ export async function pruefeStapel(
 		onFortschritt({ text: datei?.basename ?? pfad, fertig, gesamt });
 		const schluessel = stapelSchluessel(eintraege);
 
+		// Ein anderes Gerät war schneller – dessen Antwort steht schon im Vault.
+		const frisch = await ladeNotiz(plugin, pfad);
+		if (frisch && !frisch.fehler && schonGeprueft(schluessel, frisch.schluessel)) {
+			d.notizen[pfad] = frisch;
+			ergebnis.uebersprungen++;
+			fertig++;
+			continue;
+		}
+
 		// Rein technische Fälle: erneutes Übertragen genügt, keine KI.
 		if (eintraege.every((e) => nurNeuUebertragen(e.befunde))) {
-			d.notizen[pfad] = { schluessel, am: new Date().toISOString(), modell: '', ohneKi: true };
-			await speichereStapel(plugin, d);
+			d.notizen[pfad] = { schluessel, am: new Date().toISOString(), modell: '', ohneKi: true, karten: eintraege };
+			await speichereNotiz(plugin, pfad, d.notizen[pfad]);
 			ergebnis.geprueft++;
 			fertig++;
 			continue;
 		}
 
+		const am = new Date().toISOString();
 		try {
-			await pruefeNotiz(plugin, pfad, eintraege, modell, modellName, signal);
-			d.notizen[pfad] = { schluessel, am: new Date().toISOString(), modell: modellName };
+			const g = await pruefeNotiz(plugin, pfad, eintraege, modell, modellName, am, signal);
+			d.notizen[pfad] = { schluessel, am, modell: modellName, auftrag: g.auftrag, antwort: g.antwort, karten: eintraege };
 			ergebnis.geprueft++;
 		} catch (e: any) {
 			if (signal.aborted) break;
-			d.notizen[pfad] = { schluessel, am: new Date().toISOString(), modell: modellName, fehler: e?.message || String(e) };
+			d.notizen[pfad] = { schluessel, am, modell: modellName, fehler: e?.message || String(e), karten: eintraege };
 			ergebnis.fehler++;
 		}
-		await speichereStapel(plugin, d);
+		await speichereNotiz(plugin, pfad, d.notizen[pfad]);
 		fertig++;
 	}
 
@@ -160,19 +127,17 @@ export async function pruefeStapel(
 				auftrag: waisenAuftrag(stand.waisen, modell === 'claude-agent'),
 				signal
 			});
-			d.waisen = { schluessel, am: new Date().toISOString(), modell: modellName, antwort: antwort.text, erledigt: {} };
+			d.waisen = { schluessel, am: new Date().toISOString(), modell: modellName, antwort: antwort.text, erledigt: {}, karten: stand.waisen };
 			ergebnis.geprueft++;
 		} catch (e: any) {
 			if (!signal.aborted) {
-				d.waisen = { schluessel, am: new Date().toISOString(), modell: modellName, antwort: '', erledigt: {}, fehler: e?.message || String(e) };
+				d.waisen = { schluessel, am: new Date().toISOString(), modell: modellName, antwort: '', erledigt: {}, fehler: e?.message || String(e), karten: stand.waisen };
 				ergebnis.fehler++;
 			}
 		}
-		await speichereStapel(plugin, d);
+		if (d.waisen) await speichereWaisen(plugin, d.waisen);
 	}
 
-	d.letzterLauf = new Date().toISOString();
-	await speichereStapel(plugin, d);
 	return ergebnis;
 }
 
@@ -183,8 +148,9 @@ async function pruefeNotiz(
 	eintraege: FlaggenEintrag[],
 	modell: AiProvider | 'claude-agent',
 	modellName: string,
+	am: string,
 	signal: AbortSignal
-): Promise<void> {
+): Promise<{ auftrag: string; antwort: ChatMessage }> {
 	const datei = dateiFuer(plugin, pfad);
 	if (!datei) throw new Error('Notiz nicht gefunden.');
 
@@ -207,18 +173,22 @@ async function pruefeNotiz(
 		signal
 	});
 
-	const verlauf: ChatMessage[] = plugin.feedbackCache.get(pfad) ?? [];
-	verlauf.push({ role: 'user', content: eingeklappt(auftrag, eintraege.length) });
+	const kopf = eingeklappt(auftrag, eintraege.length);
 	const nachricht: ChatMessage = {
 		role: 'ai',
 		content: antwort.text,
 		modell: modellName,
-		karten: karten.map((k) => ({ id: k.id, q: k.q }))
+		karten: karten.map((k) => ({ id: k.id, q: k.q })),
+		flaggenAm: am
 	};
 	if (antwort.sitzung) nachricht.agentSitzung = antwort.sitzung;
-	verlauf.push(nachricht);
+
+	const verlauf: ChatMessage[] = plugin.feedbackCache.get(pfad) ?? [];
+	verlauf.push({ role: 'user', content: kopf }, nachricht);
 	setHistory(plugin, pfad, verlauf);
 	plugin.app.workspace.trigger('anki:chat-update', pfad, plugin.feedbackCache.get(pfad));
+	// Die Ablage bekommt eine eigene Kopie – der Verlauf wird im Chat weiter verändert.
+	return { auftrag: kopf, antwort: JSON.parse(JSON.stringify(nachricht)) };
 }
 
 async function frageModell(

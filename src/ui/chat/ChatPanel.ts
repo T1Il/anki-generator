@@ -34,6 +34,8 @@ export interface ChatPanelOptions {
 	 * zeigt die rechte Spalte Vorher/Nachher.
 	 */
 	onVorschlagWaehlen?: (s: Suggestion, diagrammBearbeiten?: () => void) => void;
+	/** Ein Vorschlag wurde übernommen, verworfen oder zurückgenommen. */
+	onZustand?: () => void;
 }
 
 /**
@@ -492,6 +494,7 @@ export class ChatPanel extends Component {
 		}
 
 		this.zeichneBox(ktx);
+		this.options.onZustand?.();
 		const blase = ktx.box.closest('.anki-chat-bubble') as HTMLElement | null;
 		if (blase) this.aktualisiereLeiste(blase);
 		this.plugin.app.workspace.trigger('anki:vorschlag-zustand', this.sourcePath, ktx.schluessel, ktx.msg, neu);

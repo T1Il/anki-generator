@@ -26,6 +26,8 @@ export interface ChatMessage {
 	modell?: string;
 	/** Claude-CLI-Sitzung dieser Antwort – Rueckfragen knuepfen daran an. */
 	agentSitzung?: string;
+	/** Antwort einer Flaggen-Prüfung: deren Zeitpunkt, Schlüssel zur Ablage im Vault. */
+	flaggenAm?: string;
 }
 
 /** Eine Karte, wie sie zum Zeitpunkt einer Anfrage im Block stand. */

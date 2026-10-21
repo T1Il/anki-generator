@@ -1,13 +1,13 @@
-import { ButtonComponent, Modal, Notice, TFile } from 'obsidian';
+import { ButtonComponent, Modal, Notice, TFile, setIcon } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 import { ChatModal } from './chat/ChatModal';
 import { FlaggenEintrag } from '../flaggen/sammeln';
 import { flaggenArt, waisenBegruendung } from '../flaggen/flaggen';
 import { htmlToPlain } from '../anki/driftCheck';
 import { zeigeInAnki } from '../anki/AnkiConnect';
-import { entferneFlaggen, schliesseNotizAb, syncNachAnkiWeb, uebernimmWaise, waisenVorschlaege } from '../flaggen/abschluss';
-import { ladeStapel, speichereStapel } from '../flaggen/stapel';
-import { NotizStatus, STATUS_RANG } from '../flaggen/bearbeitung';
+import { uebernimmWaise, waisenVorschlaege } from '../flaggen/abschluss';
+import { ladeStapel, speichereWaisen } from '../flaggen/ablage';
+import { NotizStatus } from '../flaggen/bearbeitung';
 
 const STATUS_TEXT: Record<NotizStatus, string> = {
 	unbearbeitet: 'unbearbeitet',
@@ -28,12 +28,17 @@ const NUR_ABSCHLUSS = new Set<NotizStatus>(['bearbeitet', 'ohneVorschlag', 'nurU
  * Je Notiz: Karten mit Flagge und Befund, „Ansehen“ öffnet den großen Chat mit
  * den Vorschlägen der KI, „Abschließen“ bringt den Vault-Stand nach Anki und
  * nimmt die Flaggen weg. Karten ohne Notiz werden direkt in Anki korrigiert.
+ *
+ * „Durchgehen“ öffnet eine Notiz nach der anderen im großen Chat, mit einer
+ * Leiste oben (Flaggen, Stand, „Abschließen & weiter“) – ohne Umweg über
+ * diese Liste. Abschließen wartet nie: es läuft im Dienst in einer
+ * Warteschlange (bis 1.22.5 kam die Liste erst nach Übertragen, Neuladen
+ * aus Anki und Sync wieder).
  */
 export class FlaggenModal extends Modal {
 	private liste!: HTMLElement;
 	private kopf!: HTMLElement;
 	private abmelden: (() => void) | null = null;
-	private beschaeftigt = new Set<string>();
 
 	constructor(private plugin: AnkiGeneratorPlugin) {
 		super(plugin.app);
@@ -57,6 +62,9 @@ export class FlaggenModal extends Modal {
 				this.liste.createDiv({ cls: 'anki-flaggen-leer', text: 'Anki nicht erreichbar: ' + (e?.message || e) });
 				return;
 			}
+		} else if (dienst.ohneAnki) {
+			// Vielleicht ist Anki inzwischen da – im Hintergrund nachsehen.
+			void dienst.aktualisiere().catch(() => undefined);
 		}
 		this.zeichne();
 	}
@@ -79,19 +87,30 @@ export class FlaggenModal extends Modal {
 		zahlen.createSpan({ text: stand.anzahl === 1 ? ' Karte' : ' Karten' });
 		const offen = dienst.offeneKarten();
 		if (offen) zahlen.createSpan({ cls: 'anki-flaggen-offen', text: ` · ${offen} ungeprüft` });
-		const zuTun = Array.from(stand.notizen.entries())
-			.filter(([p, e]) => { const st = dienst.status(p, e); return st === 'unbearbeitet' || st === 'teilweise'; }).length;
-		if (zuTun) zahlen.createSpan({ text: ` · ${zuTun} ${zuTun === 1 ? 'Notiz' : 'Notizen'} unbearbeitet` });
+		const zuTun = dienst.nochOffen();
+		if (zuTun) zahlen.createSpan({ text: ` · ${zuTun} ${zuTun === 1 ? 'Notiz' : 'Notizen'} offen` });
+		if (dienst.imAbschluss.size) zahlen.createSpan({ text: ` · ${dienst.imAbschluss.size} im Abschluss` });
+		if (dienst.ohneAnki) zahlen.createSpan({ cls: 'anki-flaggen-ohne-anki', text: 'Anki offline' });
 
 		const knoepfe = this.kopf.createDiv({ cls: 'anki-flaggen-knoepfe' });
+		const naechste = dienst.naechste();
+		const durch = new ButtonComponent(knoepfe).setButtonText('Durchgehen').setDisabled(!naechste);
+		if (naechste) durch.setCta();
+		durch.onClick(() => {
+			dienst.gesehen.clear();
+			const n = dienst.naechste();
+			if (!n) return;
+			this.close();
+			oeffneFlaggenChat(this.plugin, n);
+		});
 		if (dienst.lauf) {
 			const f = dienst.fortschritt;
 			const lauf = this.kopf.createDiv({ cls: 'anki-flaggen-lauf' });
 			lauf.createSpan({ text: f && f.gesamt ? `Prüfe ${f.fertig + 1}/${f.gesamt}: ${f.text}` : 'Prüfe …' });
 			new ButtonComponent(knoepfe).setButtonText('Abbrechen').onClick(() => dienst.brecheAb());
-		} else {
+		} else if (!dienst.ohneAnki) {
 			const alle = new ButtonComponent(knoepfe).setButtonText('Alle prüfen lassen').setDisabled(offen === 0);
-			if (offen) alle.setCta();
+			if (offen && !naechste) alle.setCta();
 			alle.onClick(() => void dienst.starteStapel());
 		}
 		new ButtonComponent(knoepfe).setIcon('refresh-cw').setTooltip('Neu aus Anki laden').onClick(async () => {
@@ -104,11 +123,7 @@ export class FlaggenModal extends Modal {
 		}
 
 		// --- Notizen ----------------------------------------------------------
-		const notizen = Array.from(stand.notizen.entries())
-			.map(([pfad, e]) => ({ pfad, e, status: dienst.status(pfad, e) }))
-			.sort((a, b) => STATUS_RANG[a.status] - STATUS_RANG[b.status] || a.pfad.localeCompare(b.pfad));
-
-		for (const n of notizen) this.zeichneNotiz(n.pfad, n.e, n.status);
+		for (const n of dienst.sortierteNotizen()) this.zeichneNotiz(n.pfad, n.e, n.status);
 		if (stand.waisen.length) this.zeichneWaisen(stand.waisen);
 	}
 
@@ -121,24 +136,29 @@ export class FlaggenModal extends Modal {
 			const f = this.app.vault.getAbstractFileByPath(pfad);
 			if (f instanceof TFile) void this.app.workspace.getLeaf(false).openFile(f);
 		};
-		let text = STATUS_TEXT[status];
-		if (status === 'teilweise') {
-			const b = this.plugin.flaggen.bearbeitung(pfad);
+		const dienst = this.plugin.flaggen;
+		const laeuft = dienst.imAbschluss.has(pfad);
+		let text = laeuft ? 'wird abgeschlossen' : STATUS_TEXT[status];
+		if (!laeuft && status === 'teilweise') {
+			const b = dienst.bearbeitung(pfad);
 			if (b.vorschlaege) text += ` (${b.erledigt}/${b.vorschlaege})`;
 		}
-		if (NUR_ABSCHLUSS.has(status)) gruppe.addClass('is-erledigt');
-		kopf.createSpan({ cls: `anki-flaggen-status is-${status}`, text });
-		const fehler = this.plugin.flaggen.datei.notizen[pfad]?.fehler;
+		if (laeuft || NUR_ABSCHLUSS.has(status)) gruppe.addClass('is-erledigt');
+		kopf.createSpan({ cls: `anki-flaggen-status is-${laeuft ? 'laeuft' : status}`, text });
+		const fehler = dienst.datei.notizen[pfad]?.fehler;
 		if (status === 'fehler' && fehler) kopf.createSpan({ cls: 'anki-flaggen-fehler', text: fehler });
 
 		const k = kopf.createDiv({ cls: 'anki-flaggen-gruppe-knoepfe' });
 		if (status !== 'nurUebertragen') {
-			new ButtonComponent(k).setButtonText('Ansehen').onClick(() => this.oeffneChat(pfad));
+			new ButtonComponent(k).setButtonText('Ansehen').onClick(() => {
+				this.close();
+				oeffneFlaggenChat(this.plugin, pfad);
+			});
 		}
 		const ab = new ButtonComponent(k).setButtonText('Abschließen');
 		if (NUR_ABSCHLUSS.has(status)) ab.setCta();
-		ab.setDisabled(this.beschaeftigt.has(pfad));
-		ab.onClick(() => void this.schliesseAb(pfad, eintraege));
+		ab.setDisabled(laeuft || dienst.ohneAnki);
+		ab.onClick(() => dienst.reiheAbschluss(pfad, eintraege));
 
 		for (const e of eintraege) this.zeichneKarte(gruppe, e);
 	}
@@ -161,15 +181,9 @@ export class FlaggenModal extends Modal {
 		extra?.(text);
 
 		const knoepfe = zeile.createDiv({ cls: 'anki-flaggen-karte-knoepfe' });
-		new ButtonComponent(knoepfe).setIcon('flag-off').setTooltip('Flagge entfernen').onClick(async () => {
-			try {
-				await entferneFlaggen([e.cardId]);
-				await this.plugin.flaggen.aktualisiere();
-				void syncNachAnkiWeb();
-			} catch (err: any) {
-				new Notice('Flagge nicht entfernt: ' + (err?.message || err));
-			}
-		});
+		new ButtonComponent(knoepfe).setIcon('flag-off').setTooltip('Flagge entfernen')
+			.setDisabled(this.plugin.flaggen.ohneAnki)
+			.onClick(() => this.plugin.flaggen.entferneFlagge(e));
 	}
 
 	private zeichneWaisen(waisen: FlaggenEintrag[]) {
@@ -204,12 +218,13 @@ export class FlaggenModal extends Modal {
 					const kn = box.createDiv({ cls: 'anki-flaggen-gruppe-knoepfe' });
 					const ja = new ButtonComponent(kn).setButtonText(v.op === 'delete' ? 'In Anki löschen' : 'In Anki übernehmen');
 					if (v.op === 'delete') ja.setWarning(); else ja.setCta();
+					ja.setDisabled(dienst.ohneAnki);
 					ja.onClick(async () => {
 						try {
 							await uebernimmWaise(e, v);
 							await this.merkeWaise(e.noteId, 'uebernommen');
-							await dienst.aktualisiere();
-							void syncNachAnkiWeb();
+							dienst.planeSync();
+							this.zeichne();
 						} catch (err: any) {
 							new Notice('Nicht übernommen: ' + (err?.message || err));
 						}
@@ -231,52 +246,92 @@ export class FlaggenModal extends Modal {
 		const d = await ladeStapel(this.plugin);
 		if (!d.waisen) return;
 		d.waisen.erledigt[String(noteId)] = z;
-		await speichereStapel(this.plugin, d);
+		await speichereWaisen(this.plugin, d.waisen);
+		this.plugin.flaggen.datei = d;
+	}
+}
+
+/**
+ * Eine Notiz im großen Chat, mit Leiste zum Durchgehen. Schließen führt
+ * sofort zurück in die Liste; ist die Notiz fertig, schließt der Dienst sie
+ * im Hintergrund ab.
+ */
+export function oeffneFlaggenChat(plugin: AnkiGeneratorPlugin, pfad: string) {
+	const dienst = plugin.flaggen;
+	dienst.gesehen.add(pfad);
+	let weiter: string | null = null;
+
+	const chat = new ChatModal(plugin, pfad, (el, m) => zeichneLeiste(plugin, el, m, (abschliessen) => {
+		if (abschliessen) dienst.reiheAbschluss(pfad);
+		weiter = dienst.naechste(pfad);
+		m.close();
+	}));
+	chat.scope.register(['Alt'], 'ArrowRight', () => {
+		dienst.reiheAbschluss(pfad);
+		weiter = dienst.naechste(pfad);
+		chat.close();
+		return false;
+	});
+	const abmelden = dienst.beobachte(() => chat.zeichneLeiste());
+	const zu = chat.onClose.bind(chat);
+	chat.onClose = () => {
+		zu();
+		abmelden();
+		dienst.schliesseAbWennFertig(pfad);
+		if (weiter) oeffneFlaggenChat(plugin, weiter);
+		else new FlaggenModal(plugin).open();
+	};
+	chat.open();
+}
+
+/** Leiste über dem Chat: Flaggen der Notiz, Stand, Weiter. */
+function zeichneLeiste(
+	plugin: AnkiGeneratorPlugin,
+	el: HTMLElement,
+	m: ChatModal,
+	weiter: (abschliessen: boolean) => void
+) {
+	const dienst = plugin.flaggen;
+	const pfad = m.pfad;
+	const eintraege = dienst.stand?.notizen.get(pfad) ?? [];
+
+	const flaggen = el.createDiv({ cls: 'anki-chat-leiste-flaggen' });
+	for (const e of eintraege) {
+		const art = flaggenArt(e.flagge);
+		const chip = flaggen.createSpan({ cls: 'anki-chat-leiste-flagge', attr: { title: kurz(htmlToPlain(e.anki.felder[0] ?? '')) } });
+		chip.createSpan({ cls: 'anki-flaggen-flagge' }).style.backgroundColor = art.css;
+		if (e.kartenNummer) chip.createSpan({ cls: 'anki-flaggen-nummer', text: String(e.kartenNummer) });
+		chip.createSpan({ text: art.bedeutung });
 	}
 
-	/** Großer Chat; danach kommt dieses Fenster mit frischem Stand zurück. */
-	private oeffneChat(pfad: string) {
-		this.close();
-		const chat = new ChatModal(this.plugin, pfad);
-		const zu = chat.onClose.bind(chat);
-		chat.onClose = () => {
-			zu();
-			// Alle Vorschläge erledigt? Dann gleich abschließen, danach die Liste.
-			const dienst = this.plugin.flaggen;
-			void dienst.schliesseFertigeAb()
-				.catch((e) => console.warn('[Flaggen] Auto-Abschluss', e))
-				.finally(() => new FlaggenModal(this.plugin).open());
-		};
-		chat.open();
+	const rechts = el.createDiv({ cls: 'anki-chat-leiste-rechts' });
+	const laeuft = dienst.imAbschluss.has(pfad);
+	const status = eintraege.length ? dienst.status(pfad, eintraege) : null;
+	let text = laeuft ? 'wird abgeschlossen' : !eintraege.length ? 'abgeschlossen' : status ? STATUS_TEXT[status] : '';
+	if (!laeuft && status && status !== 'ohneVorschlag') {
+		const b = dienst.bearbeitung(pfad);
+		if (b.vorschlaege) text = `${b.erledigt}/${b.vorschlaege} Vorschläge`;
 	}
+	rechts.createSpan({ cls: `anki-flaggen-status is-${laeuft ? 'laeuft' : status ?? 'bearbeitet'}`, text });
 
-	private async schliesseAb(pfad: string, eintraege: FlaggenEintrag[]) {
-		this.beschaeftigt.add(pfad);
-		this.zeichne();
-		try {
-			const r = await schliesseNotizAb(this.plugin, pfad, eintraege);
-			const teile = [`${r.uebertragen} übertragen`];
-			if (r.geloescht) teile.push(`${r.geloescht} gelöscht`);
-			teile.push(`${r.entflaggt} Flaggen entfernt`);
-			new Notice(teile.join(', '));
-		} catch (e: any) {
-			new Notice('Abschließen fehlgeschlagen: ' + (e?.message || e), 8000);
-			this.beschaeftigt.delete(pfad);
-			this.zeichne();
-			return;
-		}
-		try {
-			// Erst neu laden, dann syncen: während des Syncs lehnt Anki jede
-			// Anfrage ab („Collection lifecycle operation is active“).
-			await this.plugin.flaggen.aktualisiere();
-		} catch (e) {
-			console.warn('[Flaggen] Neu laden nach dem Abschließen', e);
-		} finally {
-			void syncNachAnkiWeb();
-			this.beschaeftigt.delete(pfad);
-			this.zeichne();
-		}
+	const rest = dienst.nochOffen(pfad);
+	if (rest > 0) rechts.createSpan({ cls: 'anki-chat-leiste-rest', text: `noch ${rest}` });
+
+	const liste = rechts.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': 'Liste' } });
+	setIcon(liste, 'list');
+	liste.addEventListener('click', () => m.close());
+
+	const hatNaechste = dienst.naechste(pfad) !== null;
+	if (hatNaechste) {
+		new ButtonComponent(rechts).setButtonText('Überspringen').onClick(() => weiter(false));
 	}
+	const fertig = status === 'bearbeitet' || status === 'ohneVorschlag' || status === 'nurUebertragen';
+	const kannAbschliessen = !dienst.ohneAnki && !laeuft && eintraege.length > 0;
+	const haupt = new ButtonComponent(rechts)
+		.setButtonText(kannAbschliessen ? (hatNaechste ? 'Abschließen & weiter' : 'Abschließen') : (hatNaechste ? 'Weiter' : 'Fertig'))
+		.setTooltip(kannAbschliessen ? 'Alt+→' : '');
+	if (fertig || !kannAbschliessen) haupt.setCta();
+	haupt.onClick(() => weiter(kannAbschliessen));
 }
 
 function kurz(t: string, max = 140): string {

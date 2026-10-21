@@ -106,6 +106,9 @@ export async function sammleFlaggen(plugin: AnkiGeneratorPlugin): Promise<Flagge
  * Die Nummer zählt über alle Blöcke der Datei, genau wie die Kartenliste,
  * die der Chat der KI zeigt (ChatPanel.readNote).
  */
+/** Notiz-ID → Datei vom letzten Mal: erst dort suchen, dann den ganzen Vault. */
+const ortCache = new Map<number, string>();
+
 async function vaultIndex(
 	plugin: AnkiGeneratorPlugin,
 	gesucht: Set<number>
@@ -113,18 +116,37 @@ async function vaultIndex(
 	const out = new Map<number, { pfad: string; karte: Card; nummer: number }>();
 	if (gesucht.size === 0) return out;
 	const idMuster = new RegExp(`^\\s*>?\\s*ID:\\s*(${Array.from(gesucht).join('|')})\\b`, 'm');
+	const gelesen = new Set<string>();
 
-	for (const file of plugin.app.vault.getMarkdownFiles()) {
-		if (plugin.settings.ignoredFiles.some((p) => file.path === p || file.path.startsWith(p + '/'))) continue;
+	const lies = async (file: TFile) => {
+		gelesen.add(file.path);
+		if (plugin.settings.ignoredFiles.some((p) => file.path === p || file.path.startsWith(p + '/'))) return;
 		const content = await plugin.app.vault.cachedRead(file);
-		if (!content.includes('anki-cards') || !idMuster.test(content)) continue;
+		if (!content.includes('anki-cards') || !idMuster.test(content)) return;
 
 		const karten = getAnkiBlocks(content)
 			.map((b) => parseCardsFromBlockSource(b.innerClean))
 			.reduce((acc, l) => acc.concat(l), [] as Card[]);
 		karten.forEach((k, i) => {
-			if (k.id && gesucht.has(k.id) && !out.has(k.id)) out.set(k.id, { pfad: file.path, karte: k, nummer: i + 1 });
+			if (k.id && gesucht.has(k.id) && !out.has(k.id)) {
+				out.set(k.id, { pfad: file.path, karte: k, nummer: i + 1 });
+				ortCache.set(k.id, file.path);
+			}
 		});
+	};
+
+	// Meist stehen die Karten noch dort, wo sie beim letzten Mal standen.
+	const bekannt = new Set<string>();
+	gesucht.forEach((id) => { const p = ortCache.get(id); if (p) bekannt.add(p); });
+	for (const p of bekannt) {
+		const f = dateiFuer(plugin, p);
+		if (f) await lies(f);
+	}
+	if (out.size === gesucht.size) return out;
+
+	for (const file of plugin.app.vault.getMarkdownFiles()) {
+		if (gelesen.has(file.path)) continue;
+		await lies(file);
 		if (out.size === gesucht.size) break;
 	}
 	return out;
@@ -142,17 +164,30 @@ async function medienInfos(infos: any[]): Promise<Map<string, MedienInfo>> {
 	const out = new Map<string, MedienInfo>();
 	for (const name of namen) {
 		if (/\.(pdf|excalidraw|md|canvas)$/i.test(name)) continue;
+		const gemerkt = medienCache.get(name);
+		if (gemerkt && Date.now() - gemerkt.zeit < MEDIEN_MERKEN_MS) {
+			out.set(name, gemerkt.info);
+			continue;
+		}
 		try {
 			const daten = await holeMediendatei(name);
 			const info: MedienInfo = { name, vorhanden: !!daten };
 			if (daten) Object.assign(info, await bildMasse(daten, name));
 			out.set(name, info);
+			medienCache.set(name, { info, zeit: Date.now() });
 		} catch {
 			// Ohne Antwort lieber keinen Befund als einen falschen.
 		}
 	}
 	return out;
 }
+
+/**
+ * Jedes Bild kam bei jedem Neuladen als Base64 aus Anki und wurde dekodiert –
+ * nach jedem Abschließen, für alle Karten. Name und Maße ändern sich kaum.
+ */
+const medienCache = new Map<string, { info: MedienInfo; zeit: number }>();
+const MEDIEN_MERKEN_MS = 30 * 60 * 1000;
 
 function bildMasse(base64: string, name: string): Promise<{ breite?: number; hoehe?: number }> {
 	return new Promise((resolve) => {

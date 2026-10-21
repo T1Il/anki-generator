@@ -71,6 +71,8 @@ export interface AnkiGeneratorSettings {
 	flaggenModell: string;
 	/** Bearbeitete Notizen und reine Neu-Übertragungen ohne Klick abschließen. */
 	flaggenAutoAbschluss: boolean;
+	/** Vault-Ordner für die Prüfergebnisse – synchronisiert mit den anderen Geräten. */
+	flaggenOrdner: string;
 }
 
 export interface QuellenSitzung {
@@ -264,6 +266,7 @@ Hier ist der Lerninhalt:
 	flaggenSchwelle: 10,
 	flaggenModell: 'claude-agent',
 	flaggenAutoAbschluss: true,
+	flaggenOrdner: 'Lernen/Anki-Flaggen',
 	zoteroApiUrl: 'http://localhost:23119/api',
 	zoteroDataDir: '',
 	fitnessManagerUrl: 'https://fitness-manager.tail0d1239.ts.net',
@@ -657,6 +660,17 @@ export class AnkiGeneratorSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.flaggenAutoAbschluss)
 				.onChange(async (value) => {
 					this.plugin.settings.flaggenAutoAbschluss = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Ordner der Prüfergebnisse')
+			.setDesc('Im Vault, damit andere Geräte nicht neu prüfen.')
+			.addText(text => text
+				.setPlaceholder('Lernen/Anki-Flaggen')
+				.setValue(this.plugin.settings.flaggenOrdner)
+				.onChange(async (value) => {
+					this.plugin.settings.flaggenOrdner = value.trim().replace(/^\/+|\/+$/g, '') || 'Lernen/Anki-Flaggen';
 					await this.plugin.saveSettings();
 				}));
 

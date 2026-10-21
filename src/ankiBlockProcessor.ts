@@ -478,6 +478,7 @@ export async function processAnkiCardsBlock(plugin: AnkiGeneratorPlugin, source:
 		new ChatModal(plugin, ctx.sourcePath).open();
 	};
 
+	plugin.flaggen.spiegleInChat(ctx.sourcePath);
 	const cachedHistory = plugin.feedbackCache.get(ctx.sourcePath);
 	if (cachedHistory) {
 		// console.log("Found cached feedback history for", ctx.sourcePath, "rendering it.");

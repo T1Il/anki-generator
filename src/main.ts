@@ -155,6 +155,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 			callback: () => new FlaggenModal(this).open()
 		});
 		this.app.workspace.onLayoutReady(() => {
+			void this.flaggen.starte().catch((e) => console.warn('[Flaggen] Ablage', e));
 			// Anki braucht nach dem Hochfahren einen Moment, bis AnkiConnect lauscht.
 			window.setTimeout(() => {
 				if (this.settings.flaggenAutomatisch) void this.flaggen.pruefeBeiBedarf(true).catch((e) => console.warn('[Flaggen]', e));

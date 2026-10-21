@@ -6,7 +6,7 @@ import { basicMarkdownToHtml, convertObsidianLatexToAnki } from '../utils';
 import { CardSuggestion, parseSuggestions } from '../chat/suggestions';
 import { FlaggenEintrag, dateiFuer } from './sammeln';
 import { abschlussPlan } from './flaggen';
-import { ladeStapel, speichereStapel } from './stapel';
+import { loescheNotiz } from './ablage';
 
 export interface AbschlussErgebnis {
 	uebertragen: number;
@@ -61,9 +61,7 @@ export async function schliesseNotizAb(
 	if (plan.loeschen.length) await deleteAnkiNotes(plan.loeschen);
 	if (plan.entflaggen.length) await setzeFlagge(plan.entflaggen, 0);
 
-	const d = await ladeStapel(plugin);
-	delete d.notizen[pfad];
-	await speichereStapel(plugin, d);
+	await loescheNotiz(plugin, pfad);
 
 	return { uebertragen, geloescht: plan.loeschen.length, entflaggt: plan.entflaggen.length };
 }

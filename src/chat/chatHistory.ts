@@ -90,6 +90,13 @@ export async function saveHistory(plugin: AnkiGeneratorPlugin) {
 	} catch (e) {
 		console.warn('Chat-Verlauf konnte nicht gespeichert werden:', e);
 	}
+	// Antworten geflaggter Karten liegen zusätzlich im Vault (synchronisiert):
+	// Übernommenes und Verworfenes dorthin nachtragen.
+	try {
+		plugin.flaggen?.spiegleZurueck();
+	} catch (e) {
+		console.warn('[Flaggen] Ablage nicht nachgeführt', e);
+	}
 }
 
 export async function loadHistory(plugin: AnkiGeneratorPlugin) {

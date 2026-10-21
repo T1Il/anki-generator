@@ -25,7 +25,8 @@ const entry = path.join(os.tmpdir(), 'anki-flaggen-entry.ts');
 fs.writeFileSync(
 	entry,
 	'export * from ' + JSON.stringify(path.join(root, 'src/flaggen/flaggen.ts').replace(/\\/g, '/')) + ';\n' +
-	'export * from ' + JSON.stringify(path.join(root, 'src/flaggen/bearbeitung.ts').replace(/\\/g, '/')) + ';\n'
+	'export * from ' + JSON.stringify(path.join(root, 'src/flaggen/bearbeitung.ts').replace(/\\/g, '/')) + ';\n' +
+	'export * from ' + JSON.stringify(path.join(root, 'src/flaggen/spiegel.ts').replace(/\\/g, '/')) + ';\n'
 );
 
 const outfile = path.join(os.tmpdir(), 'anki-flaggen-check.cjs');
@@ -253,6 +254,43 @@ console.log('\nBearbeitet?');
 	check('Antwort ohne Vorschlag', F.statusAus(bo) === 'ohneVorschlag', bo);
 	check('ohne Verlauf = unbearbeitet', F.statusAus(F.bearbeitungsStand(undefined, am, vor)) === 'unbearbeitet');
 	check('Rang: unbearbeitet vor bearbeitet', F.STATUS_RANG.unbearbeitet < F.STATUS_RANG.bearbeitet && F.STATUS_RANG.teilweise < F.STATUS_RANG.nurUebertragen);
+}
+
+console.log('\nAblage im Vault <-> lokaler Chat');
+{
+	const am = '2026-10-21T08:00:00.000Z';
+	const g = { auftrag: F.AUFTRAG_KOPF + ' (2 Karten)', antwort: { role: 'ai', content: 'Vorschlag …', vorschlaege: { a: { status: 'applied' } } } };
+
+	// Zweites Gerät: lokal nichts – Auftrag und Antwort kommen ans Ende.
+	const leer = [{ role: 'user', content: 'Hallo' }, { role: 'ai', content: 'Hi' }];
+	check('fehlt -> angehaengt', F.spiegleInVerlauf(leer, am, g) === true && leer.length === 4 && leer[3].flaggenAm === am, leer);
+	check('Kopie, nicht dasselbe Objekt', leer[3] !== g.antwort && leer[3].vorschlaege !== g.antwort.vorschlaege);
+	check('zweites Mal: nichts zu tun', F.spiegleInVerlauf(leer, am, g) === false && leer.length === 4);
+
+	// Anderes Gerät hat verworfen: Ablage gewinnt beim Öffnen.
+	const g2 = { ...g, antwort: { ...g.antwort, vorschlaege: { a: { status: 'applied' }, b: { status: 'dismissed' } } } };
+	check('Ablage neuer -> Zustand uebernommen', F.spiegleInVerlauf(leer, am, g2) === true && leer[3].vorschlaege.b.status === 'dismissed');
+
+	// Abgleich mit Basis: wer sich seit dem letzten Abgleich geändert hat, gewinnt.
+	const A = { a: { status: 'applied' } };
+	const AB = { a: { status: 'applied' }, b: { status: 'dismissed' } };
+	check('gleich -> nichts', F.abgleich(A, { a: { status: 'applied' } }, F.fingerabdruck(A)) === 'gleich');
+	check('lokal geaendert -> schieben', F.abgleich(AB, A, F.fingerabdruck(A)) === 'schieben');
+	check('anderes Geraet geaendert -> ziehen', F.abgleich(A, AB, F.fingerabdruck(A)) === 'ziehen');
+	check('ohne Basis gewinnt die Ablage', F.abgleich(A, AB, undefined) === 'ziehen');
+	check('beide geaendert -> lokal gewinnt', F.abgleich({ c: { status: 'applied' } }, AB, F.fingerabdruck(A)) === 'schieben');
+	check('Ruecknahme lokal (alles leer) -> schieben', F.abgleich(undefined, A, F.fingerabdruck(A)) === 'schieben');
+
+	// Reihenfolge der Schlüssel ist egal; leer = nichts.
+	check('gleich ohne Reihenfolge', F.gleich({ x: 1, y: { a: 1, b: 2 } }, { y: { b: 2, a: 1 }, x: 1 }));
+	check('leeres Objekt = nichts', F.gleich({}, undefined));
+
+	const n1 = F.ablageName('Medizin/Herz/Herzinfarkt.md');
+	const n2 = F.ablageName('Archiv/Herzinfarkt.md');
+	check('Dateiname lesbar', n1.startsWith('Herzinfarkt ') && n1.endsWith('.json'), n1);
+	check('gleichnamige Notizen getrennt', n1 !== n2, [n1, n2]);
+	check('Dateiname stabil', n1 === F.ablageName('Medizin/Herz/Herzinfarkt.md'));
+	check('keine verbotenen Zeichen', !/[\\/:*?"<>|#^[\]]/.test(F.ablageName('A/B: C? [x].md').replace(/\.json$/, '')), F.ablageName('A/B: C? [x].md'));
 }
 
 console.log('');

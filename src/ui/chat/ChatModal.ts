@@ -10,6 +10,9 @@ import { klappbareCallouts } from '../callouts';
 
 type Ansicht = 'vergleich' | 'notiz';
 
+/** Leiste über dem Chat (Durchgehen geflaggter Karten); wird bei jeder Änderung neu gezeichnet. */
+export type ChatLeiste = (el: HTMLElement, modal: ChatModal) => void;
+
 /**
  * Der AI-Chat gross: links Chat und Vorschlaege, rechts Vorher/Nachher des
  * gewaehlten Vorschlags oder die ganze Notiz gerendert.
@@ -34,11 +37,23 @@ export class ChatModal extends Modal {
 	private quellKnopf!: HTMLElement;
 	private renderKomponente: Component | null = null;
 	private neuTimer = 0;
+	private leisteEl: HTMLElement | null = null;
 
-	constructor(plugin: AnkiGeneratorPlugin, sourcePath: string) {
+	constructor(plugin: AnkiGeneratorPlugin, sourcePath: string, private leiste?: ChatLeiste) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.sourcePath = sourcePath;
+	}
+
+	get pfad(): string {
+		return this.sourcePath;
+	}
+
+	/** Leiste neu zeichnen (Zustand der Vorschläge, Notiz geändert, Abschluss fertig). */
+	zeichneLeiste() {
+		if (!this.leisteEl || !this.leiste) return;
+		this.leisteEl.empty();
+		this.leiste(this.leisteEl, this);
 	}
 
 	onOpen() {
@@ -46,10 +61,17 @@ export class ChatModal extends Modal {
 		const file = this.app.vault.getAbstractFileByPath(this.sourcePath);
 		this.titleEl.setText('AI Chat – ' + (file instanceof TFile ? file.basename : this.sourcePath));
 
+		if (this.leiste) {
+			this.modalEl.addClass('has-leiste');
+			this.leisteEl = this.contentEl.createDiv({ cls: 'anki-chat-leiste' });
+			this.zeichneLeiste();
+		}
 		const raster = this.contentEl.createDiv({ cls: 'anki-chat-modal-grid' });
 		const links = raster.createDiv({ cls: 'anki-chat-modal-chat' });
 		this.rechts = raster.createDiv({ cls: 'anki-chat-modal-vergleich' });
 
+		// Prüfergebnis geflaggter Karten aus dem Vault (von einem anderen Gerät).
+		this.plugin.flaggen.spiegleInChat(this.sourcePath);
 		let history: ChatMessage[] | undefined = this.plugin.feedbackCache.get(this.sourcePath);
 		if (!history) {
 			history = [];
@@ -62,7 +84,8 @@ export class ChatModal extends Modal {
 				this.gewaehlt = s;
 				this.diagrammBearbeiten = bearbeiten ?? null;
 				this.zeige('vergleich');
-			}
+			},
+			onZustand: () => this.zeichneLeiste()
 		});
 		this.panel.load();
 		this.panel.build();
@@ -74,7 +97,7 @@ export class ChatModal extends Modal {
 		const beiAenderung = (f: TAbstractFile) => {
 			if (f.path !== this.sourcePath) return;
 			window.clearTimeout(this.neuTimer);
-			this.neuTimer = window.setTimeout(() => void this.zeichne(), 250);
+			this.neuTimer = window.setTimeout(() => { void this.zeichne(); this.zeichneLeiste(); }, 250);
 		};
 		this.panel.registerEvent(this.app.vault.on('modify', beiAenderung));
 

@@ -1647,3 +1647,43 @@ textarea.schema-hintergrund {
 .anki-flaggen-status.is-bearbeitet,
 .anki-flaggen-status.is-ohneVorschlag { background: rgba(48, 164, 108, 0.15); color: #30a46c; }
 .anki-flaggen-gruppe.is-erledigt .anki-flaggen-karte { opacity: 0.6; }
+
+/* --- Geflaggte Karten durchgehen: Leiste über dem großen Chat (1.23.0) --- */
+
+.anki-chat-leiste {
+	flex: none;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 16px;
+	padding: 0 0 var(--size-4-3);
+	margin-bottom: var(--size-4-3);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.anki-chat-leiste-flaggen { flex: 1 1 320px; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.anki-chat-leiste-flagge {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 8px;
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	font-size: 0.85em;
+	white-space: nowrap;
+}
+.anki-chat-leiste-flagge .anki-flaggen-flagge { margin-top: 0; }
+.anki-chat-leiste-rechts { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.anki-chat-leiste-rest { font-size: 0.85em; color: var(--text-muted); }
+.anki-flaggen-status.is-laeuft { background: var(--background-modifier-hover); color: var(--text-muted); }
+.anki-flaggen-ohne-anki {
+	margin-left: 8px;
+	padding: 1px 8px;
+	border-radius: var(--radius-s);
+	background: rgba(247, 107, 21, 0.15);
+	color: #f76b15;
+	font-size: 0.85em;
+}
+
+@media (max-width: 700px) {
+	.anki-chat-leiste-rechts { flex-basis: 100%; justify-content: flex-end; }
+}
