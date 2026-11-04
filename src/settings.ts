@@ -154,8 +154,9 @@ REGELN ZUR KARTENERSTELLUNG:
    - Die Antwort (A:) ist eine Markdown-Liste.
    - Nutze KEINE Lückentexte für Listenpunkte.
 
-2. **Eintipp-Karten (Type-In)**:
-   - Nutze dies für kurze, präzise Fakten, die exakt reproduziert werden müssen (z.B. Vitalwerte, Dosierungen, Formeln, Jahreszahlen).
+2. **Eintipp-Karten (Type-In)** – sparsam:
+   - Nur, wenn die Antwort ein einzelnes Wort oder eine einzelne Zahl ist (z.B. ein Normalwert, eine Dosis). Sonst Basic.
+   - Nicht bevorzugen; der Lernende tippt selten. Nie eine Frage umformulieren, nur damit sie eintippbar wird.
    - Format: 'A (type):' statt 'A:'.
    - Beispiel:
      Q: Normalwert Herzfrequenz Erwachsene?

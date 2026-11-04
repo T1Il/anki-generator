@@ -4,7 +4,7 @@ import { DebugModal } from './ui/DebugModal';
 import { ManualGenerationModal } from './ui/ManualGenerationModal';
 import { ImageInput, ChatMessage, ChatTurn, AiProvider } from './types';
 import { getProvider, RequestOptions } from './providers';
-import { SUGGESTION_FORMAT_INSTRUCTIONS } from './chat/suggestions';
+import { SUGGESTION_FORMAT_INSTRUCTIONS, KARTEN_QUALITAET } from './chat/suggestions';
 
 export async function generateCardsWithAI(
 	app: App,
@@ -137,6 +137,9 @@ Gib NUR die überarbeiteten Karten zurück.`;
 	const encodeForMarkdownUrl = (s: string) =>
 		encodeURIComponent(s).replace(/\(/g, '%28').replace(/\)/g, '%29');
 	const noteURI = `obsidian://open?vault=${encodeForMarkdownUrl(settings.vaultName)}&file=${encodeForMarkdownUrl(noteTitle)}`;
+
+	// Kartenqualität gilt immer – auch mit eigenem Prompt und bei der Überarbeitung.
+	if (!cardPrompt.includes('## Kartenqualität')) cardPrompt += '\n\n' + KARTEN_QUALITAET;
 
 	return cardPrompt
 		.split('{{noteContent}}').join(noteContent)

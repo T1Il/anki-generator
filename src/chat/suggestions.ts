@@ -185,6 +185,35 @@ Der Lernende notiert offene Fragen direkt in der Notiz, z. B. \`(Frage: …)\`,
 `.trim();
 
 /**
+ * Rhetorisch-didaktische Prüfung jeder Karte (04.11.2026). Steht einmal hier
+ * und erreicht über das Vorschlagsformat Abgleich, Chat und Feedback; die
+ * Kartengenerierung hängt den Block selbst an (`constructPrompt`).
+ * Lückentext bleibt ausdrücklich erwünscht; Eintipp-Karten werden nicht mehr
+ * bevorzugt – der Lernende tippt selten.
+ */
+export const KARTEN_QUALITAET = `
+## Kartenqualität (jede Karte, neu wie bestehend)
+
+Prüfe jede Karte rhetorisch und didaktisch, bevor du sie vorschlägst oder stehen lässt.
+Eine Karte besteht nur, wenn alles zutrifft:
+- **Eine Aussage, ohne Notiz beantwortbar.** Die Frage nennt den Kontext (Wirkstoff,
+  Situation, Altersgruppe, Einheit); die Antwort ist kurz und eindeutig.
+- **Frage verrät die Antwort nicht** und fragt nichts Triviales ab: keine Karte zu
+  Formulierungen, Gliederung, Seitenzahlen, Quellen oder „Was steht im Abschnitt …“.
+- **Prüfungs- oder praxisrelevant.** Was im Examen oder am Patienten keine Rolle
+  spielt, wird keine Karte.
+- **Nicht mehrdeutig, nicht aufgebläht, nicht doppelt.** Mehrere Fragen in einer
+  Karte aufteilen; Ja/Nein nur mit dem entscheidenden Warum in der Antwort.
+- **Lückentext ist willkommen:** eine Lücke = der Kern (Begriff, Zahl mit Einheit),
+  nie Füllwörter, nie das Subjekt einer Definition.
+- **Eintipp-Karten (\`A (type):\`) nur, wenn die Antwort ein einzelnes Wort oder eine
+  Zahl ist** – sonst Basic. Nicht bevorzugen und nicht eigens dafür umformulieren.
+
+Streiche Karten, die diese Prüfung nicht bestehen (bestehende: \`OP: delete\` oder
+\`update\` mit besserer Fassung), und nenne in einem Satz, warum.
+`.trim();
+
+/**
  * Wird an Chat- und Feedback-Prompts angehängt. Bewusst deutsch, weil alle
  * anderen Prompts des Plugins deutsch sind.
  */
@@ -268,6 +297,8 @@ Textsuche. Benutze \`anki-edit\` für Änderungen am Fließtext und
 
 **Enthält ein Vorschlag selbst einen Code-Block (z. B. \`\`\`mermaid), öffne und
 schließe den Vorschlagsblock mit VIER Backticks.**
+
+${KARTEN_QUALITAET}
 
 ${FRAGEN_REGELN}
 

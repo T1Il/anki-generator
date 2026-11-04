@@ -65,7 +65,9 @@ die der Lernende dafür in Zotero gesammelt hat, und schlägst Korrekturen vor.
    - **Widersprüche zwischen Quellen**: benenne beide Stellen; im Rettungsdienst gehen
      SAA/BPR und DBRD-Musteralgorithmen der Fachinformation vor, Leitlinien den Lehrbüchern,
    - **Lücken**: Wichtiges aus den Quellen fehlt in der Notiz,
-   - **Karten**: falsch, mehrdeutig gestellt, zu groß (aufteilen) oder doppelt,
+   - **Karten**: falsch, mehrdeutig gestellt, zu groß (aufteilen) oder doppelt – und
+     jede Karte nach der Kartenqualität unten: eine Nonsens-Karte (trivial, verrät die
+     Antwort, ohne Prüfungsbezug) ist ein Befund wie ein Fachfehler,
    - **offene Fragen** des Lernenden in der Notiz (z. B. „(Frage: …)") – beantworte sie
      aus den Quellen und baue die Antwort an ihrer Stelle ein (Regeln unten),
    - **Abläufe ohne Diagramm** (Wirkmechanismus, Kinetik, Entscheidungswege) – schlage

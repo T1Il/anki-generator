@@ -90,6 +90,11 @@ check('enthält Vorschlagsformat', prompt.includes('```anki-card') && prompt.inc
 check('verbietet Web ohne Recherche', prompt.includes('Recherchiere NICHT im Web'));
 check('Zusatzauftrag', prompt.includes('Kinderdosis prüfen'));
 check('Kartennummern', prompt.includes('CARD: 1'));
+// Jede Karte wird rhetorisch-didaktisch geprüft (04.11.2026): die Regeln stehen einmal in
+// suggestions.ts und erreichen Abgleich, Chat und Feedback über das Vorschlagsformat.
+check('Kartenqualität im Abgleich', prompt.includes('## Kartenqualität') && /Lückentext/.test(prompt) && /Eintipp/.test(prompt));
+check('Kartenqualität im Vorschlagsformat', m.SUGGESTION_FORMAT_INSTRUCTIONS.includes('## Kartenqualität'));
+check('Kartenqualität als eigener Baustein', typeof m.KARTEN_QUALITAET === 'string' && /verrät|verraten/.test(m.KARTEN_QUALITAET) && /streich/i.test(m.KARTEN_QUALITAET));
 const mitWeb = m.buildAbgleichPrompt({ noteTitle: 'x', noteContent: '', cards: '', sources, research: true, extra: '' });
 check('erlaubt Web mit Recherche', mitWeb.includes('WebSearch') && !mitWeb.includes('Recherchiere NICHT'));
 
