@@ -480,6 +480,7 @@ export class ChatPanel extends Component {
 	private entscheidungMelden(ktx: BoxKontext, status: 'applied' | 'dismissed') {
 		const v = this.aktuellerVorschlag(ktx) as any;
 		const eintrag = rueckmeldungAus(v, status === 'applied' ? 'uebernommen' : 'verworfen', ktx.grund, ktx.grundText);
+		if (!eintrag) return;
 		this.plugin.lernplanApi.rueckmeldung(eintrag).catch((e) => console.debug('[AnkiGenerator] Rückmeldung nicht gesendet', e));
 	}
 

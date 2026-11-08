@@ -23,7 +23,9 @@ export function chatEreignisse(text: string): ChatEreignis[] {
 /** Kartenvorschlag des Chats in die gemeinsame Rückmeldung. */
 export function rueckmeldungAus(v: { kind: string; q?: string; a?: string; replace?: string; text?: string }, status: 'uebernommen' | 'verworfen', grund?: string, grundText?: string) {
 	const karte = v.kind === 'card';
-	return { typ: karte ? 'karte' : 'luecke', status, vorne: karte ? v.q : undefined, hinten: karte ? v.a : undefined,
+	const typ = karte ? 'karte' : v.kind === 'edit' ? 'widerspruch' : v.kind === 'insert' ? 'luecke' : null;
+	if (!typ) return null;
+	return { typ, status, vorne: karte ? v.q : undefined, hinten: karte ? v.a : undefined,
 		neu: karte ? undefined : (v.replace ?? v.text), grund, grund_text: grundText, herkunft: 'plugin' };
 }
 

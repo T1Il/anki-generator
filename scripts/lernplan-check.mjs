@@ -19,6 +19,8 @@ assert.deepEqual(m.chatEreignisse('{"type":"text","text":"a"}\nkaputt\n\n{"type"
 const k = m.rueckmeldungAus({ kind: 'card', q: 'F?', a: 'A' }, 'verworfen', 'zu_lang', 'kürzer');
 assert.equal(k.typ, 'karte'); assert.equal(k.vorne, 'F?'); assert.equal(k.grund_text, 'kürzer');
 
+assert.equal(m.rueckmeldungAus({ kind: 'edit', replace: 'x' }, 'verworfen').typ, 'widerspruch');
+assert.equal(m.rueckmeldungAus({ kind: 'quelle' }, 'verworfen'), null);
 const api = new m.LernplanApi(() => 'https://x/');
 ob._setze({ status: 200, json: {} });
 await api.verknuepfen({ kw: 46, jahr: 2026, index: 3, text: 'T' }, 'A.md');

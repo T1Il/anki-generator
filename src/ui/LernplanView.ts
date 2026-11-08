@@ -148,12 +148,13 @@ export class LernplanView extends ItemView {
 		};
 		if (e.art === 'dosis') {
 			const k = karte('var(--color-red, #e05252)', e.suche || 'Dosis');
-			for (const a of e.angaben.slice(0, 8)) {
+			for (const a of e.angaben) {
 				const z = k.createDiv({ cls: 'anki-lp-dosis' });
 				z.createSpan({ text: a.zielgruppe || 'Alle' });
 				z.createEl('b', { text: a.text });
 				z.createEl('small', { text: [a.beleg || a.quelle, a.seite && `S. ${a.seite}`].filter(Boolean).join(', ') });
 			}
+			if (e.weitere > 0) k.createDiv({ text: `${e.weitere} weitere Angaben, frag enger nach`, cls: 'anki-lp-status' });
 		} else if (e.art === 'vorhaltung') {
 			const k = karte('var(--color-blue, #5b9bd5)', 'Auf dem Fahrzeug');
 			for (const z of e.eintraege) k.createDiv({ text: `${z.med_key}: ${z.label || ''}${z.package ? ` · ${z.package}` : ''}` });
