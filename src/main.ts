@@ -1,3 +1,4 @@
+import { rechtsrahmenSetzen } from './chat/suggestions';
 import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf, TFile, TFolder, Platform } from 'obsidian';
 import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings, repairCorruptedPrompt } from './settings';
 import { processAnkiCardsBlock } from './ankiBlockProcessor';
@@ -37,8 +38,21 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	ankiFileDecorationProvider: AnkiFileDecorationProvider | null = null;
 	flaggen: FlaggenDienst = new FlaggenDienst(this);
 
+	/** Gemeinsamen Regeltext vom Server holen; ohne Antwort bleibt die mitgelieferte Kopie. */
+	private async rechtsrahmenHolen() {
+		const basis = (this.settings.fitnessManagerUrl || '').replace(/\/$/, '');
+		if (!basis) return;
+		try {
+			const r = await requestUrl({ url: `${basis}/api/lernplan/regeln/rechtsrahmen`, throw: false });
+			if (r.status === 200) rechtsrahmenSetzen(r.json?.text || '');
+		} catch {
+			// Kopie bleibt
+		}
+	}
+
 	async onload() {
 		await this.loadSettings();
+		void this.rechtsrahmenHolen();
 		await loadHistory(this);
 
 		// console.log("!!! ANKI PLUGIN LOADED !!!");

@@ -213,11 +213,36 @@ Streiche Karten, die diese Prüfung nicht bestehen (bestehende: \`OP: delete\` o
 \`update\` mit besserer Fassung), und nenne in einem Satz, warum.
 `.trim();
 
-/**
- * Wird an Chat- und Feedback-Prompts angehängt. Bewusst deutsch, weil alle
- * anderen Prompts des Plugins deutsch sind.
- */
-export const SUGGESTION_FORMAT_INSTRUCTIONS = `
+/** Mitgelieferte Kopie von backend/data/ki_regeln/rechtsrahmen.md, falls der Server nicht antwortet. */
+const RECHTSRAHMEN_KOPIE = `# Befugnis und Verbote im Rettungsdienst
+
+Gilt, sobald eine Maßnahme nicht durch SAA/BPR abgedeckt ist oder die Befugnis eines Notfallsanitäters Thema wird.
+
+## Drei Ebenen trennen
+
+SAA/BPR: was vorgesehen ist, unter welcher Bedingung, mit Seite.
+§ 2a: was bei erfüllten Voraussetzungen möglich ist.
+Fachlich: was Leitlinie oder Lehrbuch empfehlen, mit Quelle.
+
+Eine Ebene ohne Aussage entfällt. Keine Ebene wird aus einer anderen abgeleitet.
+
+## Was die Ebenen rechtlich sind
+
+- SAA und BPR gehören zur Mitwirkung (§ 4 Abs. 2 Nr. 2 Buchst. c NotSanG): heilkundliche Maßnahmen, die der Ärztliche Leiter Rettungsdienst oder verantwortliche Ärzte bei bestimmten Zustandsbildern standardmäßig vorgeben, überprüfen und verantworten.
+- § 2a NotSanG ist eine eigene Befugnis zur eigenverantwortlichen Durchführung, auch invasiv oder medikamentös, bis zum Eintreffen des Notarztes oder bis zum Beginn einer weiteren ärztlichen, auch teleärztlichen, Versorgung. Voraussetzungen: Die Maßnahme wurde in der Ausbildung erlernt und wird beherrscht, und sie ist jeweils erforderlich, um Lebensgefahr oder wesentliche Folgeschäden abzuwenden. Eine ärztliche Weiterversorgung muss folgen: durch Notarzt oder durch Klinik, Hausarzt, Facharzt oder andere Ärzte, auch teleärztlich.
+- Beurteilt wird aus der Sicht des Moments, nicht im Nachhinein.
+- § 2a regelt die Erlaubnis zur Heilkunde. Die Rechtfertigung des Eingriffs, vor allem die Einwilligung, bleibt davon unberührt.
+- Der Begriff „Notkompetenz“ ist überholt und wird nicht verwendet.
+
+## Formulieren
+
+- „Nicht in der SAA“ heißt nicht „verboten“. Schreibe: „Die SAA/BPR sieht das nicht vor.“ Prüfe danach § 2a und die fachliche Empfehlung.
+- „Verboten“, „nicht erlaubt“ und „dürfen wir nicht“ nur, wenn eine Quelle es so sagt, mit Quelle und Seite.
+- Eine Kontraindikation ist eine fachliche Aussage und wird als Kontraindikation benannt, nicht als Verbot.
+- Sage nie zu, eine Maßnahme sei im Einzelfall erlaubt. Nenne die Voraussetzungen. Ob sie vorliegen und ob die Maßnahme beherrscht wird, entscheidet die handelnde Person im Einsatz.
+- Regionale Vorgaben und Dienstanweisungen benennst du als solche, nur mit Quelle.`;
+
+const formatAnweisungen = (rahmen: string) => `
 ## Format für konkrete Änderungen
 
 Wenn du eine konkrete Änderung vorschlägst, gib sie IMMER in einem der folgenden
@@ -303,7 +328,26 @@ ${KARTEN_QUALITAET}
 ${FRAGEN_REGELN}
 
 ${DIAGRAMM_REGELN}
+
+${rahmen}
 `.trim();
+
+let rechtsrahmen = RECHTSRAHMEN_KOPIE;
+
+/**
+ * Wird an Chat- und Feedback-Prompts angehängt. Bewusst deutsch, weil alle
+ * anderen Prompts des Plugins deutsch sind.
+ */
+export let SUGGESTION_FORMAT_INSTRUCTIONS = formatAnweisungen(rechtsrahmen);
+
+/** Text vom Server übernehmen. Eine leere Antwort ändert nichts. */
+export function rechtsrahmenSetzen(text: string) {
+	if (!text.trim()) return;
+	rechtsrahmen = text.trim();
+	SUGGESTION_FORMAT_INSTRUCTIONS = formatAnweisungen(rechtsrahmen);
+}
+
+export const KARTEN_QUALITAET_MIT_RAHMEN = () => `${KARTEN_QUALITAET}\n\n${rechtsrahmen}`;
 
 // 3 oder mehr Backticks erlauben - Modelle nutzen gern vier.
 const FENCE = /^[ \t]*(`{3,})(anki-edit|anki-card|anki-insert|anki-quelle)[ \t]*$/;

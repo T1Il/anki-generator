@@ -5,5 +5,6 @@
 	"description": "Creates anki cards using Google Gemini",
 	"author": "T1Il",
 	"authorUrl": "https://github.com/T1Il/",
-	"isDesktopOnly": false
+	"isDesktopOnly": false,
+	"version": "1.25.0"
 }
