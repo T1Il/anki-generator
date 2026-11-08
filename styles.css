@@ -1687,3 +1687,67 @@ textarea.schema-hintergrund {
 @media (max-width: 700px) {
 	.anki-chat-leiste-rechts { flex-basis: 100%; justify-content: flex-end; }
 }
+
+
+/* ── Vorschläge lesbar machen (08.11.2026): Größe, Kontrast, auch im dunklen Thema ──────── */
+.anki-vs-chip { font-size: 12.5px; }
+.anki-vs-bezug { font-size: var(--font-ui-small); color: var(--text-normal); }
+.anki-vs-warum { font-size: var(--font-ui-medium); line-height: 1.5; color: var(--text-normal); }
+.anki-vs-feldname { font-size: 12px; color: var(--text-muted); }
+.anki-vs-inhalt { font-size: var(--font-ui-medium); line-height: 1.55; color: var(--text-normal); }
+.anki-vs-feld { padding: 8px 12px 4px; }
+.anki-vs-feld.is-unveraendert .anki-vs-inhalt { color: var(--text-normal); opacity: .85; }
+.anki-vs-meta { font-size: var(--font-ui-small); color: var(--text-muted); }
+.anki-vs-weg { color: var(--text-normal); background: color-mix(in srgb, var(--color-red, #e05252) 28%, transparent); border-radius: 3px; padding: 0 2px; }
+.anki-vs-neu { color: var(--text-normal); background: color-mix(in srgb, var(--color-green, #4caf50) 30%, transparent); border-radius: 3px; padding: 0 2px; font-weight: 600; }
+.anki-vs-inhalt.is-ganz-neu, .anki-vs-inhalt.is-ganz-weg { color: var(--text-normal); }
+.anki-suggestion-actions button { font-size: var(--font-ui-small); padding: 6px 12px; }
+.anki-suggestion button.anki-vs-leise { font-size: var(--font-ui-small); color: var(--text-normal); }
+.anki-vs-hinweis { font-size: var(--font-ui-small); color: var(--text-muted); }
+.anki-vs-gruende { display: grid; border-top: 1px solid var(--background-modifier-border); }
+.anki-vs-gruende button { justify-content: flex-start; background: none; box-shadow: none; border-radius: 0; font-size: var(--font-ui-medium); height: auto; padding: 10px 12px; border-top: 1px solid var(--background-modifier-border); color: var(--text-normal); }
+.anki-vs-gruende button:first-child { border-top: 0; }
+.anki-vs-gruende button:hover { background: var(--background-modifier-hover); }
+.anki-vs-eigen { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--background-modifier-border); }
+
+/* Lernplan in der Seitenleiste */
+.anki-lp { font-size: var(--font-ui-medium); line-height: 1.5; }
+.anki-lp button { cursor: pointer; }
+.anki-lp-reiter { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+.anki-lp-ziel { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); color: var(--text-normal); }
+.anki-lp-voll { width: 100%; margin-bottom: 12px; }
+.anki-lp-status { color: var(--text-muted); margin: 6px 0; }
+.anki-lp-befund { white-space: pre-wrap; margin-bottom: 12px; color: var(--text-normal); }
+.anki-lp-fehler { color: var(--text-error); margin: 6px 0; }
+.anki-lp-vor { margin-bottom: 12px; border: 1px solid var(--background-modifier-border); border-left: 4px solid var(--c); border-radius: 8px; background: var(--background-primary); overflow: hidden; }
+.anki-lp-vkopf { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 10px 12px 2px; }
+.anki-lp-vkopf span { color: var(--text-muted); font-size: var(--font-ui-small); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-lp-warum { padding: 2px 12px 8px; color: var(--text-normal); }
+.anki-lp-warum p, .anki-lp-inhalt p, .anki-lp-ki p { margin: 0 0 4px; }
+.anki-lp-inhalt { padding: 8px 12px 10px; border-top: 1px solid var(--background-modifier-border); color: var(--text-normal); }
+.anki-lp-inhalt small { display: block; margin-top: 6px; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--text-muted); }
+.anki-lp-inhalt textarea { display: block; width: 100%; min-height: 76px; font-size: var(--font-ui-medium); line-height: 1.5; }
+.anki-lp-alt { text-decoration: line-through; background: color-mix(in srgb, var(--color-red, #e05252) 26%, transparent); border-radius: 3px; padding: 1px 4px; margin-bottom: 4px; }
+.anki-lp-neu { background: color-mix(in srgb, var(--color-green, #4caf50) 24%, transparent); border-radius: 3px; padding: 1px 4px; font-weight: 600; }
+.anki-lp-beleg { padding: 0 12px 10px; font-size: var(--font-ui-small); color: var(--text-muted); }
+.anki-lp-gruende { display: grid; border-top: 1px solid var(--background-modifier-border); }
+.anki-lp-gruende > button { justify-content: flex-start; height: auto; padding: 10px 12px; background: none; box-shadow: none; border-radius: 0; border-top: 1px solid var(--background-modifier-border); color: var(--text-normal); }
+.anki-lp-gruende > button:first-child { border-top: 0; }
+.anki-lp-gruende > button:hover { background: var(--background-modifier-hover); }
+.anki-lp-eigen { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--background-modifier-border); }
+.anki-lp-leiste { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border-top: 1px solid var(--background-modifier-border); }
+.anki-lp-leiste button { height: auto; padding: 10px 4px; border-radius: 0; box-shadow: none; font-weight: 700; font-size: var(--font-ui-small); border-left: 1px solid var(--background-modifier-border); }
+.anki-lp-leiste button:first-child { border-left: 0; }
+.anki-lp-zu { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; color: var(--text-normal); }
+.anki-lp-zu a { font-weight: 700; cursor: pointer; }
+.anki-lp-du { margin: 10px 0 10px 32px; padding: 8px 12px; border-radius: 12px 12px 3px 12px; background: color-mix(in srgb, var(--interactive-accent) 20%, transparent); color: var(--text-normal); }
+.anki-lp-ki { margin-bottom: 10px; color: var(--text-normal); }
+.anki-lp-em { margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--background-modifier-border); border-left: 4px solid var(--c); border-radius: 8px; background: var(--background-primary); color: var(--text-normal); }
+.anki-lp-em img { display: block; max-width: 100%; margin-top: 8px; border-radius: 4px; }
+.anki-lp-dosis { display: grid; grid-template-columns: 90px minmax(0, 1fr); column-gap: 10px; padding: 6px 0; border-top: 1px solid var(--background-modifier-border); margin-top: 6px; }
+.anki-lp-dosis span { color: var(--text-muted); }
+.anki-lp-dosis small { grid-column: 2; color: var(--text-muted); }
+.anki-lp-ein { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; position: sticky; bottom: 0; padding-top: 8px; background: var(--background-secondary); }
+.anki-lp-ein textarea { font-size: var(--font-ui-medium); }
+.anki-lp-wahl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.anki-lp-wahl-rechts { color: var(--text-muted); font-size: var(--font-ui-small); white-space: nowrap; }

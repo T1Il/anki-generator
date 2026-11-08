@@ -1,5 +1,6 @@
 import { ButtonComponent, MarkdownRenderer, Menu, Notice, Platform, TFile, setIcon, Component, loadMermaid, requestUrl } from 'obsidian';
 import AnkiGeneratorPlugin from '../../main';
+import { GRUENDE, rueckmeldungAus } from '../../lernplan/lernplanApi';
 import { AiProvider, ChatMessage, KartenBezug, VorschlagZustand } from '../../types';
 import { streamChatResponse, generateFeedbackOnly, buildChatSystemPrompt } from '../../aiGenerator';
 import { resolveProvider, PROVIDERS, getAvailableProviders, modelLabel } from '../../providers';
@@ -475,12 +476,21 @@ export class ChatPanel extends Component {
 		return (this.zustand(ktx).bearbeitet as Suggestion | undefined) ?? ktx.original;
 	}
 
+	/** Entscheidung in die gemeinsame Rückmeldung, damit auch Durchgang und Lernchat daraus lernen. Blockiert nichts. */
+	private entscheidungMelden(ktx: BoxKontext, status: 'applied' | 'dismissed') {
+		const v = this.aktuellerVorschlag(ktx) as any;
+		const eintrag = rueckmeldungAus(v, status === 'applied' ? 'uebernommen' : 'verworfen', ktx.grund, ktx.grundText);
+		this.plugin.lernplanApi.rueckmeldung(eintrag).catch((e) => console.debug('[AnkiGenerator] Rückmeldung nicht gesendet', e));
+	}
+
 	/**
 	 * Zustand einer Box aendern und im Verlauf speichern – bearbeitete
 	 * Fassungen, Übernahmen und Verwerfen ueberstehen so den Neustart.
 	 */
 	private setzeZustand(ktx: BoxKontext, aenderung: Partial<VorschlagZustand>) {
+		const vorher = this.zustand(ktx).status;
 		const neu: VorschlagZustand = { ...this.zustand(ktx), ...aenderung };
+		if (aenderung.status && aenderung.status !== vorher) this.entscheidungMelden(ktx, aenderung.status);
 		(Object.keys(neu) as (keyof VorschlagZustand)[]).forEach((k) => { if (neu[k] === undefined) delete neu[k]; });
 
 		if (ktx.msg) {
@@ -636,7 +646,21 @@ export class ChatPanel extends Component {
 			qb.setText(ktx.quelltext ? 'Quelltext aus' : 'Quelltext');
 		});
 		const vb = rechts.createEl('button', { cls: 'anki-vs-leise', text: 'Verwerfen' });
-		vb.addEventListener('click', () => this.setzeZustand(ktx, { status: 'dismissed' }));
+		const gruende = box.createDiv({ cls: 'anki-vs-gruende' });
+		gruende.hide();
+		const wegMit = (grund?: string, text?: string) => {
+			ktx.grund = grund;
+			ktx.grundText = text;
+			this.setzeZustand(ktx, { status: 'dismissed' });
+		};
+		for (const [k, name] of GRUENDE) gruende.createEl('button', { text: name }).addEventListener('click', () => wegMit(k));
+		const eigen = gruende.createDiv({ cls: 'anki-vs-eigen' });
+		const eigenFeld = eigen.createEl('input', { attr: { placeholder: 'Eigene Begründung', type: 'text' } });
+		eigen.createEl('button', { text: 'Verwerfen' }).addEventListener('click', () => wegMit(undefined, eigenFeld.value.trim() || undefined));
+		vb.addEventListener('click', () => {
+			rechts.parentElement?.after(gruende);
+			if (gruende.isShown()) gruende.hide(); else gruende.show();
+		});
 
 		// --- Inhalt je Art ---------------------------------------------------
 		if (v.kind === 'invalid') {
@@ -1676,6 +1700,8 @@ interface BoxKontext {
 	warum: string;
 	bearbeiten: boolean;
 	quelltext: boolean;
+	grund?: string;
+	grundText?: string;
 	/** Zustand ohne Nachricht (sollte nicht vorkommen) – nur im Speicher. */
 	fluechtig?: VorschlagZustand;
 }

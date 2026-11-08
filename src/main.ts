@@ -1,4 +1,7 @@
 import { rechtsrahmenSetzen } from './chat/suggestions';
+import { LernplanApi } from './lernplan/lernplanApi';
+import { LERNPLAN_VIEW_TYPE, LernplanView } from './ui/LernplanView';
+import { DurchgangModal, NotizVerknuepfenModal } from './ui/LernplanModals';
 import { App, Editor, MarkdownView, Notice, Plugin, requestUrl, WorkspaceLeaf, TFile, TFolder, Platform } from 'obsidian';
 import { AnkiGeneratorSettingTab, DEFAULT_SETTINGS, AnkiGeneratorSettings, repairCorruptedPrompt } from './settings';
 import { processAnkiCardsBlock } from './ankiBlockProcessor';
@@ -38,6 +41,37 @@ export default class AnkiGeneratorPlugin extends Plugin {
 	ankiFileDecorationProvider: AnkiFileDecorationProvider | null = null;
 	flaggen: FlaggenDienst = new FlaggenDienst(this);
 
+	lernplanApi = new LernplanApi(() => this.settings.fitnessManagerUrl);
+
+	async lernplanOeffnen(chat = false) {
+		const { workspace } = this.app;
+		let leaf = workspace.getLeavesOfType(LERNPLAN_VIEW_TYPE)[0];
+		if (!leaf) {
+			leaf = workspace.getRightLeaf(false) as WorkspaceLeaf;
+			await leaf.setViewState({ type: LERNPLAN_VIEW_TYPE, active: true });
+		}
+		workspace.revealLeaf(leaf);
+		const v = leaf.view as LernplanView;
+		if (chat) v.oeffneChat(); else void v.zeigen();
+	}
+
+	async notizMitAufgabeVerknuepfen() {
+		const datei = this.app.workspace.getActiveFile();
+		if (!datei || datei.extension !== 'md') { new Notice('Keine Notiz geöffnet.'); return; }
+		try {
+			new NotizVerknuepfenModal(this.app, this.lernplanApi, datei, await this.lernplanApi.aufgabenFuerNotiz(datei.path)).open();
+		} catch (e: any) { new Notice(e?.message || String(e)); }
+	}
+
+	async durchgangWaehlen() {
+		try {
+			const plan = await this.lernplanApi.plan();
+			const w = plan.vorarbeit || plan.woche;
+			if (!w) { new Notice('Keine laufende Woche.'); return; }
+			new DurchgangModal(this.app, this.lernplanApi, w, await this.lernplanApi.pruefstand(w.kw, w.jahr), () => void this.lernplanOeffnen()).open();
+		} catch (e: any) { new Notice(e?.message || String(e)); }
+	}
+
 	/** Gemeinsamen Regeltext vom Server holen; ohne Antwort bleibt die mitgelieferte Kopie. */
 	private async rechtsrahmenHolen() {
 		const basis = (this.settings.fitnessManagerUrl || '').replace(/\/$/, '');
@@ -59,6 +93,12 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		// Register ViewPlugin for Legacy Auto-Hide
 		this.registerEditorExtension(legacyAnkiStateField);
+
+		this.registerView(LERNPLAN_VIEW_TYPE, (leaf) => new LernplanView(leaf, this));
+		this.addCommand({ id: 'lernplan-notiz-verknuepfen', name: 'Notiz mit Lernplan-Aufgabe verknüpfen', callback: () => void this.notizMitAufgabeVerknuepfen() });
+		this.addCommand({ id: 'lernplan-durchgang-starten', name: 'Durchgang für Aufgaben starten', callback: () => void this.durchgangWaehlen() });
+		this.addCommand({ id: 'lernplan-oeffnen', name: 'Lernplan und Vorschläge öffnen', callback: () => void this.lernplanOeffnen() });
+		this.addCommand({ id: 'lernplan-chat', name: 'Lernchat öffnen', callback: () => void this.lernplanOeffnen(true) });
 
 		// REGISTER FEEDBACK VIEW
 		this.registerView(
