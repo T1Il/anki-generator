@@ -1854,3 +1854,8 @@ button.anki-lp-fzeile:disabled { opacity: 1; cursor: default; }
 .anki-lp-ffuss button.mod-cta { border-color: var(--lp-lern) !important; background: var(--lp-lern) !important; color: var(--lp-auf-lern) !important; }
 .anki-lp-wahl { flex: none; }
 .anki-lp-wahl { padding: 0; text-align: center; justify-content: center; align-content: center; }
+
+/* Die Statusleiste von Obsidian liegt am Desktop über dem unteren Rand der Ansicht */
+.anki-lp-ein { --lp-unten: 12px; padding-bottom: var(--lp-unten); }
+body:not(.is-mobile) .anki-lp-ein { --lp-unten: 42px; }
+button.anki-lp-senden { bottom: calc(var(--lp-unten) + 6px); }
