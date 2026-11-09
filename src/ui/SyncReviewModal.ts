@@ -1,8 +1,10 @@
 import { App, Modal, TFile, Notice } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
-import { getAnkiBlocks, parseBlockHeader, parseCardsFromBlockSource } from '../anki/ankiParser';
+import { getAnkiBlocks, parseBlockHeader, parseCardsFromBlockSource, stripClozeSyntax } from '../anki/ankiParser';
 import { syncAnkiBlock } from '../anki/syncManager';
+import { getDeckNames } from '../anki/AnkiConnect';
 import { t } from '../lang/helpers';
+import { auftraege, deckVorschlag, gewaehltZahl, neueGruppe, passt, SyncGruppe } from './syncAuswahl';
 
 /** Ab dieser Kartenzahl verlangt "Alle synchronisieren" einen zweiten Klick. */
 const CONFIRM_THRESHOLD = 25;
@@ -17,14 +19,17 @@ interface UnsyncedBlock {
     source: string;
     /** Indizes der Karten ohne ID, bezogen auf den geparsten Block. */
     unsyncedIndices: number[];
+    auswahl: SyncGruppe;
 }
 
 export class SyncReviewModal extends Modal {
     plugin: AnkiGeneratorPlugin;
-    /** Blöcke mit TARGET DECK — nur die lassen sich synchronisieren. */
     blocks: UnsyncedBlock[] = [];
-    /** Blöcke ohne TARGET DECK. Die liefen früher erst beim Sync in einen Fehler. */
-    blocked: UnsyncedBlock[] = [];
+    deckNamen: string[] = [];
+    /** Deck für alle Notizen ohne eigenes. */
+    fuerAlle = '';
+    /** Ohne laufendes Anki kann nichts synchronisiert werden. */
+    ankiDa = true;
     isScanning = true;
     /** Der Bestätigungsklick steht noch aus. */
     armed = false;
@@ -35,17 +40,19 @@ export class SyncReviewModal extends Modal {
     }
 
     async onOpen() {
+        this.modalEl.addClass('anki-lp-fenster');
         this.render();
+        try { this.deckNamen = await getDeckNames(); } catch { this.deckNamen = []; this.ankiDa = false; }
         await this.scanVault();
     }
 
-    private get totalCards(): number {
-        return this.blocks.reduce((n, b) => n + b.unsyncedIndices.length, 0);
+    private get gruppen(): SyncGruppe[] {
+        return this.blocks.map((b) => b.auswahl);
     }
 
     async scanVault() {
         this.blocks = [];
-        this.blocked = [];
+        const deckeJeOrdner: Record<string, Record<string, number>> = {};
 
         for (const file of this.app.vault.getMarkdownFiles()) {
             try {
@@ -59,27 +66,38 @@ export class SyncReviewModal extends Modal {
 
                 found.forEach((block, i) => {
                     const cards = parseCardsFromBlockSource(block.innerClean);
+                    const blockDeck = parseBlockHeader(block.innerClean).deckName;
+                    if (blockDeck) {
+                        const ordner = (deckeJeOrdner[file.parent?.path || ''] ||= {});
+                        ordner[blockDeck] = (ordner[blockDeck] || 0) + 1;
+                    }
                     const unsyncedIndices = cards
                         .map((c, idx) => (!c.id && c.q && c.q.trim() ? idx : -1))
                         .filter(idx => idx >= 0);
 
                     if (unsyncedIndices.length === 0) return;
 
-                    const entry: UnsyncedBlock = {
+                    const deckName = parseBlockHeader(block.innerClean).deckName;
+                    this.blocks.push({
                         file,
                         blockNo: i + 1,
                         blockCount: found.length,
-                        deckName: parseBlockHeader(block.innerClean).deckName,
+                        deckName,
                         source: block.innerClean,
-                        unsyncedIndices
-                    };
-
-                    (entry.deckName ? this.blocks : this.blocked).push(entry);
+                        unsyncedIndices,
+                        auswahl: neueGruppe(deckName, unsyncedIndices.map((index) => ({ index, frage: stripClozeSyntax(cards[index].q), antwort: (cards[index].a || '').trim() })))
+                    });
                 });
             } catch (e) {
                 console.error(`Fehler beim Scannen von ${file.path}:`, e);
             }
         }
+
+        // Vorschlag aus dem Ordner, sichtbar und änderbar. Die aktuelle Notiz steht oben, danach was noch ein Deck braucht.
+        const aktiv = this.app.workspace?.getActiveFile?.()?.path;
+        for (const b of this.blocks) if (!b.deckName) b.auswahl.neuesDeck = deckVorschlag(b.file.path, deckeJeOrdner);
+        const rang = (b: UnsyncedBlock) => (b.file.path === aktiv ? 0 : b.deckName ? 2 : 1);
+        this.blocks.sort((a, b) => rang(a) - rang(b) || a.file.basename.localeCompare(b.file.basename, 'de'));
 
         this.isScanning = false;
         this.render();
@@ -88,148 +106,136 @@ export class SyncReviewModal extends Modal {
     render() {
         const { contentEl } = this;
         contentEl.empty();
-        contentEl.createEl('h2', { text: t('syncReview.title') });
+        this.titleEl.setText('Karten synchronisieren');
 
         if (this.isScanning) {
-            contentEl.createDiv({ text: t('syncReview.scanning'), cls: 'anki-sync-scanning' });
+            contentEl.createDiv({ text: t('syncReview.scanning'), cls: 'anki-lp-fleer' });
+            return;
+        }
+        if (this.blocks.length === 0) {
+            contentEl.createDiv({ text: t('syncReview.allSynced'), cls: 'anki-lp-fleer' });
             return;
         }
 
-        if (this.blocks.length === 0 && this.blocked.length === 0) {
-            contentEl.createDiv({ text: t('syncReview.allSynced') });
-            return;
+        const decks = contentEl.createEl('datalist');
+        decks.id = 'anki-sync-decks';
+        this.deckNamen.forEach((d) => decks.createEl('option', { attr: { value: d } }));
+
+        const kopf = contentEl.createDiv({ cls: 'anki-sy-kopf' });
+        const alle = kopf.createEl('label', { cls: 'anki-sy-alle' });
+        const alleBox = alle.createEl('input', { attr: { type: 'checkbox' } });
+        alle.createSpan({ text: 'Alle' });
+        const zahl = kopf.createSpan({ cls: 'anki-sy-zahl' });
+        if (this.blocks.some((b) => !b.deckName)) {
+            const fuerAlle = contentEl.createEl('input', { cls: 'anki-lp-fsuche anki-sy-fueralle', attr: { type: 'search', list: 'anki-sync-decks', placeholder: 'Deck für alle Notizen ohne Deck' } });
+            fuerAlle.value = this.fuerAlle;
+            fuerAlle.oninput = () => { this.fuerAlle = fuerAlle.value; aktualisieren(); };
         }
 
-        const fileCount = new Set(this.blocks.map(b => b.file.path)).size;
-        contentEl.createDiv({
-            cls: 'anki-sync-summary',
-            text: t('syncReview.summary', {
-                cards: this.totalCards,
-                blocks: this.blocks.length,
-                files: fileCount
-            })
-        });
+        const suche = contentEl.createEl('input', { cls: 'anki-lp-fsuche anki-sy-suche', attr: { type: 'search', placeholder: 'Notiz oder Karte suchen' } });
+        const liste = contentEl.createDiv({ cls: 'anki-lp-fliste' });
+        const fuss = contentEl.createDiv({ cls: 'anki-lp-ffuss anki-sy-fuss' });
+        const hinweis = fuss.createSpan({ cls: 'anki-sy-hinweis' });
+        const start = fuss.createEl('button', { cls: 'mod-cta' });
 
-        this.renderDeckBreakdown(contentEl);
-        this.renderList(contentEl, this.blocks);
+        const aktualisieren = () => {
+            const n = gewaehltZahl(this.gruppen);
+            const gesamt = this.gruppen.reduce((x, g) => x + g.karten.length, 0);
+            const a = auftraege(this.gruppen, this.fuerAlle);
+            zahl.setText(`${n} von ${gesamt} Karten`);
+            alleBox.checked = n === gesamt;
+            alleBox.indeterminate = n > 0 && n < gesamt;
+            hinweis.setText(!this.ankiDa ? 'Anki ist nicht erreichbar. Starte Anki und öffne das Fenster neu.' : a.ohneDeck.length ? `${a.ohneDeck.length} ${a.ohneDeck.length === 1 ? 'Notiz braucht' : 'Notizen brauchen'} noch ein Deck` : '');
+            start.setText(this.armed ? `Ja, ${n} Karten synchronisieren` : `${n} Karten synchronisieren`);
+            start.disabled = !this.ankiDa || n === 0 || a.ohneDeck.length > 0;
+        };
 
-        if (this.blocked.length > 0) {
-            contentEl.createEl('h3', {
-                cls: 'anki-sync-blocked-heading',
-                text: t('syncReview.noDeck', { count: this.blocked.length })
-            });
-            this.renderList(contentEl, this.blocked, true);
-        }
-
-        this.renderActions(contentEl);
-    }
-
-    /** Wohin die Karten gehen — bei einem Vault-weiten Sync die wichtigste Info. */
-    private renderDeckBreakdown(parent: HTMLElement) {
-        if (this.blocks.length === 0) return;
-
-        const perDeck = new Map<string, number>();
-        for (const b of this.blocks) {
-            const deck = b.deckName as string;
-            perDeck.set(deck, (perDeck.get(deck) || 0) + b.unsyncedIndices.length);
-        }
-
-        const list = parent.createDiv({ cls: 'anki-sync-decks' });
-        [...perDeck.entries()]
-            .sort((a, b) => b[1] - a[1])
-            .forEach(([deck, count]) => {
-                const row = list.createDiv({ cls: 'anki-sync-deck-row' });
-                row.createSpan({ cls: 'anki-sync-deck-count', text: String(count) });
-                row.createSpan({ cls: 'anki-sync-deck-name', text: deck });
-            });
-    }
-
-    private renderList(parent: HTMLElement, items: UnsyncedBlock[], muted = false) {
-        const container = parent.createDiv({
-            cls: muted ? 'anki-sync-list anki-sync-list-muted' : 'anki-sync-list'
-        });
-
-        items.forEach(item => {
-            const row = container.createDiv({ cls: 'anki-sync-list-item' });
-            row.onclick = async () => {
-                await this.app.workspace.getLeaf(false).openFile(item.file);
-                this.close();
-            };
-
-            const name = row.createSpan({ cls: 'anki-sync-filename', text: item.file.basename });
-            if (item.blockCount > 1) {
-                name.createSpan({
-                    cls: 'anki-sync-blockno',
-                    text: ' ' + t('syncReview.blockLabel', { n: item.blockNo, total: item.blockCount })
-                });
+        const zeilen = this.blocks.map((item) => ({ item, ...this.notizZeile(liste, item, aktualisieren) }));
+        // „Alle“ gilt für das, was die Suche gerade zeigt.
+        alleBox.onchange = () => {
+            for (const z of zeilen) {
+                if (passt(z.item.file.basename, z.item.auswahl.karten, suche.value)) z.item.auswahl.gewaehlt = new Set(alleBox.checked ? z.item.auswahl.karten.map((k) => k.index) : []);
+                z.setzen();
             }
-
-            row.createSpan({
-                cls: 'anki-sync-details',
-                text: item.deckName
-                    ? t('syncReview.cardsInDeck', { count: item.unsyncedIndices.length, deck: item.deckName })
-                    : String(item.unsyncedIndices.length)
-            });
-        });
-    }
-
-    private renderActions(parent: HTMLElement) {
-        const total = this.totalCards;
-        if (total === 0) return;
-
-        if (this.armed) {
-            parent.createDiv({
-                cls: 'anki-sync-warning',
-                text: t('syncReview.confirmWarn', { count: total })
-            });
-        }
-
-        const actions = parent.createDiv({ cls: 'anki-sync-actions' });
-
-        if (this.armed) {
-            const cancel = actions.createEl('button', { text: t('syncReview.cancel') });
-            cancel.onclick = () => {
-                this.armed = false;
-                this.render();
-            };
-
-            const confirm = actions.createEl('button', {
-                cls: 'mod-warning',
-                text: t('syncReview.confirmBtn', { count: total })
-            });
-            confirm.onclick = () => this.syncAll();
-            return;
-        }
-
-        const syncBtn = actions.createEl('button', {
-            cls: 'mod-cta',
-            text: t('syncReview.syncAll', { count: total })
-        });
-        syncBtn.onclick = () => {
-            // Erst nachfragen, wenn es viele sind: an einer reinen Dateizahl war
-            // nicht zu erkennen, dass 12 Dateien 130 Karten bedeuten.
-            if (total >= CONFIRM_THRESHOLD) {
+            aktualisieren();
+        };
+        suche.oninput = () => zeilen.forEach((z) => z.zeigen(passt(z.item.file.basename, z.item.auswahl.karten, suche.value)));
+        start.onclick = () => {
+            if (gewaehltZahl(this.gruppen) >= CONFIRM_THRESHOLD && !this.armed) {
                 this.armed = true;
-                this.render();
+                aktualisieren();
                 return;
             }
-            this.syncAll();
+            void this.syncAll();
         };
+        aktualisieren();
+    }
+
+    /** Eine Notiz: Haken, Deck, aufklappbar bis zur einzelnen Karte. Gibt zurück, wie sich die Haken neu setzen. */
+    private notizZeile(parent: HTMLElement, item: UnsyncedBlock, aktualisieren: () => void): { setzen: () => void; zeigen: (an: boolean) => void } {
+        const g = item.auswahl;
+        const auf = parent.createEl('details', { cls: 'anki-sy-notiz' });
+        const kopf = auf.createEl('summary');
+        const box = kopf.createEl('input', { attr: { type: 'checkbox', 'aria-label': `${item.file.basename} wählen` } });
+        box.onclick = (e) => e.stopPropagation();
+        const text = kopf.createDiv({ cls: 'anki-lp-ftext' });
+        text.createDiv({ text: item.file.basename + (item.blockCount > 1 ? ` · ${t('syncReview.blockLabel', { n: item.blockNo, total: item.blockCount })}` : '') });
+        if (item.deckName) text.createEl('small', { text: item.deckName });
+        const zahl = kopf.createSpan({ cls: 'anki-lp-frechts' });
+
+        const deck = item.deckName ? null : parent.createEl('input', { cls: 'anki-sy-deck', attr: { type: 'search', list: 'anki-sync-decks', placeholder: 'Deck wählen' } });
+        if (deck) {
+            deck.value = g.neuesDeck;
+            deck.oninput = () => { g.neuesDeck = deck.value; aktualisieren(); };
+        }
+
+        const karten = g.karten.map((k) => {
+            const zeile = auf.createEl('label', { cls: 'anki-sy-karte' });
+            const b = zeile.createEl('input', { attr: { type: 'checkbox' } });
+            const inhalt = zeile.createDiv();
+            inhalt.createDiv({ text: k.frage });
+            if (k.antwort && k.antwort !== '—') inhalt.createEl('small', { text: k.antwort });
+            b.onchange = () => {
+                if (b.checked) g.gewaehlt.add(k.index); else g.gewaehlt.delete(k.index);
+                setzen();
+                aktualisieren();
+            };
+            return { index: k.index, b };
+        });
+        const setzen = () => {
+            box.checked = g.gewaehlt.size === g.karten.length;
+            box.indeterminate = g.gewaehlt.size > 0 && !box.checked;
+            zahl.setText(`${g.gewaehlt.size}/${g.karten.length}`);
+            karten.forEach(({ index, b }) => { b.checked = g.gewaehlt.has(index); });
+        };
+        box.onchange = () => {
+            g.gewaehlt = new Set(box.checked ? g.karten.map((k) => k.index) : []);
+            setzen();
+            aktualisieren();
+        };
+        const oeffnen = auf.createEl('button', { cls: 'anki-lp-textknopf anki-sy-oeffnen', text: 'Notiz öffnen' });
+        oeffnen.onclick = async () => {
+            await this.app.workspace.getLeaf(false).openFile(item.file);
+            this.close();
+        };
+        setzen();
+        const zeigen = (an: boolean) => { auf.style.display = an ? '' : 'none'; if (deck) deck.style.display = an ? '' : 'none'; };
+        return { setzen, zeigen };
     }
 
     async syncAll() {
-        const items = this.blocks;
-        const blockedCount = this.blocked.length;
+        const { fertig } = auftraege(this.gruppen, this.fuerAlle);
+        const items = fertig.map((f) => ({ item: this.blocks.find((b) => b.auswahl === f.gruppe) as UnsyncedBlock, deck: f.deck, indizes: f.indizes }));
         this.close();
 
         const notice = new Notice(t('syncReview.scanning'), 0);
 
         let processed = 0;
         let failed = 0;
-        let skipped = blockedCount;
+        let skipped = 0;
 
         for (let i = 0; i < items.length; i++) {
-            const item = items[i];
+            const { item, deck, indizes } = items[i];
             notice.setMessage(t('syncReview.progress', {
                 file: item.file.basename,
                 current: i + 1,
@@ -255,14 +261,14 @@ export class SyncReviewModal extends Modal {
                 await syncAnkiBlock(
                     this.plugin,
                     block.innerClean,
-                    item.deckName,
+                    deck,
                     cards,
                     item.file,
-                    // Nur die Karten ohne ID anfassen. Vorher lief der ganze Block
+                    // Nur die gewählten Karten ohne ID anfassen. Vorher lief der ganze Block
                     // durch, also auch hunderte Updates an bereits synchronen Karten.
-                    item.unsyncedIndices
+                    indizes
                 );
-                processed += item.unsyncedIndices.length;
+                processed += indizes.length;
             } catch (e) {
                 console.error(`Fehler beim Sync von ${item.file.path}:`, e);
                 failed++;

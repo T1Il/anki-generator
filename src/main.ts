@@ -282,7 +282,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'sync-unsynced-anki-cards',
-			name: 'Sync all unsynced Anki cards in Vault',
+			name: 'Alle offenen Anki-Karten synchronisieren',
 			callback: () => {
 				new SyncReviewModal(this.app, this).open();
 			}
