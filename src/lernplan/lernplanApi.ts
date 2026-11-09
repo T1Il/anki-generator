@@ -5,6 +5,7 @@ import { requestUrl } from 'obsidian';
  * Verknüpfen, Durchgang und Chat laufen über dieselben Endpunkte wie App und Web.
  */
 export interface LernAufgabe { kw: number; jahr: number; index: number; text: string; kurz?: string; gruppe?: string | null; seite?: number | null; woche?: string; lernziel?: string; passt?: boolean; verknuepft?: boolean; }
+export interface LernChatLive { aktiv: boolean; schritte: string[]; text: string; einbettungen: any[]; }
 export interface LernChatKopf { id: number; titel?: string; }
 export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; }
 export interface ChatEreignis { type: string; text?: string; name?: string; einbettung?: any; punkt?: LernPunkt; }
@@ -54,6 +55,7 @@ export class LernplanApi {
 	async rueckmeldung(eintrag: Record<string, unknown>) { await this.ruf('/api/lernplan/rueckmeldung', 'POST', eintrag); }
 	async chatAnlegen(felder: Record<string, unknown>) { return (await this.ruf('/api/lernchat', 'POST', felder)).json; }
 	async chatListe(): Promise<LernChatKopf[]> { return (await this.ruf('/api/lernchat')).json.chats || []; }
+	async chatLive(id: number): Promise<LernChatLive> { return (await this.ruf(`/api/lernchat/${id}/live`)).json; }
 	async chatLesen(id: number) { return (await this.ruf(`/api/lernchat/${id}`)).json; }
 	async chatFragen(id: number, text: string): Promise<ChatEreignis[]> { return chatEreignisse((await this.ruf(`/api/lernchat/${id}/stream`, 'POST', { text })).text); }
 }

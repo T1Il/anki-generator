@@ -248,11 +248,35 @@ export class LernplanView extends ItemView {
 			senden.disabled = true;
 			if (!this.chatId) verlauf.empty();
 			this.nachricht(verlauf, 'user', text, []);
-			const warte = verlauf.createDiv({ text: 'Sucht in den Quellen', cls: 'anki-lp-arbeit' });
+			const live = verlauf.createDiv({ cls: 'anki-lp-live' });
+			const schritte = live.createDiv({ cls: 'anki-lp-schritte' });
+			const karten = live.createDiv();
+			const entwurf = live.createDiv({ cls: 'anki-lp-ki' });
+			entwurf.hide();
+			const warte = live.createDiv({ text: 'Denkt nach', cls: 'anki-lp-arbeit' });
 			const start = Date.now();
+			let schritt = 'Denkt nach', gezeigt = 0, geschrieben = '', frage = false, anzahl = 0;
 			const uhr = window.setInterval(() => {
 				const s = Math.round((Date.now() - start) / 1000);
-				warte.setText(`Sucht in den Quellen, ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+				warte.setText(`${schritt}, ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+				if (frage || !this.chatId) return;
+				frage = true;
+				api.chatLive(this.chatId).then((z) => {
+					const unten = verlauf.scrollHeight - verlauf.scrollTop - verlauf.clientHeight < 80;
+					if (z.schritte.length > anzahl) {
+						schritte.empty();
+						z.schritte.slice(0, -1).slice(-4).forEach((t) => schritte.createDiv({ text: t }));
+						schritt = z.schritte[z.schritte.length - 1];
+						anzahl = z.schritte.length;
+					}
+					for (; gezeigt < z.einbettungen.length; gezeigt++) this.einbettung(karten, z.einbettungen[gezeigt]);
+					if (z.text !== geschrieben) {
+						geschrieben = z.text;
+						entwurf.empty();
+						if (z.text.trim()) { entwurf.show(); this.md(entwurf.createDiv(), z.text); schritt = 'Schreibt die Antwort'; } else entwurf.hide();
+					}
+					if (unten) verlauf.scrollTop = verlauf.scrollHeight;
+				}).catch(() => undefined).finally(() => { frage = false; });
 			}, 1000);
 			verlauf.scrollTop = verlauf.scrollHeight;
 			try {
@@ -262,7 +286,7 @@ export class LernplanView extends ItemView {
 					titel.setText(text.slice(0, 80));
 				}
 				const ev = await api.chatFragen(this.chatId as number, text);
-				warte.remove();
+				live.remove();
 				const em = ev.filter((x) => x.einbettung).map((x) => x.einbettung);
 				const antwort = ev.find((x) => x.type === 'text')?.text || '';
 				this.nachricht(verlauf, 'ai', antwort, em);
@@ -270,7 +294,7 @@ export class LernplanView extends ItemView {
 					if (x.type === 'fehler') verlauf.createDiv({ text: x.text, cls: 'anki-lp-fehler' });
 					if (x.type === 'vorschlag' && x.punkt && x.punkt.typ in ART) this.punkt(verlauf, x.punkt);
 				}
-			} catch (e: any) { warte.remove(); verlauf.createDiv({ text: e?.message || String(e), cls: 'anki-lp-fehler' }); } finally {
+			} catch (e: any) { live.remove(); verlauf.createDiv({ text: e?.message || String(e), cls: 'anki-lp-fehler' }); } finally {
 				window.clearInterval(uhr);
 				senden.disabled = false;
 				verlauf.scrollTop = verlauf.scrollHeight;
