@@ -138,6 +138,16 @@ export class LernplanView extends ItemView {
 		void MarkdownRenderer.render(this.app, text, el, pfad || '', this);
 	}
 
+	/** PDF-Seiten brauchen beim ersten Mal bis zu einer Minute, bis dahin steht dort, dass sie laden. */
+	private bild(el: HTMLElement, src: string, alt: string) {
+		const rahmen = el.createDiv({ cls: 'anki-lp-bild', text: 'Abbildung lädt' });
+		const img = document.createElement('img');
+		img.alt = alt;
+		img.onload = () => { rahmen.empty(); rahmen.removeClass('anki-lp-bild'); rahmen.appendChild(img); };
+		img.onerror = () => { rahmen.setText('Abbildung nicht geladen'); };
+		img.src = src;
+	}
+
 	private einbettung(el: HTMLElement, e: any) {
 		const basis = (this.plugin.settings.fitnessManagerUrl || '').replace(/\/$/, '');
 		const karte = (farbe: string, zeichen: string, titel: string, rechts?: string) => {
@@ -147,6 +157,15 @@ export class LernplanView extends ItemView {
 			kopf.createSpan({ cls: 'anki-lp-ico', text: zeichen });
 			kopf.createEl('b', { text: titel });
 			if (rechts) kopf.createEl('em', { text: rechts });
+			if (['seite', 'bild', 'grafik'].includes(e.art)) {
+				k.addClass('is-klappbar');
+				kopf.setAttribute('role', 'button');
+				kopf.setAttribute('tabindex', '0');
+				kopf.setAttribute('aria-expanded', 'true');
+				const klappen = () => kopf.setAttribute('aria-expanded', String(!k.classList.toggle('is-zu')));
+				kopf.onclick = klappen;
+				kopf.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); klappen(); } };
+			}
 			return k;
 		};
 		const ROT = 'var(--lp-dosis)', BLAU = 'var(--lp-lern)', GRUEN = 'var(--lp-moos)';
@@ -165,11 +184,11 @@ export class LernplanView extends ItemView {
 		} else if (e.art === 'seite') {
 			const k = karte(BLAU, '▦', e.titel || 'Abbildung', `S. ${e.seite}`);
 			const ziel = e.zotero ? k.createEl('a', { href: e.zotero, cls: 'anki-lp-bildlink' }) : k;
-			ziel.createEl('img', { attr: { src: basis + e.bild, alt: e.titel || '' } });
+			this.bild(ziel, basis + e.bild, e.titel || '');
 			if (e.zotero) k.createEl('a', { cls: 'anki-lp-fuss anki-lp-zotero', href: e.zotero, text: 'In Zotero öffnen' });
 		} else if (e.art === 'bild') {
 			const k = karte(BLAU, 'N', e.titel || 'Bild', 'Notiz');
-			k.createEl('img', { attr: { src: basis + e.bild, alt: e.titel || '' } });
+			this.bild(k, basis + e.bild, e.titel || '');
 		} else if (e.art === 'grafik') {
 			const k = karte(GRUEN, '✎', e.titel, 'Eigene Skizze');
 			k.createEl('img', { cls: 'anki-lp-grafik', attr: { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(e.svg)}`, alt: e.titel } });

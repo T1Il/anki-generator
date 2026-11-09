@@ -1877,3 +1877,11 @@ button.anki-lp-senden { bottom: calc(var(--lp-unten) + 6px); }
 .anki-lp-ek em, .anki-lp-dosis small, .anki-lp-fuss { color: color-mix(in srgb, var(--lp-text-stark) 72%, transparent); }
 .anki-lp-em { border-left-color: var(--c); }
 .anki-lp-em img.anki-lp-grafik { max-height: 240px; object-fit: contain; }
+.anki-lp-ek b { color: var(--lp-text-stark); }
+.anki-lp-bild { display: grid; place-items: center; min-height: 140px; border-top: 1px solid var(--lp-rand); font-size: 13.5px; color: color-mix(in srgb, var(--lp-text-stark) 72%, transparent); }
+.anki-lp-em.is-klappbar .anki-lp-ek { grid-template-columns: 22px minmax(0, 1fr) auto 12px; cursor: pointer; }
+.anki-lp-em.is-klappbar .anki-lp-ek::after { content: "▾"; font-size: 13px; line-height: 1; color: color-mix(in srgb, var(--lp-text-stark) 72%, transparent); transition: transform .15s; }
+.anki-lp-em.is-zu .anki-lp-ek::after { transform: rotate(-90deg); }
+.anki-lp-em.is-zu > :not(.anki-lp-ek) { display: none; }
+.anki-lp-ek:focus-visible { outline: 2px solid var(--lp-lern); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { .anki-lp-em.is-klappbar .anki-lp-ek::after { transition: none; } }
