@@ -83,15 +83,18 @@ export class DurchgangModal extends Modal {
 			const z = new Setting(this.contentEl).setName(a.text).setDesc(STAND[this.stand[a.index]] || '');
 			z.addToggle((t) => t.setValue(false).onChange((an) => { if (an) this.wahl.add(a.index); else this.wahl.delete(a.index); }));
 		}
-		new Setting(this.contentEl).addButton((b) => b.setButtonText('Durchgang starten').setCta().onClick(async () => {
+		const starten = async (modus: 'fakten' | 'karten') => {
 			if (!this.wahl.size) { new Notice('Keine Aufgabe gewählt.'); return; }
 			try {
-				const d = await this.api.durchgangStarten(this.woche.kw, this.woche.jahr, [...this.wahl].sort((x, y) => x - y));
-				new Notice(d?.anderer_umfang ? 'Es läuft schon ein Durchgang.' : 'Durchgang gestartet.');
+				const d = await this.api.durchgangStarten(this.woche.kw, this.woche.jahr, [...this.wahl].sort((x, y) => x - y), modus);
+				new Notice(d?.anderer_umfang ? 'Es läuft schon ein Durchgang.' : modus === 'karten' ? 'Karten-Durchgang gestartet.' : 'Durchgang gestartet.');
 				this.close();
 				this.nachStart();
 			} catch (e: any) { new Notice(e?.message || String(e)); }
-		}));
+		};
+		new Setting(this.contentEl)
+			.addButton((b) => b.setButtonText('Karten-Durchgang').onClick(() => starten('karten')))
+			.addButton((b) => b.setButtonText('Durchgang starten').setCta().onClick(() => starten('fakten')));
 	}
 	onClose() { this.contentEl.empty(); }
 }

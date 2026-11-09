@@ -49,7 +49,7 @@ export class LernplanApi {
 	async verknuepfen(a: LernAufgabe, pfad: string) { return (await this.ruf('/api/lernplan/aufgabe/notiz', 'POST', { kw: a.kw, jahr: a.jahr, index: a.index, pfad, text: a.text })).json; }
 	async loesen(a: LernAufgabe, pfad: string) { return (await this.ruf('/api/lernplan/aufgabe/notiz/loesen', 'POST', { kw: a.kw, jahr: a.jahr, index: a.index, pfad, text: a.text })).json; }
 	async pruefstand(kw: number, jahr: number): Promise<Record<string, string>> { return (await this.ruf(`/api/lernplan/durchgang/pruefstand?kw=${kw}&jahr=${jahr}`)).json.aufgaben || {}; }
-	async durchgangStarten(kw: number, jahr: number, aufgaben: number[]) { return (await this.ruf('/api/lernplan/durchgang', 'POST', { kw, jahr, aufgaben })).json.durchgang; }
+	async durchgangStarten(kw: number, jahr: number, aufgaben: number[], modus: 'fakten' | 'karten' = 'fakten') { return (await this.ruf('/api/lernplan/durchgang', 'POST', { kw, jahr, aufgaben, modus })).json.durchgang; }
 	async durchgang(kw: number, jahr: number) { return (await this.ruf(`/api/lernplan/durchgang?kw=${kw}&jahr=${jahr}&auch_spaeter=true`)).json.durchgang; }
 	async punkt(id: number, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> { return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert })).json.punkt; }
 	async rueckmeldung(eintrag: Record<string, unknown>) { await this.ruf('/api/lernplan/rueckmeldung', 'POST', eintrag); }
