@@ -308,6 +308,15 @@ export class LernplanView extends ItemView {
 	private nachricht(el: HTMLElement, rolle: string, text: string, einbettungen: any[]) {
 		if (rolle === 'user') { el.createDiv({ text, cls: 'anki-lp-du' }); return; }
 		for (const e of einbettungen || []) this.einbettung(el, e);
-		if (text) this.md(el.createDiv({ cls: 'anki-lp-ki' }), text);
+		if (!text) return;
+		const box = el.createDiv({ cls: 'anki-lp-ki' });
+		this.md(box.createDiv(), text);
+		const kopieren = box.createEl('button', { cls: 'anki-lp-textknopf anki-lp-kopieren', text: 'Kopieren' });
+		kopieren.onclick = () => {
+			navigator.clipboard.writeText(text).then(() => {
+				kopieren.setText('Kopiert');
+				window.setTimeout(() => kopieren.setText('Kopieren'), 1500);
+			}).catch(() => new Notice('Kopieren ging nicht. Markiere den Text von Hand.'));
+		};
 	}
 }

@@ -1887,3 +1887,5 @@ button.anki-lp-senden { bottom: calc(var(--lp-unten) + 6px); }
 @media (prefers-reduced-motion: reduce) { .anki-lp-em.is-klappbar .anki-lp-ek::after { transition: none; } }
 .anki-lp-schritte { display: grid; gap: 2px; margin: 0 0 8px; font-size: 13.5px; color: var(--text-muted); }
 .anki-lp-schritte > div::before { content: "✓ "; color: var(--lp-moos); }
+.anki-lp-ki, .anki-lp-du, .anki-lp-em, .anki-lp-schritte { user-select: text; -webkit-user-select: text; cursor: auto; }
+.anki-lp-kopieren { display: block; margin: 8px 0 0 auto; font-size: 13px !important; }
