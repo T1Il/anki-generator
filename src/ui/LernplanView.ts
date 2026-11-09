@@ -138,13 +138,18 @@ export class LernplanView extends ItemView {
 		void MarkdownRenderer.render(this.app, text, el, pfad || '', this);
 	}
 
-	/** PDF-Seiten brauchen beim ersten Mal bis zu einer Minute, bis dahin steht dort, dass sie laden. */
-	private bild(el: HTMLElement, src: string, alt: string) {
-		const rahmen = el.createDiv({ cls: 'anki-lp-bild', text: 'Abbildung lädt' });
+	/** Neue PDF-Seiten brauchen etwas. Scheitert der Abruf, zum Beispiel beim Neustart des Servers, versucht es das Plugin erneut. */
+	private bild(el: HTMLElement, src: string, alt: string, versuch = 0) {
+		const rahmen = versuch ? el : el.createDiv({ cls: 'anki-lp-bild', text: 'Abbildung lädt' });
 		const img = document.createElement('img');
 		img.alt = alt;
 		img.onload = () => { rahmen.empty(); rahmen.removeClass('anki-lp-bild'); rahmen.appendChild(img); };
-		img.onerror = () => { rahmen.setText('Abbildung nicht geladen'); };
+		img.onerror = () => {
+			if (versuch < 3) { window.setTimeout(() => this.bild(rahmen, src, alt, versuch + 1), 8000); return; }
+			rahmen.empty();
+			const nochmal = rahmen.createEl('button', { cls: 'anki-lp-textknopf', text: 'Abbildung erneut laden' });
+			nochmal.onclick = () => { rahmen.setText('Abbildung lädt'); this.bild(rahmen, src, alt, 1); };
+		};
 		img.src = src;
 	}
 
