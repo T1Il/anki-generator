@@ -244,6 +244,11 @@ export class LernplanView extends ItemView {
 			if (!this.chatId) verlauf.empty();
 			this.nachricht(verlauf, 'user', text, []);
 			const warte = verlauf.createDiv({ text: 'Sucht in den Quellen', cls: 'anki-lp-arbeit' });
+			const start = Date.now();
+			const uhr = window.setInterval(() => {
+				const s = Math.round((Date.now() - start) / 1000);
+				warte.setText(`Sucht in den Quellen, ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+			}, 1000);
 			verlauf.scrollTop = verlauf.scrollHeight;
 			try {
 				if (!this.chatId) {
@@ -261,6 +266,7 @@ export class LernplanView extends ItemView {
 					if (x.type === 'vorschlag' && x.punkt && x.punkt.typ in ART) this.punkt(verlauf, x.punkt);
 				}
 			} catch (e: any) { warte.remove(); verlauf.createDiv({ text: e?.message || String(e), cls: 'anki-lp-fehler' }); } finally {
+				window.clearInterval(uhr);
 				senden.disabled = false;
 				verlauf.scrollTop = verlauf.scrollHeight;
 			}
