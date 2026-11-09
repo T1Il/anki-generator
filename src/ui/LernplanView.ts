@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from 'obsidian';
+import { ItemView, MarkdownRenderer, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
 import { GRUENDE, LernPunkt } from '../lernplan/lernplanApi';
 
@@ -31,7 +31,7 @@ export class LernplanView extends ItemView {
 			const b = kopf.createEl('button', { text: name, cls: this.reiter === k ? 'mod-cta' : '' });
 			b.onclick = () => { this.reiter = k; void this.zeigen(); };
 		}
-		const inhalt = c.createDiv();
+		const inhalt = c.createDiv({ cls: 'anki-lp-inhalt-raum' });
 		try {
 			if (this.reiter === 'durchgang') await this.durchgang(inhalt); else await this.chat(inhalt);
 		} catch (e: any) { inhalt.createDiv({ text: e?.message || String(e), cls: 'anki-lp-fehler' }); }
@@ -140,55 +140,97 @@ export class LernplanView extends ItemView {
 
 	private einbettung(el: HTMLElement, e: any) {
 		const basis = (this.plugin.settings.fitnessManagerUrl || '').replace(/\/$/, '');
-		const karte = (farbe: string, titel: string) => {
+		const karte = (farbe: string, zeichen: string, titel: string, rechts?: string) => {
 			const k = el.createDiv({ cls: 'anki-lp-em' });
 			k.style.setProperty('--c', farbe);
-			k.createEl('b', { text: titel });
+			const kopf = k.createDiv({ cls: 'anki-lp-ek' });
+			kopf.createSpan({ cls: 'anki-lp-ico', text: zeichen });
+			kopf.createEl('b', { text: titel });
+			if (rechts) kopf.createEl('em', { text: rechts });
 			return k;
 		};
+		const ROT = 'var(--lp-dosis)', BLAU = 'var(--lp-lern)', GRUEN = 'var(--lp-moos)';
 		if (e.art === 'dosis') {
-			const k = karte('var(--color-red, #e05252)', e.suche || 'Dosis');
+			const k = karte(ROT, '℞', e.suche || 'Dosis');
 			for (const a of e.angaben) {
 				const z = k.createDiv({ cls: 'anki-lp-dosis' });
 				z.createSpan({ text: a.zielgruppe || 'Alle' });
 				z.createEl('b', { text: a.text });
 				z.createEl('small', { text: [a.beleg || a.quelle, a.seite && `S. ${a.seite}`].filter(Boolean).join(', ') });
 			}
-			if (e.weitere > 0) k.createDiv({ text: `${e.weitere} weitere Angaben, frag enger nach`, cls: 'anki-lp-status' });
+			if (e.weitere > 0) k.createDiv({ text: `${e.weitere} weitere Angaben, frag enger nach`, cls: 'anki-lp-fuss' });
 		} else if (e.art === 'vorhaltung') {
-			const k = karte('var(--color-blue, #5b9bd5)', 'Auf dem Fahrzeug');
-			for (const z of e.eintraege) k.createDiv({ text: `${z.med_key}: ${z.label || ''}${z.package ? ` · ${z.package}` : ''}` });
-		} else if (e.art === 'seite' || e.art === 'bild') {
-			const k = karte('var(--color-blue, #5b9bd5)', e.titel || (e.seite ? `S. ${e.seite}` : 'Bild'));
+			const k = karte(BLAU, '▤', 'Auf dem Fahrzeug', 'Vorhaltung');
+			for (const z of e.eintraege) k.createDiv({ cls: 'anki-lp-zeile', text: `${z.med_key}: ${z.label || ''}${z.package ? `, ${z.package}` : ''}` });
+		} else if (e.art === 'seite') {
+			const k = karte(BLAU, '▦', e.titel || 'Abbildung', `S. ${e.seite}`);
+			const ziel = e.zotero ? k.createEl('a', { href: e.zotero, cls: 'anki-lp-bildlink' }) : k;
+			ziel.createEl('img', { attr: { src: basis + e.bild, alt: e.titel || '' } });
+			if (e.zotero) k.createEl('a', { cls: 'anki-lp-fuss anki-lp-zotero', href: e.zotero, text: 'In Zotero öffnen' });
+		} else if (e.art === 'bild') {
+			const k = karte(BLAU, 'N', e.titel || 'Bild', 'Notiz');
 			k.createEl('img', { attr: { src: basis + e.bild, alt: e.titel || '' } });
+		} else if (e.art === 'grafik') {
+			const k = karte(GRUEN, '✎', e.titel, 'Eigene Skizze');
+			k.createEl('img', { cls: 'anki-lp-grafik', attr: { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(e.svg)}`, alt: e.titel } });
 		} else if (e.art === 'rechnung') {
-			const k = karte('var(--color-green, #4caf50)', e.ausdruck);
-			k.createDiv({ text: e.ergebnis?.text || e.ergebnis?.anzeige || JSON.stringify(e.ergebnis) });
+			const k = karte(GRUEN, '=', e.ausdruck, 'Rechner');
+			k.createDiv({ cls: 'anki-lp-zeile anki-lp-stark', text: e.ergebnis?.text || e.ergebnis?.anzeige || JSON.stringify(e.ergebnis) });
 		}
 	}
 
 	private async chat(el: HTMLElement) {
 		const api = this.plugin.lernplanApi;
+		el.addClass('anki-lp-chatflaeche');
+		const kopf = el.createDiv({ cls: 'anki-lp-chatkopf' });
+		const titel = kopf.createDiv({ cls: 'anki-lp-chattitel', text: 'Lernchat' });
+		const verlaufKnopf = kopf.createEl('button', { cls: 'anki-lp-textknopf', text: 'Verlauf' });
+		const neuKnopf = kopf.createEl('button', { cls: 'anki-lp-textknopf', text: 'Neu' });
 		const verlauf = el.createDiv({ cls: 'anki-lp-chat' });
+
+		const liste = async () => {
+			verlauf.empty();
+			verlauf.createDiv({ cls: 'anki-lp-fab', text: 'Letzte Chats' });
+			const chats = await api.chatListe();
+			for (const c of chats) {
+				const b = verlauf.createEl('button', { cls: `anki-lp-fzeile${c.id === this.chatId ? ' is-aktiv' : ''}` });
+				b.createDiv({ cls: 'anki-lp-ftext', text: c.titel || 'Lernchat' });
+				b.onclick = () => { this.chatId = c.id; void this.zeigen(); };
+			}
+			if (!chats.length) verlauf.createDiv({ cls: 'anki-lp-fleer', text: 'Noch keine Chats' });
+		};
+		let listeOffen = false;
+		verlaufKnopf.onclick = () => { listeOffen = !listeOffen; if (listeOffen) void liste(); else void this.zeigen(); };
+		neuKnopf.onclick = () => { this.chatId = null; void this.zeigen(); };
+
 		if (this.chatId) {
 			const c = await api.chatLesen(this.chatId);
+			titel.setText(c.titel || 'Lernchat');
 			for (const m of c.nachrichten) this.nachricht(verlauf, m.rolle, m.content, m.einbettungen);
 			for (const p of (c.vorschlaege || []) as LernPunkt[]) if (p.typ in ART) this.punkt(verlauf, p);
-		}
+			verlauf.scrollTop = verlauf.scrollHeight;
+		} else await liste();
+
 		const ein = el.createDiv({ cls: 'anki-lp-ein' });
-		const feld = ein.createEl('textarea', { attr: { placeholder: 'Frage', rows: '2' } });
-		const senden = ein.createEl('button', { text: 'Senden', cls: 'mod-cta' });
+		const feld = ein.createEl('textarea', { attr: { placeholder: 'Frage', rows: '1' } });
+		const senden = ein.createEl('button', { cls: 'anki-lp-senden', attr: { 'aria-label': 'Senden' } });
+		setIcon(senden, 'arrow-up');
+		feld.oninput = () => { feld.style.height = 'auto'; feld.style.height = `${Math.min(feld.scrollHeight, 160)}px`; };
 		const los = async () => {
 			const text = feld.value.trim();
-			if (!text) return;
+			if (!text || senden.disabled) return;
 			feld.value = '';
+			feld.style.height = 'auto';
 			senden.disabled = true;
+			if (!this.chatId) verlauf.empty();
 			this.nachricht(verlauf, 'user', text, []);
-			const warte = verlauf.createDiv({ text: 'Denkt nach …', cls: 'anki-lp-status' });
+			const warte = verlauf.createDiv({ text: 'Sucht in den Quellen', cls: 'anki-lp-arbeit' });
+			verlauf.scrollTop = verlauf.scrollHeight;
 			try {
 				if (!this.chatId) {
 					const datei = this.app.workspace.getActiveFile();
 					this.chatId = (await api.chatAnlegen({ titel: text.slice(0, 80), pfad: datei?.extension === 'md' ? datei.path : undefined })).id;
+					titel.setText(text.slice(0, 80));
 				}
 				const ev = await api.chatFragen(this.chatId as number, text);
 				warte.remove();
@@ -199,10 +241,14 @@ export class LernplanView extends ItemView {
 					if (x.type === 'fehler') verlauf.createDiv({ text: x.text, cls: 'anki-lp-fehler' });
 					if (x.type === 'vorschlag' && x.punkt && x.punkt.typ in ART) this.punkt(verlauf, x.punkt);
 				}
-			} catch (e: any) { warte.remove(); verlauf.createDiv({ text: e?.message || String(e), cls: 'anki-lp-fehler' }); } finally { senden.disabled = false; }
+			} catch (e: any) { warte.remove(); verlauf.createDiv({ text: e?.message || String(e), cls: 'anki-lp-fehler' }); } finally {
+				senden.disabled = false;
+				verlauf.scrollTop = verlauf.scrollHeight;
+			}
 		};
 		senden.onclick = () => void los();
 		feld.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void los(); } };
+		feld.focus();
 	}
 
 	private nachricht(el: HTMLElement, rolle: string, text: string, einbettungen: any[]) {

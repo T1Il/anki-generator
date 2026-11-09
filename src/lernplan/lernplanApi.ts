@@ -4,7 +4,8 @@ import { requestUrl } from 'obsidian';
  * Lernplan auf dem Server (08.11.2026). Das Plugin schreibt nie selbst in die Lernplan-Notiz:
  * Verknüpfen, Durchgang und Chat laufen über dieselben Endpunkte wie App und Web.
  */
-export interface LernAufgabe { kw: number; jahr: number; index: number; text: string; passt?: boolean; verknuepft?: boolean; }
+export interface LernAufgabe { kw: number; jahr: number; index: number; text: string; kurz?: string; gruppe?: string | null; seite?: number | null; woche?: string; lernziel?: string; passt?: boolean; verknuepft?: boolean; }
+export interface LernChatKopf { id: number; titel?: string; }
 export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; }
 export interface ChatEreignis { type: string; text?: string; name?: string; einbettung?: any; punkt?: LernPunkt; }
 
@@ -52,6 +53,25 @@ export class LernplanApi {
 	async punkt(id: number, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> { return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert })).json.punkt; }
 	async rueckmeldung(eintrag: Record<string, unknown>) { await this.ruf('/api/lernplan/rueckmeldung', 'POST', eintrag); }
 	async chatAnlegen(felder: Record<string, unknown>) { return (await this.ruf('/api/lernchat', 'POST', felder)).json; }
+	async chatListe(): Promise<LernChatKopf[]> { return (await this.ruf('/api/lernchat')).json.chats || []; }
 	async chatLesen(id: number) { return (await this.ruf(`/api/lernchat/${id}`)).json; }
 	async chatFragen(id: number, text: string): Promise<ChatEreignis[]> { return chatEreignisse((await this.ruf(`/api/lernchat/${id}/stream`, 'POST', { text })).text); }
+}
+
+export interface AufgabenWoche { kw: number; titel?: string; lernziel?: string; gruppen: { titel: string | null; aufgaben: LernAufgabe[] }[]; }
+
+/** Für das Fenster: passende zuerst, darunter je Woche und Kapitel wie auf /lernplan. Suche über Kapitel und Aufgabe. */
+export function aufgabenGliedern(aufgaben: LernAufgabe[], suche: string): { passend: LernAufgabe[]; wochen: AufgabenWoche[] } {
+	const q = suche.trim().toLowerCase();
+	const treffer = aufgaben.filter((a) => !q || `${a.gruppe || ''} ${a.kurz || a.text} ${a.text}`.toLowerCase().includes(q));
+	const passend = q ? [] : treffer.filter((a) => a.passt && !a.verknuepft);
+	const wochen: AufgabenWoche[] = [];
+	for (const a of treffer.filter((x) => !passend.includes(x)).sort((x, y) => (x.jahr - y.jahr) || (x.kw - y.kw) || (x.index - y.index))) {
+		let w = wochen.find((x) => x.kw === a.kw);
+		if (!w) { w = { kw: a.kw, titel: a.woche, lernziel: a.lernziel, gruppen: [] }; wochen.push(w); }
+		let g = w.gruppen[w.gruppen.length - 1];
+		if (!g || g.titel !== (a.gruppe ?? null)) { g = { titel: a.gruppe ?? null, aufgaben: [] }; w.gruppen.push(g); }
+		g.aufgaben.push(a);
+	}
+	return { passend, wochen };
 }

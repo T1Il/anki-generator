@@ -21,6 +21,15 @@ assert.equal(k.typ, 'karte'); assert.equal(k.vorne, 'F?'); assert.equal(k.grund_
 
 assert.equal(m.rueckmeldungAus({ kind: 'edit', replace: 'x' }, 'verworfen').typ, 'widerspruch');
 assert.equal(m.rueckmeldungAus({ kind: 'quelle' }, 'verworfen'), null);
+const gl = m.aufgabenGliedern([
+	{ kw: 46, jahr: 2026, index: 2, text: 'Karten', passt: false },
+	{ kw: 46, jahr: 2026, index: 0, text: 'x', kurz: 'Sinus', gruppe: 'Kap. 3.1.7', passt: true },
+	{ kw: 46, jahr: 2026, index: 1, text: 'y', kurz: 'AV-Block', gruppe: 'Kap. 3.1.7', passt: true, verknuepft: true },
+	{ kw: 47, jahr: 2026, index: 0, text: 'EKG', woche: 'EKG' }], '');
+assert.deepEqual(gl.passend.map((a) => a.kurz), ['Sinus']);
+assert.deepEqual(gl.wochen.map((w) => w.kw), [46, 47]);
+assert.equal(gl.wochen[0].gruppen[0].aufgaben.length, 1);
+assert.deepEqual(m.aufgabenGliedern(gl.wochen[0].gruppen[0].aufgaben, 'av').wochen[0].gruppen[0].aufgaben.map((a) => a.kurz), ['AV-Block']);
 const api = new m.LernplanApi(() => 'https://x/');
 ob._setze({ status: 200, json: {} });
 await api.verknuepfen({ kw: 46, jahr: 2026, index: 3, text: 'T' }, 'A.md');

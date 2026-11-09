@@ -1,27 +1,73 @@
-import { App, Modal, Notice, Setting, SuggestModal, TFile } from 'obsidian';
-import { LernAufgabe, LernplanApi } from '../lernplan/lernplanApi';
+import { App, Modal, Notice, Setting, TFile } from 'obsidian';
+import { aufgabenGliedern, LernAufgabe, LernplanApi } from '../lernplan/lernplanApi';
 
-/** Offene Notiz an eine Lernplan-Aufgabe hängen. Passende Aufgaben stehen oben. */
-export class NotizVerknuepfenModal extends SuggestModal<LernAufgabe> {
-	constructor(app: App, private api: LernplanApi, private datei: TFile, private aufgaben: LernAufgabe[]) {
-		super(app);
-		this.setPlaceholder(`${datei.basename} verknüpfen mit …`);
+/** Offene Notiz an Aufgaben hängen: passende oben, darunter je Woche und Kapitel wie auf /lernplan. Bleibt für mehrere offen. */
+export class NotizVerknuepfenModal extends Modal {
+	private suche = '';
+	private zu = new Set<string>();
+	constructor(app: App, private api: LernplanApi, private datei: TFile, private aufgaben: LernAufgabe[]) { super(app); }
+
+	onOpen() {
+		this.modalEl.addClass('anki-lp-fenster');
+		this.titleEl.setText('Mit Aufgabe verknüpfen');
+		this.titleEl.createEl('small', { text: this.datei.basename });
+		const eingabe = this.contentEl.createEl('input', { cls: 'anki-lp-fsuche', attr: { type: 'search', placeholder: 'Aufgabe oder Kapitel suchen' } });
+		const liste = this.contentEl.createDiv({ cls: 'anki-lp-fliste' });
+		const fuss = this.contentEl.createDiv({ cls: 'anki-lp-ffuss' });
+		const zeichnen = () => {
+			liste.empty();
+			const { passend, wochen } = aufgabenGliedern(this.aufgaben, this.suche);
+			if (passend.length) {
+				liste.createDiv({ cls: 'anki-lp-fab', text: 'Passt zu dieser Notiz' });
+				passend.forEach((a) => this.zeile(liste, a, a.gruppe || `KW ${a.kw}`, zeichnen, fuss));
+			}
+			for (const w of wochen) {
+				const k = liste.createDiv({ cls: 'anki-lp-fwoche' });
+				k.createEl('b', { text: `KW ${w.kw}` });
+				if (w.titel) k.createSpan({ text: w.titel });
+				for (const g of w.gruppen) {
+					if (g.titel) liste.createDiv({ cls: 'anki-lp-fgruppe', text: g.titel });
+					g.aufgaben.forEach((a) => this.zeile(liste, a, null, zeichnen, fuss));
+				}
+			}
+			if (!passend.length && !wochen.length) liste.createDiv({ cls: 'anki-lp-fleer', text: 'Keine Aufgabe gefunden' });
+		};
+		eingabe.oninput = () => { this.suche = eingabe.value; zeichnen(); };
+		zeichnen();
+		this.fussZeichnen(fuss);
+		eingabe.focus();
 	}
-	getSuggestions(q: string) {
-		const s = q.toLowerCase();
-		return this.aufgaben.filter((a) => a.text.toLowerCase().includes(s));
+
+	private schluessel(a: LernAufgabe) { return `${a.jahr}-${a.kw}-${a.index}`; }
+
+	private fussZeichnen(fuss: HTMLElement) {
+		fuss.empty();
+		const b = fuss.createEl('button', { text: this.zu.size ? `Fertig · ${this.zu.size} verknüpft` : 'Schließen', cls: this.zu.size ? 'mod-cta' : '' });
+		b.onclick = () => this.close();
 	}
-	renderSuggestion(a: LernAufgabe, el: HTMLElement) {
-		el.addClass('anki-lp-wahl');
-		el.createDiv({ text: a.text, cls: 'anki-lp-wahl-text' });
-		el.createDiv({ text: `KW ${a.kw}${a.verknuepft ? ' · verknüpft' : a.passt ? ' · passt' : ''}`, cls: 'anki-lp-wahl-rechts' });
+
+	private zeile(el: HTMLElement, a: LernAufgabe, unter: string | null, zeichnen: () => void, fuss: HTMLElement) {
+		const dran = a.verknuepft || this.zu.has(this.schluessel(a));
+		const z = el.createEl('button', { cls: `anki-lp-fzeile${dran ? ' is-dran' : ''}` });
+		z.createSpan({ cls: `anki-lp-wahl${dran ? ' is-an' : ''}`, text: dran ? '✓' : '' });
+		const t = z.createDiv({ cls: 'anki-lp-ftext' });
+		t.createDiv({ text: a.kurz || a.text });
+		if (unter) t.createEl('small', { text: unter });
+		z.createSpan({ cls: 'anki-lp-frechts', text: dran ? 'verknüpft' : a.seite ? `S. ${a.seite}` : '' });
+		z.disabled = !!dran;
+		z.onclick = async () => {
+			z.disabled = true;
+			try {
+				await this.api.verknuepfen(a, this.datei.path);
+				this.zu.add(this.schluessel(a));
+				a.verknuepft = true;
+				zeichnen();
+				this.fussZeichnen(fuss);
+			} catch (e: any) { new Notice(e?.message || String(e)); z.disabled = false; }
+		};
 	}
-	async onChooseSuggestion(a: LernAufgabe) {
-		try {
-			await this.api.verknuepfen(a, this.datei.path);
-			new Notice(`Verknüpft mit ${a.text}`);
-		} catch (e: any) { new Notice(e?.message || String(e)); }
-	}
+
+	onClose() { this.contentEl.empty(); }
 }
 
 const STAND: Record<string, string> = { geprueft: 'geprüft', geaendert: 'geändert', offen: 'offen', keine_notiz: 'keine Notiz' };
