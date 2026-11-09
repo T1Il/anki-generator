@@ -1859,3 +1859,21 @@ button.anki-lp-fzeile:disabled { opacity: 1; cursor: default; }
 .anki-lp-ein { --lp-unten: 12px; padding-bottom: var(--lp-unten); }
 body:not(.is-mobile) .anki-lp-ein { --lp-unten: 42px; }
 button.anki-lp-senden { bottom: calc(var(--lp-unten) + 6px); }
+
+/* Antworten klar abgesetzt und gut lesbar (09.11.2026) */
+.anki-lp { --lp-text-stark: #1F1A16; --lp-flaeche: #FFFFFF; --lp-rand: color-mix(in srgb, var(--text-normal) 22%, transparent); }
+.theme-dark .anki-lp { --lp-text-stark: #F3EEE6; --lp-flaeche: color-mix(in srgb, #FFFFFF 7%, var(--background-primary)); }
+.anki-lp-ki { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--lp-rand); border-radius: 4px 14px 14px 14px; background: var(--lp-flaeche); color: var(--lp-text-stark); line-height: 1.55; }
+.anki-lp-ki > :last-child, .anki-lp-ki p:last-child { margin-bottom: 0; }
+.anki-lp-ki strong, .anki-lp-ki b { color: var(--lp-text-stark); }
+.anki-lp-ki h1, .anki-lp-ki h2, .anki-lp-ki h3, .anki-lp-ki h4 { margin: 12px 0 4px; font: 500 16.5px/1.3 var(--lp-display); color: var(--lp-text-stark); }
+.anki-lp-ki > div > :first-child { margin-top: 0; }
+.anki-lp-ki ul, .anki-lp-ki ol { margin: 0 0 8px; padding-left: 20px; }
+.anki-lp-ki table { width: 100%; border-collapse: collapse; margin: 0 0 8px; font-size: 14.5px; }
+.anki-lp-ki th, .anki-lp-ki td { padding: 5px 8px; border: 1px solid var(--lp-rand); text-align: left; vertical-align: top; }
+.anki-lp-du { color: var(--lp-text-stark); }
+.anki-lp-em { background: var(--lp-flaeche); border-color: var(--lp-rand); }
+.anki-lp-dosis, .anki-lp-fuss { border-top-color: var(--lp-rand); }
+.anki-lp-ek em, .anki-lp-dosis small, .anki-lp-fuss { color: color-mix(in srgb, var(--lp-text-stark) 72%, transparent); }
+.anki-lp-em { border-left-color: var(--c); }
+.anki-lp-em img.anki-lp-grafik { max-height: 240px; object-fit: contain; }
