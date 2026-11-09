@@ -3,6 +3,7 @@ import AnkiGeneratorPlugin from '../main';
 import { getAnkiBlocks, parseBlockHeader, parseCardsFromBlockSource, stripClozeSyntax } from '../anki/ankiParser';
 import { syncAnkiBlock } from '../anki/syncManager';
 import { getDeckNames } from '../anki/AnkiConnect';
+import { DeckWahlModal } from './DeckWahlModal';
 import { t } from '../lang/helpers';
 import { auftraege, deckVorschlag, gewaehltZahl, neueGruppe, passt, SyncGruppe } from './syncAuswahl';
 
@@ -117,19 +118,16 @@ export class SyncReviewModal extends Modal {
             return;
         }
 
-        const decks = contentEl.createEl('datalist');
-        decks.id = 'anki-sync-decks';
-        this.deckNamen.forEach((d) => decks.createEl('option', { attr: { value: d } }));
-
         const kopf = contentEl.createDiv({ cls: 'anki-sy-kopf' });
         const alle = kopf.createEl('label', { cls: 'anki-sy-alle' });
         const alleBox = alle.createEl('input', { attr: { type: 'checkbox' } });
         alle.createSpan({ text: 'Alle' });
         const zahl = kopf.createSpan({ cls: 'anki-sy-zahl' });
         if (this.blocks.some((b) => !b.deckName)) {
-            const fuerAlle = contentEl.createEl('input', { cls: 'anki-lp-fsuche anki-sy-fueralle', attr: { type: 'search', list: 'anki-sync-decks', placeholder: 'Deck für alle Notizen ohne Deck' } });
-            fuerAlle.value = this.fuerAlle;
-            fuerAlle.oninput = () => { this.fuerAlle = fuerAlle.value; aktualisieren(); };
+            const fuerAlle = contentEl.createEl('button', { cls: 'anki-sy-deckwahl anki-sy-fueralle' });
+            const beschriften = () => fuerAlle.setText(this.fuerAlle ? `Deck für alle ohne Deck: ${this.fuerAlle}` : 'Deck für alle Notizen ohne Deck wählen');
+            beschriften();
+            fuerAlle.onclick = () => this.deckWaehlen(this.fuerAlle, (d) => { this.fuerAlle = d; beschriften(); aktualisieren(); });
         }
 
         const suche = contentEl.createEl('input', { cls: 'anki-lp-fsuche anki-sy-suche', attr: { type: 'search', placeholder: 'Notiz oder Karte suchen' } });
@@ -171,6 +169,10 @@ export class SyncReviewModal extends Modal {
         aktualisieren();
     }
 
+    private deckWaehlen(aktuell: string, fertig: (deck: string) => void) {
+        new DeckWahlModal(this.app, this.plugin.settings.mainDeck, this.deckNamen, aktuell, fertig).open();
+    }
+
     /** Eine Notiz: Haken, Deck, aufklappbar bis zur einzelnen Karte. Gibt zurück, wie sich die Haken neu setzen. */
     private notizZeile(parent: HTMLElement, item: UnsyncedBlock, aktualisieren: () => void): { setzen: () => void; zeigen: (an: boolean) => void } {
         const g = item.auswahl;
@@ -183,10 +185,11 @@ export class SyncReviewModal extends Modal {
         if (item.deckName) text.createEl('small', { text: item.deckName });
         const zahl = kopf.createSpan({ cls: 'anki-lp-frechts' });
 
-        const deck = item.deckName ? null : parent.createEl('input', { cls: 'anki-sy-deck', attr: { type: 'search', list: 'anki-sync-decks', placeholder: 'Deck wählen' } });
+        const deck = item.deckName ? null : parent.createEl('button', { cls: 'anki-sy-deckwahl anki-sy-deck' });
         if (deck) {
-            deck.value = g.neuesDeck;
-            deck.oninput = () => { g.neuesDeck = deck.value; aktualisieren(); };
+            const beschriften = () => deck.setText(g.neuesDeck ? `Deck: ${g.neuesDeck}` : 'Deck wählen');
+            beschriften();
+            deck.onclick = () => this.deckWaehlen(g.neuesDeck, (d) => { g.neuesDeck = d; beschriften(); aktualisieren(); });
         }
 
         const karten = g.karten.map((k) => {

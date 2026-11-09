@@ -42,5 +42,12 @@ assert.equal(m.passt('Kardioversion', [{ frage: 'Energie?' }], 'KARDIO'), true);
 assert.equal(m.passt('Kardioversion', [{ frage: 'Energie?' }], 'atropin'), false);
 assert.equal(m.passt('Kardioversion', [], ' '), true);
 
+assert.deepEqual(m.deckZeilen(['M::EKG::Brady', 'M::EKG', 'M::Trauma', 'Fremd::X', 'M'], 'M'), [
+	{ name: 'EKG', pfad: 'EKG', ebene: 0 }, { name: 'Brady', pfad: 'EKG::Brady', ebene: 1 }, { name: 'Trauma', pfad: 'Trauma', ebene: 0 }], 'Baum nur unter dem Hauptdeck');
+assert.equal(m.deckPfad('M', ' EKG->Brady '), 'M::EKG::Brady');
+assert.equal(m.deckPfad('M', ''), 'M::Standard');
+assert.equal(m.unterdeck('M', 'M::EKG'), 'EKG');
+assert.equal(m.unterdeck('M', 'Fremd::X'), '');
+
 await rm(ordner, { recursive: true, force: true });
 console.log('sync-check: ok');

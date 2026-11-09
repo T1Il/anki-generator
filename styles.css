@@ -1914,3 +1914,11 @@ button.anki-lp-senden { bottom: calc(var(--lp-unten) + 6px); }
 .anki-lp-fsuche.anki-sy-suche[type="search"] { margin-bottom: 8px; }
 .anki-sy-notiz + .anki-sy-deck { margin-top: 8px; }
 button.anki-sy-oeffnen { display: block; margin: 2px 20px 10px 50px; font-size: 13px !important; }
+button.anki-sy-deckwahl { display: block; height: auto; min-height: 36px; padding: 7px 12px !important; border: 1px solid var(--lp-linie); border-radius: 9px !important; background: var(--background-primary) !important; box-shadow: none !important; color: var(--text-normal) !important; font-size: 14px; font-weight: 400; text-align: left; white-space: normal; cursor: pointer; }
+button.anki-sy-deckwahl:hover { border-color: var(--lp-lern); }
+button.anki-sy-deckwahl.anki-sy-fueralle { width: calc(100% - 40px); margin: 0 20px 10px; }
+button.anki-sy-deckwahl.anki-sy-deck { width: calc(100% - 70px); margin: 8px 20px 10px 50px; }
+.anki-sy-pfad { margin: 4px 20px 10px; font-size: 14px; color: var(--text-muted); overflow-wrap: anywhere; }
+.anki-sy-baum { border-top: 1px solid var(--lp-linie); min-height: 200px; }
+.anki-lp-fenster button.anki-lp-fzeile.anki-sy-ast { display: block; padding-left: calc(20px + var(--ebene, 0) * 18px) !important; }
+.anki-lp-fenster button.anki-sy-ast.is-aktiv { font-weight: 700 !important; color: var(--lp-lern); background: color-mix(in srgb, var(--lp-lern) 12%, transparent) !important; }

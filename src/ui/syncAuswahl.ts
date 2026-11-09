@@ -43,3 +43,21 @@ export function passt(name: string, karten: { frage: string; antwort?: string }[
 	const q = suche.trim().toLowerCase();
 	return !q || name.toLowerCase().includes(q) || karten.some((k) => `${k.frage} ${k.antwort || ''}`.toLowerCase().includes(q));
 }
+
+export interface DeckZeile { name: string; pfad: string; ebene: number; }
+
+/** Vorhandene Decks unter dem Hauptdeck als Baum in Lesereihenfolge, auch fehlende Zwischenstufen. */
+export function deckZeilen(deckNamen: string[], hauptdeck: string): DeckZeile[] {
+	const pfade = new Set<string>();
+	for (const d of deckNamen) {
+		if (!d.startsWith(`${hauptdeck}::`)) continue;
+		const teile = d.slice(hauptdeck.length + 2).split('::');
+		teile.forEach((_, i) => pfade.add(teile.slice(0, i + 1).join('::')));
+	}
+	return [...pfade].sort((a, b) => a.split('::').join('\u0000').localeCompare(b.split('::').join('\u0000'), 'de'))
+		.map((pfad) => { const t = pfad.split('::'); return { name: t[t.length - 1], pfad, ebene: t.length - 1 }; });
+}
+
+export const deckPfad = (hauptdeck: string, unter: string): string => `${hauptdeck}::${unter.trim().replace(/->/g, '::') || 'Standard'}`;
+
+export const unterdeck = (hauptdeck: string, deck: string): string => (deck.startsWith(`${hauptdeck}::`) ? deck.slice(hauptdeck.length + 2) : '');
