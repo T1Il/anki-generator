@@ -1,4 +1,5 @@
 import { App, Editor, TFile } from 'obsidian';
+import { markdownTabellenZuHtml } from './markdownTabelle';
 
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
     let binary = '';
@@ -21,6 +22,9 @@ export function basicMarkdownToHtml(text: string): string {
         const safeUrl = url.trim().replace(/\s/g, '%20');
         return `<a href="${safeUrl}">${text}</a>`;
     });
+
+    // 2. Tabellen vor dem Zeilenumbruch-Ersatz — sonst zerreißt `<br>` sie (markdownTabelle.ts).
+    html = markdownTabellenZuHtml(html);
 
     html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
     html = html.replace(/\*([^*]+)\*/g, '<i>$1</i>');
