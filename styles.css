@@ -1889,6 +1889,7 @@ button.anki-lp-senden { bottom: calc(var(--lp-unten) + 6px); }
 .anki-lp-schritte > div::before { content: "✓ "; color: var(--lp-moos); }
 .anki-lp-ki, .anki-lp-du, .anki-lp-em, .anki-lp-schritte { user-select: text; -webkit-user-select: text; cursor: auto; }
 .anki-lp-kopieren { display: block; margin: 8px 0 0 auto; font-size: 13px !important; }
+.anki-lp-grafikfuss { display: flex; justify-content: flex-end; padding: 6px 12px; border-top: 1px solid var(--lp-rand); }
 
 /* Sync-Fenster: Deck wählen und einzelne Karten (09.11.2026) */
 .anki-sy-kopf { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px 8px; }

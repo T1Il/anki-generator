@@ -2,6 +2,29 @@ import { ItemView, MarkdownRenderer, Notice, setIcon, WorkspaceLeaf } from 'obsi
 import AnkiGeneratorPlugin from '../main';
 import { GRUENDE, LernPunkt } from '../lernplan/lernplanApi';
 
+
+/** Eigene Skizze als PNG, mindestens 1600 px breit, auf Weiß wie in der Karte: SVG fügt sich in Notizen und Word kaum ein. */
+function svgAlsPng(svg: string, breite = 1600): Promise<Blob> {
+	return new Promise((fertig, fehler) => {
+		const bild = new Image();
+		bild.onload = () => {
+			const b = bild.naturalWidth || 300, h = bild.naturalHeight || 150;
+			const faktor = Math.max(2, breite / b);
+			const flaeche = document.createElement('canvas');
+			flaeche.width = Math.round(b * faktor);
+			flaeche.height = Math.round(h * faktor);
+			const ctx = flaeche.getContext('2d');
+			if (!ctx) { fehler(new Error('canvas')); return; }
+			ctx.fillStyle = '#fff';
+			ctx.fillRect(0, 0, flaeche.width, flaeche.height);
+			ctx.drawImage(bild, 0, 0, flaeche.width, flaeche.height);
+			flaeche.toBlob((blob) => (blob ? fertig(blob) : fehler(new Error('toBlob'))), 'image/png');
+		};
+		bild.onerror = () => fehler(new Error('svg'));
+		bild.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+	});
+}
+
 export const LERNPLAN_VIEW_TYPE = 'anki-lernplan-view';
 
 const ART: Record<string, [string, string]> = {
@@ -197,6 +220,15 @@ export class LernplanView extends ItemView {
 		} else if (e.art === 'grafik') {
 			const k = karte(GRUEN, '✎', e.titel, 'Eigene Skizze');
 			k.createEl('img', { cls: 'anki-lp-grafik', attr: { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(e.svg)}`, alt: e.titel } });
+			const fuss = k.createDiv({ cls: 'anki-lp-fuss anki-lp-grafikfuss' });
+			const kopieren = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'Als Bild kopieren' });
+			kopieren.onclick = () => {
+				// Der Promise geht direkt in ClipboardItem, sonst verfällt auf iOS die Nutzergeste.
+				navigator.clipboard.write([new ClipboardItem({ 'image/png': svgAlsPng(e.svg) })]).then(() => {
+					kopieren.setText('Kopiert');
+					window.setTimeout(() => kopieren.setText('Als Bild kopieren'), 1500);
+				}).catch(() => new Notice('Bild kopieren ging hier nicht.'));
+			};
 		} else if (e.art === 'rechnung') {
 			const k = karte(GRUEN, '=', e.ausdruck, 'Rechner');
 			k.createDiv({ cls: 'anki-lp-zeile anki-lp-stark', text: e.ergebnis?.text || e.ergebnis?.anzeige || JSON.stringify(e.ergebnis) });
