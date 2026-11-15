@@ -2071,3 +2071,10 @@ a.anki-lp-zurstelle { display: inline-flex; align-items: center; gap: 3px; justi
 a.anki-lp-zurstelle:hover { text-decoration: underline; }
 a.anki-lp-zurstelle svg { flex: none; width: 13px; height: 13px; }
 .anki-lp-befundtext li { margin: 0 0 4px; } .anki-lp-befundtext li > p { margin: 0; } .anki-lp-befundtext ul { margin: 0 !important; }
+.anki-lp-neuzeile { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--lp-linie); }
+.anki-lp-neuzeile input { flex: 1 1 auto; min-width: 0; height: 30px; font-size: 13.5px; }
+button.anki-lp-neuknopf { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px !important; font-size: 13px; font-weight: 700; cursor: pointer; }
+button.anki-lp-neuknopf svg { width: 14px; height: 14px; }
+button.anki-lp-neuknopf.is-laeuft svg { animation: anki-lp-dreh 1s linear infinite; }
+@keyframes anki-lp-dreh { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { button.anki-lp-neuknopf.is-laeuft svg { animation: none; } }

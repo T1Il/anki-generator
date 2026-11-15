@@ -247,6 +247,25 @@ export class LernplanView extends ItemView {
 		const bearb = leiste.createEl('button', { text: 'Bearbeiten' });
 		const frag = leiste.createEl('button', { text: 'Fragen' });
 		const weg = leiste.createEl('button', { text: 'Verwerfen' });
+		if (p.typ === 'karte') {
+			// Neu generieren: eigene Zeile über der Leiste, damit die vier Knöpfe in der Seitenleiste lesbar bleiben.
+			const neuZeile = createDiv({ cls: 'anki-lp-neuzeile' });
+			leiste.before(neuZeile);
+			const hinweis = neuZeile.createEl('input', { attr: { type: 'text', placeholder: 'Hinweis (optional)' } });
+			const los = neuZeile.createEl('button', { cls: 'anki-lp-neuknopf', attr: { title: 'Karte neu generieren' } });
+			setIcon(los.createSpan(), 'refresh-cw');
+			los.createSpan({ text: 'Neu generieren' });
+			const starten = async () => {
+				los.disabled = true; hinweis.disabled = true;
+				los.addClass('is-laeuft');
+				const s = this.plugin.settings;
+				const r = await this.tun(() => api.karteNeu(p.id, hinweis.value, { modell: s.lernchatModell || undefined, denken: s.lernchatDenken || undefined }));
+				if (r) this.punktZeichnen(box, { ...p, ...r }, nachher);
+				else { los.disabled = false; hinweis.disabled = false; los.removeClass('is-laeuft'); }
+			};
+			los.onclick = () => void starten();
+			hinweis.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); void starten(); } };
+		}
 		let imEdit = false;
 		const editSetzen = (an: boolean) => {
 			imEdit = an;

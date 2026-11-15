@@ -74,6 +74,9 @@ export class LernplanApi {
 	async durchgangStarten(kw: number, jahr: number, aufgaben: number[], modus: 'fakten' | 'karten' = 'fakten') { return (await this.ruf('/api/lernplan/durchgang', 'POST', { kw, jahr, aufgaben, modus })).json.durchgang; }
 	async durchgang(kw: number, jahr: number) { return (await this.ruf(`/api/lernplan/durchgang?kw=${kw}&jahr=${jahr}&auch_spaeter=true`)).json.durchgang; }
 	async punkt(id: number, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> { return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert })).json.punkt; }
+	async karteNeu(id: number, hinweis: string, einstellung: { modell?: string; denken?: string } = {}): Promise<LernPunkt> {
+		return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}/neu`, 'POST', { hinweis, ...einstellung })).json.punkt;
+	}
 	async rueckmeldung(eintrag: Record<string, unknown>) { await this.ruf('/api/lernplan/rueckmeldung', 'POST', eintrag); }
 	async chatAnlegen(felder: Record<string, unknown>) { return (await this.ruf('/api/lernchat', 'POST', felder)).json; }
 	async chatListe(archiv = false): Promise<LernChatKopf[]> { return (await this.ruf(`/api/lernchat${archiv ? '?archiv=true' : ''}`)).json.chats || []; }
