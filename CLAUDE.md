@@ -14,6 +14,7 @@ npm run dev          # esbuild watch mode (rebuilds on changes)
 npm run build        # TypeScript type-check + production bundle
 npm test             # Fixture tests (parser, chat, apply, Anki comparison)
 npm run version      # Bump version in manifest.json & versions.json
+git tag <version> && git push origin master <version>   # Release: the tag builds the GitHub release (BRAT)
 eslint ./src/        # Lint (requires global eslint: npm install -g eslint)
 ```
 
@@ -55,6 +56,7 @@ reload Obsidian.
 - `src/agent/` — Zotero cross-check: `abgleichPrompt.ts` builds the agent prompt, `claudeAgent.ts` spawns `claude -p` (stream-json, read-only tools, abortable). Sessions persist: `runMitSitzung()` resumes (`--resume … --fork-session`) and falls back to a fresh run with the history as text when the session is gone. Chat answers keep their session in `ChatMessage.agentSitzung`; the drug-source search stores its session per note in `settings.quellenSitzungen`, and the Zotero cross-check of that note continues it
 - `src/agent/verstehenPrompt.ts` — understanding instead of cards. `rechercheHinweise()` is the tool section of every agent chat question: the whole Zotero library (grep over `**/.zotero-ft-cache`), the vault (passed as `--add-dir`, links only to notes it found) and the web as last resort. `buildKonzeptkartenAuftrag()` is the "Konzeptkarte" header button: a labelled Mermaid concept map (class `neu` = dashed, researched but not in the note) as one `anki-insert`, numbered why-chains, vault links, corrections, gaps and three self-check questions; no `anki-card`. Input field text = focus. Runs through `agentChat(anzeige, auftrag)`, so follow-ups resume its session
 - `src/ui/` — Modal/view components (preview, edit, deck selection, drift review, decorations)
+- `src/ui/LernplanView.ts` — Lernplan sidebar/tab (Durchgang + Lernchat) on the Fitness-Manager backend (`src/lernplan/lernplanApi.ts`): history with archive, rename, model/effort choice, decided suggestions with undo, image embeds. `src/ui/lernBild.ts` — image lightbox, copy as PNG (Electron clipboard on desktop), save into note. `src/ui/linkFeld.ts` — contenteditable input that shows `[[…]]` links as title pills and serializes back to wikilinks (a copy lives in the Fitness-Manager web frontend). `src/ui/linkSuche.ts` — `[[` autocomplete for notes, headings and block IDs/callouts
 - `src/lang/` — i18n (German `de.ts`, English `en.ts`)
 - `src/types.ts` — `Card`, `ChatMessage`, `ChatTurn`, `ImageInput`, `AiProvider`
 
