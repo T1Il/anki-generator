@@ -3,6 +3,7 @@ import AnkiGeneratorPlugin from '../main';
 import { chatGruppen, chatZeit, DENKTIEFEN, GRUENDE, LernChatKopf, LernPunkt, MODELLE } from '../lernplan/lernplanApi';
 import { bildAlsPng, bildBedienbar, kopierenMitRueckmeldung, svgAdresse, svgAlsPng } from './lernBild';
 import { NameModal } from './LernplanModals';
+import { linksIm, linkSucheAnbinden } from './linkSuche';
 
 
 export const LERNPLAN_VIEW_TYPE = 'anki-lernplan-view';
@@ -504,11 +505,31 @@ export class LernplanView extends ItemView {
 		} else { notizZeigen(); verlauf.createDiv({ cls: 'anki-lp-fleer', text: 'Lädt …' }); void liste().catch((e) => { verlauf.empty(); verlauf.createDiv({ cls: 'anki-lp-fehler', text: e?.message || String(e) }); }); }
 
 		const ein = el.createDiv({ cls: 'anki-lp-ein' });
-		const feld = ein.createEl('textarea', { attr: { placeholder: 'Frage', rows: '1' } });
+		const feld = ein.createEl('textarea', { attr: { placeholder: 'Frage, [[ für Notizen und Stellen', rows: '1' } });
+		const verweise = createDiv({ cls: 'anki-lp-verweise' });
+		el.insertBefore(verweise, ein);
+		const verweiseZeichnen = () => {
+			verweise.empty();
+			const links = linksIm(feld.value);
+			verweise.toggle(links.length > 0);
+			for (const l of links) {
+				const datei = this.app.metadataCache.getFirstLinkpathDest(l.ziel, this.chatPfad || '');
+				const ziel = `${l.ziel}${l.anker ? `#${l.anker}` : ''}`;
+				const chip = verweise.createEl('button', { cls: `anki-lp-verweis${datei ? '' : ' is-kaputt'}`, attr: { title: datei ? ziel : `Nicht gefunden: ${ziel}` } });
+				setIcon(chip.createSpan(), l.anker?.startsWith('^') ? 'quote' : l.anker ? 'heading' : 'file-text');
+				chip.createSpan({ text: l.anzeige || [l.ziel.split('/').pop(), l.anker?.replace(/^\^/, '')].filter(Boolean).join(' › ') });
+				chip.onclick = (ev) => void this.app.workspace.openLinkText(ziel, this.chatPfad || '', Keymap.isModEvent(ev) || 'tab');
+				chip.onmouseover = (ev) => this.app.workspace.trigger('hover-link', { event: ev, source: LERNPLAN_VIEW_TYPE, hoverParent: this, targetEl: chip, linktext: ziel, sourcePath: this.chatPfad || '' });
+			}
+		};
+		verweise.hide();
+		feld.addEventListener('input', verweiseZeichnen);
+		linkSucheAnbinden(this.app, feld, ein, () => this.chatPfad || '', verweiseZeichnen);
 		const senden = ein.createEl('button', { cls: 'anki-lp-senden', attr: { 'aria-label': 'Senden' } });
 		setIcon(senden, 'arrow-up');
 		const wahlZeile = createDiv({ cls: 'anki-lp-einfuss' });
 		el.insertBefore(wahlZeile, ein);
+		wahlZeile.prepend(verweise);
 		const wahl = wahlZeile.createEl('button', { cls: 'anki-lp-modellwahl', attr: { title: 'Modell und Denktiefe' } });
 		const wahlText = () => {
 			const s = this.plugin.settings;
@@ -531,6 +552,7 @@ export class LernplanView extends ItemView {
 			const text = feld.value.trim();
 			if (!text || senden.disabled) return;
 			feld.value = '';
+			verweiseZeichnen();
 			feld.style.height = 'auto';
 			senden.disabled = true;
 			if (!this.chatId) { verlauf.empty(); verlauf.removeClass('is-liste'); }
@@ -597,6 +619,7 @@ export class LernplanView extends ItemView {
 			this.vorlage = null;
 			feld.style.height = `${Math.min(feld.scrollHeight, 160)}px`;
 			feld.setSelectionRange(feld.value.length, feld.value.length);
+			verweiseZeichnen();
 		}
 		feld.focus();
 	}
@@ -624,7 +647,7 @@ export class LernplanView extends ItemView {
 	}
 
 	private nachricht(el: HTMLElement, rolle: string, text: string, einbettungen: any[]) {
-		if (rolle === 'user') { el.createDiv({ text, cls: 'anki-lp-du' }); return; }
+		if (rolle === 'user') { this.md(el.createDiv({ cls: 'anki-lp-du' }), text); return; }
 		for (const e of einbettungen || []) this.einbettung(el, e);
 		if (!text) return;
 		const box = el.createDiv({ cls: 'anki-lp-ki' });
