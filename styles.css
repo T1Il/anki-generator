@@ -2066,3 +2066,4 @@ button.anki-lp-verweis.is-kaputt { border-color: var(--text-error) !important; c
 .anki-lp-pille { display: inline; padding: 1px 6px; margin: 0 1px; border-radius: 6px; background: color-mix(in srgb, var(--lp-lern) 15%, transparent); color: var(--lp-lern); font-weight: 700; white-space: normal; cursor: default; user-select: all; -webkit-user-select: all; }
 .anki-lp-pille.is-block { background: color-mix(in srgb, var(--lp-moos) 16%, transparent); color: var(--lp-moos); }
 .anki-lp-verweise { display: none !important; }
+.anki-lp-ohne-karten { color: var(--color-orange, #c77700); font-weight: 600; }

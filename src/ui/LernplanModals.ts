@@ -1,5 +1,5 @@
 import { App, Modal, Notice, Setting, TFile } from 'obsidian';
-import { aufgabenGliedern, LernAufgabe, LernplanApi } from '../lernplan/lernplanApi';
+import { aufgabenGliedern, kartenText, KartenStand, LernAufgabe, LernplanApi } from '../lernplan/lernplanApi';
 
 /** Offene Notiz an Aufgaben hängen: passende oben, darunter je Woche und Kapitel wie auf /lernplan. Bleibt für mehrere offen. */
 export class NotizVerknuepfenModal extends Modal {
@@ -75,12 +75,15 @@ const STAND: Record<string, string> = { geprueft: 'geprüft', geaendert: 'geänd
 /** Aufgaben für einen Durchgang wählen. Geprüftes ist nicht vorgewählt. */
 export class DurchgangModal extends Modal {
 	private wahl = new Set<number>();
-	constructor(app: App, private api: LernplanApi, private woche: any, private stand: Record<string, string>, private nachStart: () => void) { super(app); }
+	constructor(app: App, private api: LernplanApi, private woche: any, private stand: { aufgaben: Record<string, string>; karten: Record<string, KartenStand> }, private nachStart: () => void) { super(app); }
 	onOpen() {
 		this.titleEl.setText(`Durchgang · KW ${this.woche.kw}`);
 		if (this.woche.lernziel) this.contentEl.createEl('p', { text: this.woche.lernziel, cls: 'anki-lp-ziel' });
 		for (const a of this.woche.aufgaben || []) {
-			const z = new Setting(this.contentEl).setName(a.text).setDesc(STAND[this.stand[a.index]] || '');
+			const k = this.stand.karten[a.index];
+			const z = new Setting(this.contentEl).setName(a.text).setDesc([STAND[this.stand.aufgaben[a.index]], kartenText(k)].filter(Boolean).join(' · '));
+			if (k?.notizen?.length) z.descEl.setAttr('title', k.notizen.map((n) => `${n.name}: ${n.karten}`).join('\n'));
+			if (k && k.notizen?.length && !k.gesamt) z.descEl.addClass('anki-lp-ohne-karten');
 			z.addToggle((t) => t.setValue(false).onChange((an) => { if (an) this.wahl.add(a.index); else this.wahl.delete(a.index); }));
 		}
 		const starten = async (modus: 'fakten' | 'karten') => {

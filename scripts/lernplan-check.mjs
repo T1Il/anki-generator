@@ -48,4 +48,7 @@ assert.deepEqual(g.map((x) => x.titel), ['Heute', 'Gestern', 'Diese Woche', 'Okt
 assert.equal(m.chatZeit('2026-11-15T09:05:00', jetzt), '09:05');
 assert.equal(m.chatZeit('2026-10-02T08:00:00', jetzt), '02.10.');
 assert.equal(m.chatZeit('2025-10-02T08:00:00', jetzt), '02.10.2025');
+assert.equal(m.kartenText({ gesamt: 0, notizen: [{ name: 'A', karten: 0 }] }), 'keine Karten');
+assert.equal(m.kartenText({ gesamt: 12, notizen: [{ name: 'A', karten: 12 }, { name: 'B', karten: 0 }] }), '12 Karten · 1 ohne');
+assert.equal(m.kartenText(undefined), '');
 console.log('lernplan-check: ok');

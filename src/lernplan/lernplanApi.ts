@@ -5,6 +5,16 @@ import { requestUrl } from 'obsidian';
  * Verknüpfen, Durchgang und Chat laufen über dieselben Endpunkte wie App und Web.
  */
 export interface LernAufgabe { kw: number; jahr: number; index: number; text: string; kurz?: string; gruppe?: string | null; seite?: number | null; woche?: string; lernziel?: string; passt?: boolean; verknuepft?: boolean; }
+export interface KartenStand { gesamt: number; notizen: { name: string; karten: number }[]; }
+
+/** „keine Karten“, „12 Karten“, „12 Karten · 1 ohne“ für die Durchgang-Auswahl. */
+export function kartenText(k?: KartenStand): string {
+	if (!k || !k.notizen?.length) return '';
+	const ohne = k.notizen.filter((n) => !n.karten).length;
+	if (!k.gesamt) return 'keine Karten';
+	return `${k.gesamt} ${k.gesamt === 1 ? 'Karte' : 'Karten'}${ohne ? ` · ${ohne} ohne` : ''}`;
+}
+
 export interface LernChatLive { aktiv: boolean; schritte: string[]; text: string; einbettungen: any[]; }
 export interface LernChatKopf { id: number; titel?: string; pfad?: string | null; letzte?: string | null; fragen?: number; archiviert?: boolean; }
 export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; rueckbar?: boolean; grund?: string | null; grund_text?: string | null; notiz?: string | null; }
@@ -51,7 +61,10 @@ export class LernplanApi {
 	async aufgabenFuerNotiz(pfad: string): Promise<LernAufgabe[]> { return (await this.ruf(`/api/lernplan/notiz/aufgaben?pfad=${encodeURIComponent(pfad)}`)).json.aufgaben || []; }
 	async verknuepfen(a: LernAufgabe, pfad: string) { return (await this.ruf('/api/lernplan/aufgabe/notiz', 'POST', { kw: a.kw, jahr: a.jahr, index: a.index, pfad, text: a.text })).json; }
 	async loesen(a: LernAufgabe, pfad: string) { return (await this.ruf('/api/lernplan/aufgabe/notiz/loesen', 'POST', { kw: a.kw, jahr: a.jahr, index: a.index, pfad, text: a.text })).json; }
-	async pruefstand(kw: number, jahr: number): Promise<Record<string, string>> { return (await this.ruf(`/api/lernplan/durchgang/pruefstand?kw=${kw}&jahr=${jahr}`)).json.aufgaben || {}; }
+	async pruefstand(kw: number, jahr: number): Promise<{ aufgaben: Record<string, string>; karten: Record<string, KartenStand> }> {
+		const j = (await this.ruf(`/api/lernplan/durchgang/pruefstand?kw=${kw}&jahr=${jahr}`)).json;
+		return { aufgaben: j.aufgaben || {}, karten: j.karten || {} };
+	}
 	async durchgangStarten(kw: number, jahr: number, aufgaben: number[], modus: 'fakten' | 'karten' = 'fakten') { return (await this.ruf('/api/lernplan/durchgang', 'POST', { kw, jahr, aufgaben, modus })).json.durchgang; }
 	async durchgang(kw: number, jahr: number) { return (await this.ruf(`/api/lernplan/durchgang?kw=${kw}&jahr=${jahr}&auch_spaeter=true`)).json.durchgang; }
 	async punkt(id: number, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> { return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert })).json.punkt; }
