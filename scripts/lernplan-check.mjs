@@ -51,4 +51,8 @@ assert.equal(m.chatZeit('2025-10-02T08:00:00', jetzt), '02.10.2025');
 assert.equal(m.kartenText({ gesamt: 0, notizen: [{ name: 'A', karten: 0 }] }), 'keine Karten');
 assert.equal(m.kartenText({ gesamt: 12, notizen: [{ name: 'A', karten: 12 }, { name: 'B', karten: 0 }] }), '12 Karten · 1 ohne');
 assert.equal(m.kartenText(undefined), '');
+assert.equal(m.wenigKarten({ gesamt: 5, notizen: [{ name: 'A', karten: 5 }] }), true);
+assert.equal(m.wenigKarten({ gesamt: 40, notizen: [{ name: 'A', karten: 40 }, { name: 'B', karten: 0 }] }), true);
+assert.equal(m.wenigKarten({ gesamt: 6, notizen: [{ name: 'A', karten: 6 }] }), false);
+assert.equal(m.wenigKarten({ gesamt: 0, notizen: [] }), false);
 console.log('lernplan-check: ok');

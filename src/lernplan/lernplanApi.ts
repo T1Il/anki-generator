@@ -7,6 +7,12 @@ import { requestUrl } from 'obsidian';
 export interface LernAufgabe { kw: number; jahr: number; index: number; text: string; kurz?: string; gruppe?: string | null; seite?: number | null; woche?: string; lernziel?: string; passt?: boolean; verknuepft?: boolean; }
 export interface KartenStand { gesamt: number; notizen: { name: string; karten: number }[]; }
 
+export const WENIG_KARTEN = 5;   // Tills Grenze (15.11.2026)
+/** Für „Wenig Karten wählen“: höchstens WENIG_KARTEN Karten in den verknüpften Notizen, oder eine davon ganz ohne. */
+export function wenigKarten(k?: KartenStand): boolean {
+	return !!k?.notizen?.length && (k.gesamt <= WENIG_KARTEN || k.notizen.some((n) => !n.karten));
+}
+
 /** „keine Karten“, „12 Karten“, „12 Karten · 1 ohne“ für die Durchgang-Auswahl. */
 export function kartenText(k?: KartenStand): string {
 	if (!k || !k.notizen?.length) return '';

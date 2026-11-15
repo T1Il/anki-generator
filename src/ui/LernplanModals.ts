@@ -1,5 +1,5 @@
-import { App, Modal, Notice, Setting, TFile } from 'obsidian';
-import { aufgabenGliedern, kartenText, KartenStand, LernAufgabe, LernplanApi } from '../lernplan/lernplanApi';
+import { App, Modal, Notice, Setting, TFile, ToggleComponent } from 'obsidian';
+import { aufgabenGliedern, kartenText, KartenStand, LernAufgabe, LernplanApi, wenigKarten } from '../lernplan/lernplanApi';
 
 /** Offene Notiz an Aufgaben hängen: passende oben, darunter je Woche und Kapitel wie auf /lernplan. Bleibt für mehrere offen. */
 export class NotizVerknuepfenModal extends Modal {
@@ -79,12 +79,20 @@ export class DurchgangModal extends Modal {
 	onOpen() {
 		this.titleEl.setText(`Durchgang · KW ${this.woche.kw}`);
 		if (this.woche.lernziel) this.contentEl.createEl('p', { text: this.woche.lernziel, cls: 'anki-lp-ziel' });
+		const schalter = new Map<number, ToggleComponent>();
+		const wenige = (this.woche.aufgaben || []).filter((a: any) => wenigKarten(this.stand.karten[a.index]));
+		if (wenige.length) {
+			new Setting(this.contentEl).setName('Vorauswahl')
+				.addButton((b) => b.setButtonText(`Wenig Karten wählen (${wenige.length})`).onClick(() => {
+					for (const [i, t] of schalter) t.setValue(wenige.some((a: any) => a.index === i));
+				}));
+		}
 		for (const a of this.woche.aufgaben || []) {
 			const k = this.stand.karten[a.index];
 			const z = new Setting(this.contentEl).setName(a.text).setDesc([STAND[this.stand.aufgaben[a.index]], kartenText(k)].filter(Boolean).join(' · '));
 			if (k?.notizen?.length) z.descEl.setAttr('title', k.notizen.map((n) => `${n.name}: ${n.karten}`).join('\n'));
 			if (k && k.notizen?.length && !k.gesamt) z.descEl.addClass('anki-lp-ohne-karten');
-			z.addToggle((t) => t.setValue(false).onChange((an) => { if (an) this.wahl.add(a.index); else this.wahl.delete(a.index); }));
+			z.addToggle((t) => { schalter.set(a.index, t); t.setValue(false).onChange((an) => { if (an) this.wahl.add(a.index); else this.wahl.delete(a.index); }); });
 		}
 		const starten = async (modus: 'fakten' | 'karten') => {
 			if (!this.wahl.size) { new Notice('Keine Aufgabe gewählt.'); return; }
