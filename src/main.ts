@@ -102,7 +102,7 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		this.registerEditorExtension(legacyAnkiStateField);
 
 		this.registerView(LERNPLAN_VIEW_TYPE, (leaf) => new LernplanView(leaf, this));
-		this.registerHoverLinkSource(LERNPLAN_VIEW_TYPE, { display: 'Lernplan', defaultMod: true });
+		this.registerHoverLinkSource(LERNPLAN_VIEW_TYPE, { display: 'Lernplan', defaultMod: false });
 		this.addCommand({ id: 'lernplan-notiz-verknuepfen', name: 'Notiz mit Lernplan-Aufgabe verknüpfen', callback: () => void this.notizMitAufgabeVerknuepfen() });
 		this.addCommand({ id: 'lernplan-durchgang-starten', name: 'Durchgang für Aufgaben starten', callback: () => void this.durchgangWaehlen() });
 		this.addCommand({ id: 'lernplan-oeffnen', name: 'Lernplan und Vorschläge öffnen', callback: () => void this.lernplanOeffnen() });
