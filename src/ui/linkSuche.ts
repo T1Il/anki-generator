@@ -1,4 +1,5 @@
 import { App, prepareFuzzySearch, setIcon, TFile } from 'obsidian';
+import { LinkFeld } from './linkFeld';
 
 /** Offener `[[…` vor der Schreibmarke: Ziel und, nach `#`, der Anker. Geschlossene Links zählen nicht. */
 export function linkAnfrage(text: string, marke: number): { start: number; ziel: string; anker: string | null } | null {
@@ -59,7 +60,8 @@ const LISTE_MAX = 30;
  * Vorschläge beim Tippen von `[[` im Lernchat: Notizen, nach `#` Überschriften und Blöcke (Callouts mit ^id),
  * nach `#^` nur Blöcke. Eingesetzt wird der volle Pfad mit lesbarem Alias, damit das Backend die Stelle findet.
  */
-export function linkSucheAnbinden(app: App, feld: HTMLTextAreaElement, rahmen: HTMLElement, quelle: () => string, geaendert: () => void) {
+export function linkSucheAnbinden(app: App, f: LinkFeld, rahmen: HTMLElement, quelle: () => string) {
+	const feld = f.el;
 	const liste = rahmen.createDiv({ cls: 'anki-lp-linkwahl' });
 	liste.hide();
 	let eintraege: Eintrag[] = [], wahl = 0, anfrage: ReturnType<typeof linkAnfrage> = null, lauf = 0;
@@ -83,23 +85,19 @@ export function linkSucheAnbinden(app: App, feld: HTMLTextAreaElement, rahmen: H
 	};
 	const einsetzen = (e: Eintrag) => {
 		if (!anfrage) return;
-		const marke = feld.selectionStart;
-		const danach = feld.value.slice(marke).replace(/^[^\]\n]*\]\]/, '');
-		const vorn = feld.value.slice(0, anfrage.start) + e.einsetzen;
-		feld.value = vorn + (e.einsetzen.endsWith(']]') && !danach.startsWith(' ') ? ' ' : '') + danach;
-		const pos = vorn.length + (e.einsetzen.endsWith(']]') ? 1 : 0);
-		feld.setSelectionRange(pos, pos);
-		feld.focus();
+		const laenge = f.vorMarke().length - anfrage.start;
+		const fertig = e.einsetzen.endsWith(']]');
 		schliessen();
-		feld.dispatchEvent(new Event('input'));
-		if (!e.einsetzen.endsWith(']]')) void suchen();
-		geaendert();
+		if (fertig) f.ersetzen(laenge, { link: e.einsetzen, anzeige: e.einsetzen.match(/\|([^\]]*)\]\]$/)?.[1] });
+		else f.ersetzen(laenge, { text: e.einsetzen });
+		feld.focus();
 	};
 	// Kurzer Linktext wie Obsidian selbst (eindeutiger Name); das Backend löst ihn zum Pfad auf.
 	const ohneMd = (f: TFile) => app.metadataCache.fileToLinktext(f, quelle(), true);
 
 	const suchen = async () => {
-		anfrage = linkAnfrage(feld.value, feld.selectionStart);
+		const vorn = f.vorMarke();
+		anfrage = linkAnfrage(vorn, vorn.length);
 		if (!anfrage) { schliessen(); return; }
 		const meins = ++lauf;
 		const q = anfrage;
@@ -152,6 +150,7 @@ export function linkSucheAnbinden(app: App, feld: HTMLTextAreaElement, rahmen: H
 
 	feld.addEventListener('input', () => void suchen());
 	feld.addEventListener('click', () => void suchen());
+	feld.addEventListener('keyup', (ev) => { if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') void suchen(); });
 	feld.addEventListener('blur', () => window.setTimeout(schliessen, 150));
 	feld.addEventListener('keydown', (ev) => {
 		if (!liste.isShown() || !eintraege.length) { if (ev.key === 'Escape' && liste.isShown()) { schliessen(); ev.preventDefault(); } return; }

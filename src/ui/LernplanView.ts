@@ -3,7 +3,8 @@ import AnkiGeneratorPlugin from '../main';
 import { chatGruppen, chatZeit, DENKTIEFEN, GRUENDE, LernChatKopf, LernPunkt, MODELLE } from '../lernplan/lernplanApi';
 import { bildAlsPng, bildBedienbar, kopierenMitRueckmeldung, svgAdresse, svgAlsPng } from './lernBild';
 import { NameModal } from './LernplanModals';
-import { linksIm, linkSucheAnbinden } from './linkSuche';
+import { linkSucheAnbinden } from './linkSuche';
+import { LinkFeld } from './linkFeld';
 
 
 export const LERNPLAN_VIEW_TYPE = 'anki-lernplan-view';
@@ -505,31 +506,22 @@ export class LernplanView extends ItemView {
 		} else { notizZeigen(); verlauf.createDiv({ cls: 'anki-lp-fleer', text: 'Lädt …' }); void liste().catch((e) => { verlauf.empty(); verlauf.createDiv({ cls: 'anki-lp-fehler', text: e?.message || String(e) }); }); }
 
 		const ein = el.createDiv({ cls: 'anki-lp-ein' });
-		const feld = ein.createEl('textarea', { attr: { placeholder: 'Frage, [[ für Notizen und Stellen', rows: '1' } });
-		const verweise = createDiv({ cls: 'anki-lp-verweise' });
-		el.insertBefore(verweise, ein);
-		const verweiseZeichnen = () => {
-			verweise.empty();
-			const links = linksIm(feld.value);
-			verweise.toggle(links.length > 0);
-			for (const l of links) {
-				const datei = this.app.metadataCache.getFirstLinkpathDest(l.ziel, this.chatPfad || '');
-				const ziel = `${l.ziel}${l.anker ? `#${l.anker}` : ''}`;
-				const chip = verweise.createEl('button', { cls: `anki-lp-verweis${datei ? '' : ' is-kaputt'}`, attr: { title: datei ? ziel : `Nicht gefunden: ${ziel}` } });
-				setIcon(chip.createSpan(), l.anker?.startsWith('^') ? 'quote' : l.anker ? 'heading' : 'file-text');
-				chip.createSpan({ text: l.anzeige || [l.ziel.split('/').pop(), l.anker?.replace(/^\^/, '')].filter(Boolean).join(' › ') });
-				chip.onclick = (ev) => void this.app.workspace.openLinkText(ziel, this.chatPfad || '', Keymap.isModEvent(ev) || 'tab');
-				chip.onmouseover = (ev) => this.app.workspace.trigger('hover-link', { event: ev, source: LERNPLAN_VIEW_TYPE, hoverParent: this, targetEl: chip, linktext: ziel, sourcePath: this.chatPfad || '' });
-			}
-		};
-		verweise.hide();
-		feld.addEventListener('input', verweiseZeichnen);
-		linkSucheAnbinden(this.app, feld, ein, () => this.chatPfad || '', verweiseZeichnen);
+		const feld = new LinkFeld(ein.createDiv(), 'Frage, [[ für Notizen und Stellen');
+		feld.el.addEventListener('click', (ev) => {
+			const p = (ev.target as HTMLElement).closest('.anki-lp-pille') as HTMLElement | null;
+			const ziel = p?.dataset.link?.slice(2, -2).split('|')[0];
+			if (ziel && (ev.ctrlKey || ev.metaKey)) void this.app.workspace.openLinkText(ziel, this.chatPfad || '', 'tab');
+		});
+		feld.el.addEventListener('mouseover', (ev) => {
+			const p = (ev.target as HTMLElement).closest('.anki-lp-pille') as HTMLElement | null;
+			const ziel = p?.dataset.link?.slice(2, -2).split('|')[0];
+			if (p && ziel) this.app.workspace.trigger('hover-link', { event: ev, source: LERNPLAN_VIEW_TYPE, hoverParent: this, targetEl: p, linktext: ziel, sourcePath: this.chatPfad || '' });
+		});
+		linkSucheAnbinden(this.app, feld, ein, () => this.chatPfad || '');
 		const senden = ein.createEl('button', { cls: 'anki-lp-senden', attr: { 'aria-label': 'Senden' } });
 		setIcon(senden, 'arrow-up');
 		const wahlZeile = createDiv({ cls: 'anki-lp-einfuss' });
 		el.insertBefore(wahlZeile, ein);
-		wahlZeile.prepend(verweise);
 		const wahl = wahlZeile.createEl('button', { cls: 'anki-lp-modellwahl', attr: { title: 'Modell und Denktiefe' } });
 		const wahlText = () => {
 			const s = this.plugin.settings;
@@ -547,13 +539,10 @@ export class LernplanView extends ItemView {
 				.onClick(async () => { s.lernchatDenken = k || undefined; await this.plugin.saveSettings(); wahlText(); }));
 			m.showAtMouseEvent(ev);
 		};
-		feld.oninput = () => { feld.style.height = 'auto'; feld.style.height = `${Math.min(feld.scrollHeight, 160)}px`; };
 		const los = async () => {
-			const text = feld.value.trim();
+			const text = feld.wert().trim();
 			if (!text || senden.disabled) return;
-			feld.value = '';
-			verweiseZeichnen();
-			feld.style.height = 'auto';
+			feld.leeren();
 			senden.disabled = true;
 			if (!this.chatId) { verlauf.empty(); verlauf.removeClass('is-liste'); }
 			this.nachricht(verlauf, 'user', text, []);
@@ -613,15 +602,16 @@ export class LernplanView extends ItemView {
 			}
 		};
 		senden.onclick = () => void los();
-		feld.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void los(); } };
+		feld.el.addEventListener('keydown', (e) => {
+			if (e.key !== 'Enter') return;
+			e.preventDefault();
+			if (e.shiftKey) feld.textEinfuegen('\n'); else void los();
+		});
 		if (this.vorlage) {
-			feld.value = this.vorlage;
+			feld.setzen(this.vorlage);
 			this.vorlage = null;
-			feld.style.height = `${Math.min(feld.scrollHeight, 160)}px`;
-			feld.setSelectionRange(feld.value.length, feld.value.length);
-			verweiseZeichnen();
 		}
-		feld.focus();
+		feld.fokus();
 	}
 
 	private verlaufZeile(el: HTMLElement, c: LernChatKopf, weg: () => void) {

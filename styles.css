@@ -2058,3 +2058,11 @@ button.anki-lp-verweis.is-kaputt { border-color: var(--text-error) !important; c
 .anki-lp-einfuss { align-items: center; gap: 8px; }
 .anki-lp-einfuss .anki-lp-verweise { flex: 1 1 auto; min-width: 0; padding: 2px 0; }
 .anki-lp-einfuss button.anki-lp-modellwahl { margin-left: auto; flex: none; }
+
+/* Eingabefeld mit Link-Elementen statt Textarea (Titel des Ziels statt Syntax) */
+.anki-lp-feld { display: block; width: 100%; min-height: 46px; max-height: 180px; overflow-y: auto; padding: 11px 50px 11px 13px; border: 1px solid var(--lp-linie); border-radius: 12px; background: var(--lp-karte); font-size: 15.5px; line-height: 22px; color: var(--text-normal); white-space: pre-wrap; word-break: break-word; outline: none; cursor: text; user-select: text; -webkit-user-select: text; }
+.anki-lp-feld:focus { border-color: var(--lp-lern); box-shadow: 0 0 0 1px var(--lp-lern); }
+.anki-lp-feld.is-leer::before { content: attr(data-platzhalter); color: var(--text-faint); pointer-events: none; position: absolute; }
+.anki-lp-pille { display: inline; padding: 1px 6px; margin: 0 1px; border-radius: 6px; background: color-mix(in srgb, var(--lp-lern) 15%, transparent); color: var(--lp-lern); font-weight: 700; white-space: normal; cursor: default; user-select: all; -webkit-user-select: all; }
+.anki-lp-pille.is-block { background: color-mix(in srgb, var(--lp-moos) 16%, transparent); color: var(--lp-moos); }
+.anki-lp-verweise { display: none !important; }
