@@ -40,4 +40,12 @@ await assert.rejects(api.verknuepfen({ kw: 46, jahr: 2026, index: 3, text: 'T' }
 ob._setze({ status: 503, json: { detail: 'Weg' } });
 await assert.rejects(api.plan(), /Weg/);
 await assert.rejects(new m.LernplanApi(() => '').plan(), /Adresse/);
+// Verlauf nach Zeit
+const jetzt = new Date(2026, 10, 15, 12, 0);
+const g = m.chatGruppen([{ id: 1, letzte: '2026-11-15T09:00:00' }, { id: 2, letzte: '2026-11-14T22:00:00' }, { id: 3, letzte: '2026-11-11T08:00:00' },
+	{ id: 4, letzte: '2026-10-02T08:00:00' }, { id: 5, letzte: null }], jetzt);
+assert.deepEqual(g.map((x) => x.titel), ['Heute', 'Gestern', 'Diese Woche', 'Oktober 2026', 'Älter']);
+assert.equal(m.chatZeit('2026-11-15T09:05:00', jetzt), '09:05');
+assert.equal(m.chatZeit('2026-10-02T08:00:00', jetzt), '02.10.');
+assert.equal(m.chatZeit('2025-10-02T08:00:00', jetzt), '02.10.2025');
 console.log('lernplan-check: ok');

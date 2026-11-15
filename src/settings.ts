@@ -63,6 +63,11 @@ export interface AnkiGeneratorSettings {
 	 * im eigentlichen Sinn – liegt hier, weil es data.json ohnehin gibt.
 	 */
 	quellenSitzungen: Record<string, QuellenSitzung>;
+	/** Durchgang, den die Seitenleiste nicht mehr zeigt (abgehakt). */
+	lernplanAusgeblendet?: number;
+	/** Lernchat über Claude Code: Modell (sonnet, opus, haiku) und Denktiefe (low … max); leer = Standard des Dienstes. */
+	lernchatModell?: string;
+	lernchatDenken?: string;
 	/** Geflaggte Karten: beim Start und stündlich prüfen. */
 	flaggenAutomatisch: boolean;
 	/** Ab so vielen ungeprüften Flaggen startet die KI-Prüfung selbst. */

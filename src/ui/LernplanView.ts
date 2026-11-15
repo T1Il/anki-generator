@@ -1,29 +1,8 @@
-import { ItemView, MarkdownRenderer, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Keymap, MarkdownRenderer, Menu, Notice, PaneType, setIcon, TFile, ViewStateResult, WorkspaceLeaf } from 'obsidian';
 import AnkiGeneratorPlugin from '../main';
-import { GRUENDE, LernPunkt } from '../lernplan/lernplanApi';
+import { chatGruppen, chatZeit, DENKTIEFEN, GRUENDE, LernChatKopf, LernPunkt, MODELLE } from '../lernplan/lernplanApi';
+import { bildAlsPng, bildBedienbar, kopierenMitRueckmeldung, svgAdresse, svgAlsPng } from './lernBild';
 
-
-/** Eigene Skizze als PNG, mindestens 1600 px breit, auf Weiß wie in der Karte: SVG fügt sich in Notizen und Word kaum ein. */
-function svgAlsPng(svg: string, breite = 1600): Promise<Blob> {
-	return new Promise((fertig, fehler) => {
-		const bild = new Image();
-		bild.onload = () => {
-			const b = bild.naturalWidth || 300, h = bild.naturalHeight || 150;
-			const faktor = Math.max(2, breite / b);
-			const flaeche = document.createElement('canvas');
-			flaeche.width = Math.round(b * faktor);
-			flaeche.height = Math.round(h * faktor);
-			const ctx = flaeche.getContext('2d');
-			if (!ctx) { fehler(new Error('canvas')); return; }
-			ctx.fillStyle = '#fff';
-			ctx.fillRect(0, 0, flaeche.width, flaeche.height);
-			ctx.drawImage(bild, 0, 0, flaeche.width, flaeche.height);
-			flaeche.toBlob((blob) => (blob ? fertig(blob) : fehler(new Error('toBlob'))), 'image/png');
-		};
-		bild.onerror = () => fehler(new Error('svg'));
-		bild.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-	});
-}
 
 export const LERNPLAN_VIEW_TYPE = 'anki-lernplan-view';
 
@@ -36,23 +15,53 @@ const ART: Record<string, [string, string]> = {
 export class LernplanView extends ItemView {
 	private reiter: 'durchgang' | 'chat' = 'durchgang';
 	private chatId: number | null = null;
+	private chatPfad: string | null = null;
+	private archiv = false;
+	private suche = '';
+	private notizChip: (() => void) | null = null;
 	constructor(leaf: WorkspaceLeaf, private plugin: AnkiGeneratorPlugin) { super(leaf); }
+
+	getState() { return { reiter: this.reiter, chatId: this.chatId }; }
+	async setState(state: any, result: ViewStateResult) {
+		if (state?.reiter === 'chat' || state?.reiter === 'durchgang') this.reiter = state.reiter;
+		if (typeof state?.chatId === 'number' || state?.chatId === null) this.chatId = state.chatId;
+		await super.setState(state, result);
+		await this.zeigen();
+	}
+
+	/** Liegt die Ansicht im Hauptbereich statt in einer Seitenleiste? */
+	private istGross() { return this.leaf.getRoot() === this.app.workspace.rootSplit; }
 	getViewType() { return LERNPLAN_VIEW_TYPE; }
 	getDisplayText() { return 'Lernplan'; }
 	getIcon() { return 'graduation-cap'; }
 
-	async onOpen() { await this.zeigen(); }
+	async onOpen() {
+		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.notizChip?.()));
+		await this.zeigen();
+	}
 
 	oeffneChat() { this.reiter = 'chat'; void this.zeigen(); }
+
+	private offeneNotiz(): TFile | null {
+		const f = this.app.workspace.getActiveFile();
+		return f && f.extension === 'md' ? f : null;
+	}
 
 	async zeigen() {
 		const c = this.containerEl.children[1] as HTMLElement;
 		c.empty();
 		c.addClass('anki-lp');
+		c.toggleClass('is-gross', this.istGross());
+		this.notizChip = null;
 		const kopf = c.createDiv({ cls: 'anki-lp-reiter' });
 		for (const [k, name] of [['durchgang', 'Durchgang'], ['chat', 'Lernchat']] as const) {
 			const b = kopf.createEl('button', { text: name, cls: this.reiter === k ? 'mod-cta' : '' });
 			b.onclick = () => { this.reiter = k; void this.zeigen(); };
+		}
+		if (!this.istGross()) {
+			const gross = kopf.createEl('button', { cls: 'anki-lp-ikon anki-lp-gross', attr: { 'aria-label': 'Groß öffnen', title: 'Groß öffnen' } });
+			setIcon(gross, 'maximize-2');
+			gross.onclick = () => void this.plugin.lernplanGross(this.reiter, this.chatId);
 		}
 		const inhalt = c.createDiv({ cls: 'anki-lp-inhalt-raum' });
 		try {
@@ -64,62 +73,143 @@ export class LernplanView extends ItemView {
 		const api = this.plugin.lernplanApi;
 		const plan = await api.plan();
 		const w = plan.vorarbeit || plan.woche;
-		if (!w) { el.createDiv({ text: 'Keine laufende Woche.' }); return; }
-		if (w.lernziel) el.createEl('p', { text: w.lernziel, cls: 'anki-lp-ziel' });
-		const start = el.createEl('button', { text: 'Aufgaben wählen', cls: 'anki-lp-voll' });
-		start.onclick = () => void this.plugin.durchgangWaehlen();
+		el.addClass('anki-lp-dg');
+		if (!w) { el.createDiv({ text: 'Keine laufende Woche.', cls: 'anki-lp-leer' }); return; }
+		if (w.lernziel) {
+			const ziel = el.createDiv({ text: w.lernziel, cls: 'anki-lp-ziel', attr: { title: 'Lernziel' } });
+			ziel.onclick = () => ziel.toggleClass('is-offen', !ziel.hasClass('is-offen'));
+		}
 		const d = await api.durchgang(w.kw, w.jahr);
+		const punkte = ((d?.punkte || []) as LernPunkt[]).filter((p) => p.typ in ART);
+		const offen = punkte.filter((p) => p.status === 'offen');
+		const erledigt = punkte.filter((p) => p.status !== 'offen');
+		const laeuft = d && (d.status === 'angefragt' || d.status === 'laeuft');
+		const weg = d && !laeuft && !offen.length && this.plugin.settings.lernplanAusgeblendet === d.id;
+
+		const zeile = el.createDiv({ cls: 'anki-lp-dzeile' });
+		const links = zeile.createDiv();
+		links.createEl('b', { text: `KW ${w.kw}` });
+		const stand = !d || weg ? 'kein offener Durchgang'
+			: laeuft ? 'Durchgang läuft'
+			: d.status === 'fehlgeschlagen' ? 'Durchgang fehlgeschlagen'
+			: offen.length ? `${offen.length} offen · ${punkte.length} Punkte` : `${punkte.length} Punkte, alles entschieden`;
+		links.createSpan({ text: stand, cls: laeuft ? 'is-laeuft' : '' });
+		const start = zeile.createEl('button', { text: 'Neuer Durchgang', cls: 'anki-lp-textknopf' });
+		start.onclick = () => void this.plugin.durchgangWaehlen();
 		if (!d) return;
-		if (d.status === 'angefragt' || d.status === 'laeuft') el.createDiv({ text: 'Durchgang läuft …', cls: 'anki-lp-status' });
-		if (d.kurzbefund) el.createDiv({ text: d.kurzbefund, cls: 'anki-lp-befund' });
-		for (const p of (d.punkte || []) as LernPunkt[]) {
-			if (p.typ in ART) this.punkt(el, p);
+		if (weg) {
+			const z = el.createEl('button', { text: 'Letzten Durchgang zeigen', cls: 'anki-lp-textknopf anki-lp-leise' });
+			z.onclick = async () => { this.plugin.settings.lernplanAusgeblendet = undefined; await this.plugin.saveSettings(); void this.zeigen(); };
+			return;
+		}
+		if (d.status === 'fehlgeschlagen' && d.fehler) el.createDiv({ text: d.fehler, cls: 'anki-lp-fehler' });
+		if (d.kurzbefund) {
+			const befund = el.createEl('details', { cls: 'anki-lp-befund' });
+			if (offen.length) befund.open = true;
+			befund.createEl('summary', { text: 'Befund' });
+			this.md(befund.createDiv({ cls: 'anki-lp-befundtext' }), d.kurzbefund);
+		}
+		for (const p of offen) this.punkt(el, p, () => void this.zeigen());
+		if (erledigt.length) {
+			const box = el.createEl('details', { cls: 'anki-lp-erledigt' });
+			const zahl = (s: string) => erledigt.filter((p) => p.status === s).length;
+			box.createEl('summary', { text: [`${zahl('uebernommen')} übernommen`, zahl('verworfen') && `${zahl('verworfen')} verworfen`].filter(Boolean).join(' · ') });
+			for (const p of erledigt) this.punkt(box, p, () => void this.zeigen());
+		}
+		if (!offen.length && !laeuft) {
+			const fuss = el.createDiv({ cls: 'anki-lp-dfuss' });
+			const aus = fuss.createEl('button', { text: 'Ausblenden', cls: 'anki-lp-textknopf anki-lp-leise' });
+			aus.onclick = async () => { this.plugin.settings.lernplanAusgeblendet = d.id; await this.plugin.saveSettings(); void this.zeigen(); };
 		}
 	}
 
-	private punkt(el: HTMLElement, p: LernPunkt) {
+	/** Ein Vorschlag. Entschiedene erscheinen knapp mit Titel, Inhalt zum Aufklappen und Rückgängig; `nachher` zeichnet etwa den Durchgang neu. */
+	private punkt(el: HTMLElement, p: LernPunkt, nachher?: () => void) {
+		this.punktZeichnen(el.createDiv(), p, nachher);
+	}
+
+	private punktZeichnen(box: HTMLElement, p: LernPunkt, nachher?: () => void) {
 		const api = this.plugin.lernplanApi;
 		const [art, farbe] = ART[p.typ];
-		const box = el.createDiv({ cls: 'anki-lp-vor' });
+		box.empty();
+		box.className = 'anki-lp-vor';
 		box.style.setProperty('--c', farbe);
-		const fertig = (text: string, rueck: boolean) => {
-			box.empty();
-			const z = box.createDiv({ cls: 'anki-lp-zu' });
-			z.createSpan({ text });
-			if (rueck) {
-				const r = z.createEl('a', { text: 'Rückgängig' });
-				r.onclick = async () => { await this.tun(() => api.punkt(p.id, 'zuruecknehmen')); void this.zeigen(); };
+		const neu = (r: LernPunkt | null) => {
+			if (!r) return;
+			if (nachher && r.status !== 'konflikt') { nachher(); return; }
+			this.punktZeichnen(box, r, nachher);
+		};
+		const titelText = p.ueberschrift || (p.pfad || '').split('/').pop()?.replace(/\.md$/, '') || art;
+		const inhalt = (ziel: HTMLElement) => {
+			if (p.typ === 'karte') {
+				ziel.createEl('small', { text: 'FRAGE' });
+				this.md(ziel.createDiv(), p.vorne || '', p.pfad);
+				ziel.createEl('small', { text: 'ANTWORT' });
+				this.md(ziel.createDiv(), p.hinten || '', p.pfad);
+			} else {
+				if (p.alt) ziel.createDiv({ text: p.alt, cls: 'anki-lp-alt' });
+				this.md(ziel.createDiv({ cls: 'anki-lp-neu' }), p.neu || '', p.pfad);
 			}
 		};
-		if (p.status === 'uebernommen') { fertig('Übernommen', false); return; }
-		if (p.status === 'verworfen') { fertig('Verworfen', true); return; }
+
+		if (p.status === 'uebernommen' || p.status === 'verworfen' || p.status === 'gesehen') {
+			box.addClass('is-zu');
+			const zeile = box.createDiv({ cls: 'anki-lp-zu' });
+			const status = p.status === 'verworfen' ? 'Verworfen' : p.typ === 'karte' ? 'Karte hinzugefügt' : 'Übernommen';
+			setIcon(zeile.createSpan({ cls: 'anki-lp-zu-zeichen' }), p.status === 'verworfen' ? 'x' : 'check');
+			const t = zeile.createDiv({ cls: 'anki-lp-zu-text' });
+			t.createSpan({ text: titelText });
+			const notiz = p.pfad ? p.pfad.split('/').pop()?.replace(/\.md$/, '') : '';
+			t.createEl('small', { text: [status, art !== status ? art : '', notiz].filter(Boolean).join(' · ') });
+			const knoepfe = zeile.createDiv({ cls: 'anki-lp-zu-knoepfe' });
+			const ansehen = knoepfe.createEl('button', { cls: 'anki-lp-ikon', attr: { 'aria-label': 'Ansehen', title: 'Ansehen' } });
+			setIcon(ansehen, 'chevron-down');
+			if (p.status === 'verworfen' || p.rueckbar) {
+				const r = knoepfe.createEl('button', { cls: 'anki-lp-ikon', attr: { 'aria-label': 'Rückgängig', title: p.status === 'verworfen' ? 'Wieder öffnen' : 'Rückgängig: Notiz auf den Stand davor' } });
+				setIcon(r, 'undo-2');
+				r.onclick = async () => neu(await this.tun(() => api.punkt(p.id, 'zuruecknehmen')));
+			}
+			const koerper = box.createDiv({ cls: 'anki-lp-inhalt anki-lp-zu-inhalt' });
+			koerper.hide();
+			let gefuellt = false;
+			ansehen.onclick = () => {
+				if (!gefuellt) {
+					gefuellt = true;
+					inhalt(koerper);
+					if (p.grund || p.grund_text) koerper.createDiv({ cls: 'anki-lp-beleg', text: `Grund: ${p.grund_text || GRUENDE.find(([k]) => k === p.grund)?.[1] || p.grund}` });
+					if (p.pfad) {
+						const a = koerper.createEl('a', { cls: 'anki-lp-zu-link', text: `In ${notiz || 'Notiz'} ansehen` });
+						a.onclick = (ev) => void this.notizAnStelle(p.pfad as string, p.typ === 'karte' ? p.vorne : p.neu, Keymap.isModEvent(ev));
+					}
+				}
+				const offen = !koerper.isShown();
+				koerper.toggle(offen);
+				ansehen.toggleClass('is-an', offen);
+			};
+			return;
+		}
+
 		const kopf = box.createDiv({ cls: 'anki-lp-vkopf' });
 		kopf.createEl('b', { text: art });
-		kopf.createSpan({ text: p.ueberschrift || (p.pfad || '').split('/').pop()?.replace(/\.md$/, '') || '' });
+		kopf.createSpan({ text: titelText });
+		if (p.status === 'konflikt') box.createDiv({ cls: 'anki-lp-fehler anki-lp-warum', text: 'Die Stelle steht so nicht mehr in der Notiz. Bearbeiten oder verwerfen.' });
 		if (p.text) this.md(box.createDiv({ cls: 'anki-lp-warum' }), p.text, p.pfad);
 		const ansicht = box.createDiv({ cls: 'anki-lp-inhalt' });
 		const form = box.createDiv({ cls: 'anki-lp-inhalt' });
 		form.hide();
 		const felder: Record<string, HTMLTextAreaElement> = {};
+		inhalt(ansicht);
 		if (p.typ === 'karte') {
-			ansicht.createEl('small', { text: 'FRAGE' });
-			this.md(ansicht.createDiv(), p.vorne || '', p.pfad);
-			ansicht.createEl('small', { text: 'ANTWORT' });
-			this.md(ansicht.createDiv(), p.hinten || '', p.pfad);
 			form.createEl('small', { text: 'FRAGE' });
 			felder.vorne = form.createEl('textarea', { text: p.vorne || '' });
 			form.createEl('small', { text: 'ANTWORT' });
 			felder.hinten = form.createEl('textarea', { text: p.hinten || '' });
-		} else {
-			if (p.alt) ansicht.createDiv({ text: p.alt, cls: 'anki-lp-alt' });
-			this.md(ansicht.createDiv({ cls: 'anki-lp-neu' }), p.neu || '', p.pfad);
-			felder.neu = form.createEl('textarea', { text: p.neu || '' });
-		}
+		} else felder.neu = form.createEl('textarea', { text: p.neu || '' });
 		const beleg = (p.belege || []).map((b) => [b.titel, b.seite && `S. ${b.seite}`].filter(Boolean).join(', ')).join(' · ');
 		if (beleg) box.createDiv({ text: beleg, cls: 'anki-lp-beleg' });
 		const gruende = box.createDiv({ cls: 'anki-lp-gruende' });
 		gruende.hide();
-		const verwerfen = async (wert: Record<string, unknown>) => { await this.tun(() => api.punkt(p.id, 'verwerfen', wert)); fertig('Verworfen', true); };
+		const verwerfen = async (wert: Record<string, unknown>) => neu(await this.tun(() => api.punkt(p.id, 'verwerfen', wert)));
 		for (const [k, name] of GRUENDE) {
 			const b = gruende.createEl('button', { text: name });
 			b.onclick = () => void verwerfen({ grund: k });
@@ -143,7 +233,11 @@ export class LernplanView extends ItemView {
 		uebern.onclick = async () => {
 			const wert: Record<string, string> = {};
 			if (imEdit) for (const k in felder) wert[k] = felder[k].value;
-			if (await this.tun(() => api.punkt(p.id, 'uebernehmen', wert))) fertig('Übernommen', false);
+			uebern.disabled = true;
+			const r = await this.tun(() => api.punkt(p.id, 'uebernehmen', wert));
+			uebern.disabled = false;
+			if (r?.status === 'konflikt') new Notice('Die Stelle steht so nicht mehr in der Notiz.');
+			neu(r);
 		};
 		weg.onclick = () => { if (gruende.isShown()) gruende.hide(); else gruende.show(); };
 		frag.onclick = async () => {
@@ -153,25 +247,57 @@ export class LernplanView extends ItemView {
 		};
 	}
 
+	/** Notiz öffnen und, wenn der Text noch dasteht, dorthin springen und ihn markieren. */
+	private async notizAnStelle(pfad: string, text: string | undefined, neuerTab: PaneType | boolean) {
+		await this.app.workspace.openLinkText(pfad, '', neuerTab || (this.istGross() ? 'tab' : false));
+		const zeile = (text || '').split('\n').map((z) => z.trim()).find((z) => z.length > 8);
+		const ed = this.app.workspace.activeEditor?.editor;
+		if (!ed || !zeile) return;
+		const inhalt = ed.getValue();
+		const stelle = inhalt.indexOf(zeile.replace(/^[-*>]+\s*/, '').slice(0, 60));
+		if (stelle < 0) return;
+		const von = ed.offsetToPos(stelle), bis = ed.offsetToPos(stelle + Math.min(zeile.length, 60));
+		ed.setSelection(von, bis);
+		ed.scrollIntoView({ from: von, to: bis }, true);
+	}
+
 	private async tun<T>(fn: () => Promise<T>): Promise<T | null> {
 		try { return await fn(); } catch (e: any) { new Notice(e?.message || String(e)); return null; }
 	}
 
+	/** Markdown wie in Obsidian, Wikilinks auf Notizen, Überschriften und Blöcke anklickbar und mit Vorschau. */
 	private md(el: HTMLElement, text: string, pfad?: string) {
-		void MarkdownRenderer.render(this.app, text, el, pfad || '', this);
+		const quelle = pfad || this.chatPfad || '';
+		void MarkdownRenderer.render(this.app, text, el, quelle, this);
+		el.addEventListener('click', (ev) => {
+			const a = (ev.target as HTMLElement).closest('a.internal-link') as HTMLAnchorElement | null;
+			if (!a) return;
+			ev.preventDefault();
+			const ziel = a.getAttribute('data-href') || a.getAttribute('href');
+			if (ziel) void this.app.workspace.openLinkText(ziel, quelle, Keymap.isModEvent(ev) || (this.istGross() ? false : 'tab'));
+		});
+		el.addEventListener('mouseover', (ev) => {
+			const a = (ev.target as HTMLElement).closest('a.internal-link') as HTMLAnchorElement | null;
+			const ziel = a?.getAttribute('data-href');
+			if (a && ziel) this.app.workspace.trigger('hover-link', { event: ev, source: LERNPLAN_VIEW_TYPE, hoverParent: this, targetEl: a, linktext: ziel, sourcePath: quelle });
+		});
+		el.querySelectorAll('img').forEach((img) => bildBedienbar(this.app, img as HTMLImageElement, (img as HTMLImageElement).alt, () => bildAlsPng((img as HTMLImageElement).src)));
 	}
 
 	/** Neue PDF-Seiten brauchen etwas. Scheitert der Abruf, zum Beispiel beim Neustart des Servers, versucht es das Plugin erneut. */
-	private bild(el: HTMLElement, src: string, alt: string, versuch = 0) {
+	private bild(el: HTMLElement, src: string, alt: string, versuch = 0, extern?: string) {
 		const rahmen = versuch ? el : el.createDiv({ cls: 'anki-lp-bild', text: 'Abbildung lädt' });
 		const img = document.createElement('img');
 		img.alt = alt;
-		img.onload = () => { rahmen.empty(); rahmen.removeClass('anki-lp-bild'); rahmen.appendChild(img); };
+		img.onload = () => {
+			rahmen.empty(); rahmen.removeClass('anki-lp-bild'); rahmen.appendChild(img);
+			bildBedienbar(this.app, img, alt, () => bildAlsPng(src), extern);
+		};
 		img.onerror = () => {
-			if (versuch < 3) { window.setTimeout(() => this.bild(rahmen, src, alt, versuch + 1), 8000); return; }
+			if (versuch < 3) { window.setTimeout(() => this.bild(rahmen, src, alt, versuch + 1, extern), 8000); return; }
 			rahmen.empty();
 			const nochmal = rahmen.createEl('button', { cls: 'anki-lp-textknopf', text: 'Abbildung erneut laden' });
-			nochmal.onclick = () => { rahmen.setText('Abbildung lädt'); this.bild(rahmen, src, alt, 1); };
+			nochmal.onclick = () => { rahmen.setText('Abbildung lädt'); this.bild(rahmen, src, alt, 1, extern); };
 		};
 		img.src = src;
 	}
@@ -211,66 +337,155 @@ export class LernplanView extends ItemView {
 			for (const z of e.eintraege) k.createDiv({ cls: 'anki-lp-zeile', text: `${z.med_key}: ${z.label || ''}${z.package ? `, ${z.package}` : ''}` });
 		} else if (e.art === 'seite') {
 			const k = karte(BLAU, '▦', e.titel || 'Abbildung', `S. ${e.seite}`);
-			const ziel = e.zotero ? k.createEl('a', { href: e.zotero, cls: 'anki-lp-bildlink' }) : k;
-			this.bild(ziel, basis + e.bild, e.titel || '');
-			if (e.zotero) k.createEl('a', { cls: 'anki-lp-fuss anki-lp-zotero', href: e.zotero, text: 'In Zotero öffnen' });
+			this.bild(k, basis + e.bild, e.titel || '', 0, e.zotero);
+			this.bildFuss(k, () => bildAlsPng(basis + e.bild), e.zotero);
 		} else if (e.art === 'bild') {
 			const k = karte(BLAU, 'N', e.titel || 'Bild', 'Notiz');
 			this.bild(k, basis + e.bild, e.titel || '');
+			this.bildFuss(k, () => bildAlsPng(basis + e.bild));
 		} else if (e.art === 'grafik') {
 			const k = karte(GRUEN, '✎', e.titel, 'Eigene Skizze');
-			k.createEl('img', { cls: 'anki-lp-grafik', attr: { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(e.svg)}`, alt: e.titel } });
-			const fuss = k.createDiv({ cls: 'anki-lp-fuss anki-lp-grafikfuss' });
-			const kopieren = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'Als Bild kopieren' });
-			kopieren.onclick = () => {
-				// Der Promise geht direkt in ClipboardItem, sonst verfällt auf iOS die Nutzergeste.
-				navigator.clipboard.write([new ClipboardItem({ 'image/png': svgAlsPng(e.svg) })]).then(() => {
-					kopieren.setText('Kopiert');
-					window.setTimeout(() => kopieren.setText('Als Bild kopieren'), 1500);
-				}).catch(() => new Notice('Bild kopieren ging hier nicht.'));
-			};
+			const img = k.createEl('img', { cls: 'anki-lp-grafik', attr: { src: svgAdresse(e.svg), alt: e.titel } });
+			bildBedienbar(this.app, img, e.titel, () => svgAlsPng(e.svg));
+			this.bildFuss(k, () => svgAlsPng(e.svg));
 		} else if (e.art === 'rechnung') {
 			const k = karte(GRUEN, '=', e.ausdruck, 'Rechner');
 			k.createDiv({ cls: 'anki-lp-zeile anki-lp-stark', text: e.ergebnis?.text || e.ergebnis?.anzeige || JSON.stringify(e.ergebnis) });
 		}
 	}
 
+	private bildFuss(k: HTMLElement, png: () => Promise<Blob>, zotero?: string) {
+		const fuss = k.createDiv({ cls: 'anki-lp-fuss anki-lp-grafikfuss' });
+		if (zotero) fuss.createEl('a', { cls: 'anki-lp-zotero', href: zotero, text: 'In Zotero öffnen' });
+		const kopieren = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'Kopieren' });
+		kopieren.onclick = () => kopierenMitRueckmeldung(kopieren, png);
+		const gross = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'Vergrößern' });
+		gross.onclick = () => (k.querySelector('img') as HTMLImageElement | null)?.click();
+	}
+
 	private async chat(el: HTMLElement) {
 		const api = this.plugin.lernplanApi;
 		el.addClass('anki-lp-chatflaeche');
 		const kopf = el.createDiv({ cls: 'anki-lp-chatkopf' });
-		const titel = kopf.createDiv({ cls: 'anki-lp-chattitel', text: 'Lernchat' });
-		const verlaufKnopf = kopf.createEl('button', { cls: 'anki-lp-textknopf', text: 'Verlauf' });
-		const neuKnopf = kopf.createEl('button', { cls: 'anki-lp-textknopf', text: 'Neu' });
+		const kopfText = kopf.createDiv({ cls: 'anki-lp-chatkopftext' });
+		const titel = kopfText.createDiv({ cls: 'anki-lp-chattitel', text: 'Lernchat' });
+		const notiz = kopfText.createDiv({ cls: 'anki-lp-notiz' });
+		const ikon = (icon: string, name: string) => {
+			const b = kopf.createEl('button', { cls: 'anki-lp-ikon', attr: { 'aria-label': name, title: name } });
+			setIcon(b, icon);
+			return b;
+		};
+		const verlaufKnopf = ikon('history', 'Verlauf');
+		const neuKnopf = ikon('plus', 'Neuer Chat');
+		const mehr = ikon('more-horizontal', 'Mehr');
 		const verlauf = el.createDiv({ cls: 'anki-lp-chat' });
+		let chat: LernChatKopf | null = null;
+
+		// Notiz, auf die sich der Chat bezieht. Ein neuer Chat nimmt die offene, ein laufender bleibt bei seiner.
+		this.chatPfad = null;
+		let ohneNotiz = false;
+		const notizZeigen = () => {
+			notiz.empty();
+			const pfad = this.chatId ? chat?.pfad || null : (ohneNotiz ? null : this.offeneNotiz()?.path || null);
+			this.chatPfad = pfad;
+			if (!pfad) { notiz.setText('Ohne Notiz'); notiz.addClass('is-leer'); return; }
+			notiz.removeClass('is-leer');
+			const name = pfad.split('/').pop()?.replace(/\.md$/, '') || pfad;
+			const a = notiz.createEl('a', { text: name, attr: { title: pfad } });
+			setIcon(notiz.createSpan({ cls: 'anki-lp-notizzeichen' }), 'file-text');
+			notiz.prepend(notiz.lastChild as Node);
+			a.onclick = (ev) => void this.app.workspace.openLinkText(pfad, '', Keymap.isModEvent(ev));
+			const offen = this.offeneNotiz();
+			if (this.chatId && offen && offen.path !== pfad) {
+				const tausch = notiz.createEl('button', { cls: 'anki-lp-textknopf anki-lp-leise', text: `→ ${offen.basename}`, attr: { title: 'Chat an die offene Notiz hängen' } });
+				tausch.onclick = async () => { chat = await api.chatAendern(this.chatId as number, { pfad: offen.path }); notizZeigen(); };
+			}
+			if (!this.chatId) {
+				const x = notiz.createEl('button', { cls: 'anki-lp-textknopf anki-lp-leise anki-lp-notizweg', attr: { 'aria-label': 'Ohne Notiz', title: 'Neuen Chat ohne Notiz beginnen' } });
+				setIcon(x, 'x');
+				x.onclick = () => { ohneNotiz = true; notizZeigen(); };
+			}
+		};
+		this.notizChip = notizZeigen;
 
 		const liste = async () => {
 			verlauf.empty();
-			verlauf.createDiv({ cls: 'anki-lp-fab', text: 'Letzte Chats' });
-			const chats = await api.chatListe();
-			for (const c of chats) {
-				const b = verlauf.createEl('button', { cls: `anki-lp-fzeile${c.id === this.chatId ? ' is-aktiv' : ''}` });
-				b.createDiv({ cls: 'anki-lp-ftext', text: c.titel || 'Lernchat' });
-				b.onclick = () => { this.chatId = c.id; void this.zeigen(); };
-			}
-			if (!chats.length) verlauf.createDiv({ cls: 'anki-lp-fleer', text: 'Noch keine Chats' });
+			verlauf.addClass('is-liste');
+			const suche = verlauf.createEl('input', { cls: 'anki-lp-fsuche anki-lp-vsuche', attr: { type: 'search', placeholder: this.archiv ? 'Archiv durchsuchen' : 'Chats durchsuchen' } });
+			suche.value = this.suche;
+			const raum = verlauf.createDiv();
+			const chats = await api.chatListe(this.archiv);
+			const zeichnen = () => {
+				raum.empty();
+				const q = this.suche.trim().toLowerCase();
+				const treffer = chats.filter((c) => !q || `${c.titel || ''} ${c.pfad || ''}`.toLowerCase().includes(q));
+				for (const g of chatGruppen(treffer)) {
+					raum.createDiv({ cls: 'anki-lp-vgruppe', text: g.titel });
+					for (const c of g.chats) this.verlaufZeile(raum, c, () => { chats.splice(chats.indexOf(c), 1); zeichnen(); });
+				}
+				if (!treffer.length) raum.createDiv({ cls: 'anki-lp-fleer', text: q ? 'Nichts gefunden' : this.archiv ? 'Archiv ist leer' : 'Noch keine Chats' });
+			};
+			suche.oninput = () => { this.suche = suche.value; zeichnen(); };
+			zeichnen();
+			const fuss = verlauf.createDiv({ cls: 'anki-lp-vfuss' });
+			const wechsel = fuss.createEl('button', { cls: 'anki-lp-textknopf anki-lp-leise' });
+			setIcon(wechsel.createSpan(), this.archiv ? 'arrow-left' : 'archive');
+			wechsel.createSpan({ text: this.archiv ? 'Zurück zum Verlauf' : 'Archiv' });
+			wechsel.onclick = () => { this.archiv = !this.archiv; void liste(); };
 		};
 		let listeOffen = false;
-		verlaufKnopf.onclick = () => { listeOffen = !listeOffen; if (listeOffen) void liste(); else void this.zeigen(); };
-		neuKnopf.onclick = () => { this.chatId = null; void this.zeigen(); };
+		verlaufKnopf.onclick = () => { listeOffen = !listeOffen; verlaufKnopf.toggleClass('is-an', listeOffen); if (listeOffen) void liste(); else void this.zeigen(); };
+		neuKnopf.onclick = () => { this.chatId = null; this.archiv = false; void this.zeigen(); };
+		mehr.onclick = (ev) => {
+			const m = new Menu();
+			if (this.chatId && chat) {
+				const c = chat;
+				m.addItem((i) => i.setTitle(c.archiviert ? 'Aus dem Archiv holen' : 'Archivieren').setIcon(c.archiviert ? 'archive-restore' : 'archive').onClick(async () => {
+					await this.tun(() => api.chatAendern(c.id, { archiviert: !c.archiviert }));
+					if (!c.archiviert) this.chatId = null;
+					void this.zeigen();
+				}));
+				const offen = this.offeneNotiz();
+				if (offen && offen.path !== c.pfad) m.addItem((i) => i.setTitle(`An „${offen.basename}“ hängen`).setIcon('file-plus').onClick(async () => { chat = await api.chatAendern(c.id, { pfad: offen.path }); notizZeigen(); }));
+				if (c.pfad) m.addItem((i) => i.setTitle('Von der Notiz lösen').setIcon('file-x').onClick(async () => { chat = await api.chatAendern(c.id, { pfad: '' }); notizZeigen(); }));
+			}
+			if (!this.istGross()) m.addItem((i) => i.setTitle('Groß öffnen').setIcon('maximize-2').onClick(() => void this.plugin.lernplanGross('chat', this.chatId)));
+			m.showAtMouseEvent(ev);
+		};
 
 		if (this.chatId) {
 			const c = await api.chatLesen(this.chatId);
+			chat = c;
 			titel.setText(c.titel || 'Lernchat');
+			notizZeigen();
 			for (const m of c.nachrichten) this.nachricht(verlauf, m.rolle, m.content, m.einbettungen);
 			for (const p of (c.vorschlaege || []) as LernPunkt[]) if (p.typ in ART) this.punkt(verlauf, p);
 			verlauf.scrollTop = verlauf.scrollHeight;
-		} else await liste();
+		} else { notizZeigen(); await liste(); }
 
 		const ein = el.createDiv({ cls: 'anki-lp-ein' });
 		const feld = ein.createEl('textarea', { attr: { placeholder: 'Frage', rows: '1' } });
 		const senden = ein.createEl('button', { cls: 'anki-lp-senden', attr: { 'aria-label': 'Senden' } });
 		setIcon(senden, 'arrow-up');
+		const wahlZeile = createDiv({ cls: 'anki-lp-einfuss' });
+		el.insertBefore(wahlZeile, ein);
+		const wahl = wahlZeile.createEl('button', { cls: 'anki-lp-modellwahl', attr: { title: 'Modell und Denktiefe' } });
+		const wahlText = () => {
+			const s = this.plugin.settings;
+			const m = MODELLE.find(([k]) => k === (s.lernchatModell || 'sonnet'))?.[1] || 'Sonnet';
+			const d = DENKTIEFEN.find(([k]) => k === (s.lernchatDenken || ''))?.[1] || 'Standard';
+			wahl.setText(d === 'Standard' ? m : `${m} · ${d}`);
+		};
+		wahlText();
+		wahl.onclick = (ev) => {
+			const s = this.plugin.settings;
+			const m = new Menu();
+			for (const [k, name] of MODELLE) m.addItem((i) => i.setSection('modell').setTitle(name).setChecked((s.lernchatModell || 'sonnet') === k)
+				.onClick(async () => { s.lernchatModell = k; await this.plugin.saveSettings(); wahlText(); }));
+			for (const [k, name] of DENKTIEFEN) m.addItem((i) => i.setSection('denken').setTitle(`Denken: ${name}`).setChecked((s.lernchatDenken || '') === k)
+				.onClick(async () => { s.lernchatDenken = k || undefined; await this.plugin.saveSettings(); wahlText(); }));
+			m.showAtMouseEvent(ev);
+		};
 		feld.oninput = () => { feld.style.height = 'auto'; feld.style.height = `${Math.min(feld.scrollHeight, 160)}px`; };
 		const los = async () => {
 			const text = feld.value.trim();
@@ -278,7 +493,7 @@ export class LernplanView extends ItemView {
 			feld.value = '';
 			feld.style.height = 'auto';
 			senden.disabled = true;
-			if (!this.chatId) verlauf.empty();
+			if (!this.chatId) { verlauf.empty(); verlauf.removeClass('is-liste'); }
 			this.nachricht(verlauf, 'user', text, []);
 			const live = verlauf.createDiv({ cls: 'anki-lp-live' });
 			const schritte = live.createDiv({ cls: 'anki-lp-schritte' });
@@ -313,11 +528,13 @@ export class LernplanView extends ItemView {
 			verlauf.scrollTop = verlauf.scrollHeight;
 			try {
 				if (!this.chatId) {
-					const datei = this.app.workspace.getActiveFile();
-					this.chatId = (await api.chatAnlegen({ titel: text.slice(0, 80), pfad: datei?.extension === 'md' ? datei.path : undefined })).id;
+					chat = await api.chatAnlegen({ titel: text.slice(0, 80), pfad: this.chatPfad || undefined });
+					this.chatId = (chat as LernChatKopf).id;
 					titel.setText(text.slice(0, 80));
+					notizZeigen();
 				}
-				const ev = await api.chatFragen(this.chatId as number, text);
+				const s = this.plugin.settings;
+				const ev = await api.chatFragen(this.chatId as number, text, { modell: s.lernchatModell || undefined, denken: s.lernchatDenken || undefined });
 				live.remove();
 				const em = ev.filter((x) => x.einbettung).map((x) => x.einbettung);
 				const antwort = ev.find((x) => x.type === 'text')?.text || '';
@@ -335,6 +552,28 @@ export class LernplanView extends ItemView {
 		senden.onclick = () => void los();
 		feld.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void los(); } };
 		feld.focus();
+	}
+
+	private verlaufZeile(el: HTMLElement, c: LernChatKopf, weg: () => void) {
+		const z = el.createDiv({ cls: `anki-lp-vzeile${c.id === this.chatId ? ' is-aktiv' : ''}`, attr: { role: 'button', tabindex: '0' } });
+		const text = z.createDiv({ cls: 'anki-lp-vtext' });
+		text.createDiv({ cls: 'anki-lp-vtitel', text: c.titel || 'Lernchat' });
+		const notiz = c.pfad ? c.pfad.split('/').pop()?.replace(/\.md$/, '') : '';
+		const meta = [notiz, c.fragen ? `${c.fragen} ${c.fragen === 1 ? 'Frage' : 'Fragen'}` : ''].filter(Boolean).join(' · ');
+		if (meta) text.createDiv({ cls: 'anki-lp-vmeta', text: meta });
+		z.createDiv({ cls: 'anki-lp-vzeit', text: chatZeit(c.letzte) });
+		const ab = z.createEl('button', { cls: 'anki-lp-ikon anki-lp-varchiv', attr: { 'aria-label': c.archiviert ? 'Zurückholen' : 'Archivieren', title: c.archiviert ? 'Zurückholen' : 'Archivieren' } });
+		setIcon(ab, c.archiviert ? 'archive-restore' : 'archive');
+		ab.onclick = async (ev) => {
+			ev.stopPropagation();
+			if (await this.tun(() => this.plugin.lernplanApi.chatAendern(c.id, { archiviert: !c.archiviert }))) {
+				if (c.id === this.chatId) this.chatId = null;
+				weg();
+			}
+		};
+		const oeffnen = () => { this.chatId = c.id; this.archiv = false; void this.zeigen(); };
+		z.onclick = oeffnen;
+		z.onkeydown = (ev) => { if (ev.key === 'Enter') oeffnen(); };
 	}
 
 	private nachricht(el: HTMLElement, rolle: string, text: string, einbettungen: any[]) {

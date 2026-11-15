@@ -6,9 +6,12 @@ import { requestUrl } from 'obsidian';
  */
 export interface LernAufgabe { kw: number; jahr: number; index: number; text: string; kurz?: string; gruppe?: string | null; seite?: number | null; woche?: string; lernziel?: string; passt?: boolean; verknuepft?: boolean; }
 export interface LernChatLive { aktiv: boolean; schritte: string[]; text: string; einbettungen: any[]; }
-export interface LernChatKopf { id: number; titel?: string; }
-export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; }
+export interface LernChatKopf { id: number; titel?: string; pfad?: string | null; letzte?: string | null; fragen?: number; archiviert?: boolean; }
+export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; rueckbar?: boolean; grund?: string | null; grund_text?: string | null; notiz?: string | null; }
 export interface ChatEreignis { type: string; text?: string; name?: string; einbettung?: any; punkt?: LernPunkt; }
+
+export const MODELLE: [string, string][] = [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku']];
+export const DENKTIEFEN: [string, string][] = [['', 'Standard'], ['low', 'Wenig'], ['medium', 'Mittel'], ['high', 'Gründlich'], ['xhigh', 'Sehr gründlich'], ['max', 'Maximal']];
 
 export const GRUENDE: [string, string][] = [['falsch', 'Falsch'], ['unwichtig', 'Unwichtig'], ['zu_lang', 'Zu lang'], ['doppelt', 'Doppelt'], ['schon_klar', 'Schon klar']];
 
@@ -54,10 +57,11 @@ export class LernplanApi {
 	async punkt(id: number, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> { return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert })).json.punkt; }
 	async rueckmeldung(eintrag: Record<string, unknown>) { await this.ruf('/api/lernplan/rueckmeldung', 'POST', eintrag); }
 	async chatAnlegen(felder: Record<string, unknown>) { return (await this.ruf('/api/lernchat', 'POST', felder)).json; }
-	async chatListe(): Promise<LernChatKopf[]> { return (await this.ruf('/api/lernchat')).json.chats || []; }
+	async chatListe(archiv = false): Promise<LernChatKopf[]> { return (await this.ruf(`/api/lernchat${archiv ? '?archiv=true' : ''}`)).json.chats || []; }
+	async chatAendern(id: number, felder: { archiviert?: boolean; titel?: string; pfad?: string }): Promise<LernChatKopf> { return (await this.ruf(`/api/lernchat/${id}`, 'PATCH', felder)).json; }
 	async chatLive(id: number): Promise<LernChatLive> { return (await this.ruf(`/api/lernchat/${id}/live`)).json; }
 	async chatLesen(id: number) { return (await this.ruf(`/api/lernchat/${id}`)).json; }
-	async chatFragen(id: number, text: string): Promise<ChatEreignis[]> { return chatEreignisse((await this.ruf(`/api/lernchat/${id}/stream`, 'POST', { text })).text); }
+	async chatFragen(id: number, text: string, einstellung: { modell?: string; denken?: string } = {}): Promise<ChatEreignis[]> { return chatEreignisse((await this.ruf(`/api/lernchat/${id}/stream`, 'POST', { text, ...einstellung })).text); }
 }
 
 export interface AufgabenWoche { kw: number; titel?: string; lernziel?: string; gruppen: { titel: string | null; aufgaben: LernAufgabe[] }[]; }
@@ -76,4 +80,36 @@ export function aufgabenGliedern(aufgaben: LernAufgabe[], suche: string): { pass
 		g.aufgaben.push(a);
 	}
 	return { passend, wochen };
+}
+
+const TAG_MS = 86400000;
+const tagBeginn = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/** Verlauf nach Zeit: Heute, Gestern, Diese Woche (letzte 7 Tage), danach je Monat. */
+export function chatGruppen(chats: LernChatKopf[], jetzt = new Date()): { titel: string; chats: LernChatKopf[] }[] {
+	const heute = tagBeginn(jetzt);
+	const raus: { titel: string; chats: LernChatKopf[] }[] = [];
+	for (const c of chats) {
+		const d = c.letzte ? new Date(c.letzte) : null;
+		const t = d && !isNaN(d.getTime()) ? tagBeginn(d) : null;
+		const titel = t === null ? 'Älter'
+			: t >= heute ? 'Heute'
+			: t >= heute - TAG_MS ? 'Gestern'
+			: t >= heute - 6 * TAG_MS ? 'Diese Woche'
+			: (d as Date).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+		let g = raus.find((x) => x.titel === titel);
+		if (!g) { g = { titel, chats: [] }; raus.push(g); }
+		g.chats.push(c);
+	}
+	return raus;
+}
+
+/** Kurze Zeitangabe für die Verlaufszeile: 14:05, Mo, 03.11. */
+export function chatZeit(iso: string | null | undefined, jetzt = new Date()): string {
+	const d = iso ? new Date(iso) : null;
+	if (!d || isNaN(d.getTime())) return '';
+	const t = tagBeginn(d), heute = tagBeginn(jetzt);
+	if (t >= heute) return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false });
+	if (t >= heute - 6 * TAG_MS) return d.toLocaleDateString('de-DE', { weekday: 'short' }).replace('.', '');
+	return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear() === jetzt.getFullYear() ? '' : d.getFullYear()}`;
 }

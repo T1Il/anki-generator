@@ -1923,3 +1923,103 @@ button.anki-sy-deckwahl.anki-sy-deck { width: calc(100% - 70px); margin: 8px 20p
 .anki-sy-baum { border-top: 1px solid var(--lp-linie); min-height: 200px; }
 .anki-lp-fenster button.anki-lp-fzeile.anki-sy-ast { display: block; padding-left: calc(20px + var(--ebene, 0) * 18px) !important; }
 .anki-lp-fenster button.anki-sy-ast.is-aktiv { font-weight: 700 !important; color: var(--lp-lern); background: color-mix(in srgb, var(--lp-lern) 12%, transparent) !important; }
+
+/* Lernplan-Seitenleiste, Runde 15.11.2026: Durchgang ruhiger, Verlauf mit Archiv, Bilder groß und kopierbar */
+.anki-lp-reiter { align-items: center; }
+.anki-lp-reiter .anki-lp-gross { margin-left: auto; }
+button.anki-lp-ikon { flex: none; width: 30px; height: 30px; padding: 0 !important; display: grid; place-items: center; border: 0; border-radius: 8px !important; background: none !important; box-shadow: none !important; color: var(--text-muted) !important; cursor: pointer; }
+button.anki-lp-ikon:hover, button.anki-lp-ikon.is-an { background: var(--background-modifier-hover) !important; color: var(--text-normal) !important; }
+button.anki-lp-ikon svg { width: 17px; height: 17px; }
+.anki-lp.is-gross .anki-lp-inhalt-raum, .anki-lp.is-gross .anki-lp-chatflaeche { width: 100%; max-width: 820px; margin: 0 auto; }
+.anki-lp.is-gross .anki-lp-reiter { justify-content: center; }
+button.anki-lp-leise { color: var(--text-muted) !important; font-weight: 400; display: inline-flex; align-items: center; gap: 6px; }
+button.anki-lp-leise:hover { color: var(--text-normal) !important; }
+button.anki-lp-leise svg { width: 15px; height: 15px; }
+
+/* Durchgang */
+.anki-lp-dg { padding: 14px 16px 24px; }
+.anki-lp-dg .anki-lp-ziel { margin: 0 0 14px; padding: 0; background: none; font-size: 14px; line-height: 20px; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.anki-lp-dg .anki-lp-ziel.is-offen { -webkit-line-clamp: unset; }
+.anki-lp-dzeile { display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--lp-linie); }
+.anki-lp-dzeile > div { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.anki-lp-dzeile b { font: 500 17px/22px var(--lp-display); }
+.anki-lp-dzeile span { font-size: 13.5px; color: var(--text-muted); }
+.anki-lp-dzeile span.is-laeuft { color: var(--lp-moos); }
+.anki-lp-leer { color: var(--text-muted); }
+details.anki-lp-befund, details.anki-lp-erledigt { margin: 0 0 12px; border: 1px solid var(--lp-linie); border-radius: 10px; background: var(--lp-karte); }
+details.anki-lp-befund > summary, details.anki-lp-erledigt > summary { padding: 9px 12px; font-size: 13.5px; font-weight: 700; color: var(--text-muted); cursor: pointer; list-style: none; }
+details.anki-lp-befund > summary::-webkit-details-marker, details.anki-lp-erledigt > summary::-webkit-details-marker { display: none; }
+details.anki-lp-befund > summary::after, details.anki-lp-erledigt > summary::after { content: "›"; float: right; transition: transform .15s; }
+details[open].anki-lp-befund > summary::after, details[open].anki-lp-erledigt > summary::after { transform: rotate(90deg); }
+.anki-lp-befundtext { padding: 0 12px 10px; font-size: 14px; line-height: 1.45; }
+.anki-lp-befundtext ul { margin: 0; padding-left: 18px; }
+.anki-lp-befundtext p { margin: 0 0 6px; }
+.anki-lp-erow { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--lp-linie); }
+.anki-lp-punktfarbe { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.anki-lp-erow-text span { display: block; font-size: 14px; line-height: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-lp-erow-text small { font-size: 12.5px; color: var(--text-muted); }
+.anki-lp-dfuss { display: flex; justify-content: flex-end; }
+.anki-lp-vor.is-zu { border-left-width: 3px; }
+.anki-lp-vor.is-zu .anki-lp-zu { font-size: 14px; color: var(--text-muted); }
+
+/* Chatkopf mit Notiz */
+.anki-lp-chatkopf { align-items: center; gap: 2px; padding: 10px 8px 10px 16px; }
+.anki-lp-chatkopftext { flex: 1; min-width: 0; }
+.anki-lp-chatkopftext .anki-lp-chattitel { font-size: 17px; line-height: 22px; }
+.anki-lp-notiz { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
+.anki-lp-notiz a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lp-lern); text-decoration: none; cursor: pointer; }
+.anki-lp-notiz button.anki-lp-textknopf { font-size: 12.5px; white-space: nowrap; }
+.anki-lp-notizzeichen svg { width: 13px; height: 13px; vertical-align: -2px; }
+
+/* Verlauf */
+.anki-lp-chat.is-liste { padding: 10px 8px 14px; }
+.anki-lp-fsuche.anki-lp-vsuche[type="search"] { width: calc(100% - 16px); height: 36px; margin: 0 8px 4px; }
+.anki-lp-vgruppe { padding: 14px 10px 4px; font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); }
+.anki-lp-vzeile { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; align-items: start; padding: 8px 10px; border-radius: 9px; cursor: pointer; }
+.anki-lp-vzeile:hover, .anki-lp-vzeile:focus-visible { background: var(--background-modifier-hover); outline: none; }
+.anki-lp-vzeile.is-aktiv { background: color-mix(in srgb, var(--lp-lern) 13%, transparent); }
+.anki-lp-vtitel { font-size: 14.5px; line-height: 20px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.anki-lp-vmeta { margin-top: 1px; font-size: 12.5px; line-height: 17px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-lp-vzeit { font-size: 12.5px; line-height: 20px; color: var(--text-muted); white-space: nowrap; }
+.anki-lp-vzeile button.anki-lp-varchiv { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0; background: var(--background-secondary) !important; }
+.anki-lp-vzeile:hover button.anki-lp-varchiv, .anki-lp-vzeile:focus-within button.anki-lp-varchiv { opacity: 1; }
+@media (hover: none) { .anki-lp-vzeile { padding-right: 40px; } .anki-lp-vzeile button.anki-lp-varchiv { opacity: .7; background: none !important; } }
+.anki-lp-vfuss { display: flex; justify-content: center; padding: 16px 0 0; }
+
+/* Bilder: Lupe und Kopieren */
+img.anki-lp-zoombar { cursor: zoom-in; }
+.anki-lp-grafikfuss { gap: 16px; align-items: center; }
+.anki-lp-grafikfuss .anki-lp-zotero { margin-right: auto; }
+.modal.anki-lp-lupe { width: min(1200px, 96vw); height: min(900px, 92vh); max-width: none; max-height: none; display: flex; flex-direction: column; padding: 16px 0 0; }
+.anki-lp-lupe .modal-title { padding: 0 52px 10px 18px; font-size: 16px; }
+.anki-lp-lupe .modal-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.anki-lp-lupe-buehne { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; background: #fff; touch-action: pinch-zoom pan-x pan-y; }
+.anki-lp-lupe-buehne img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
+.anki-lp-lupe-buehne.is-gross { place-items: start; }
+.anki-lp-lupe-buehne.is-gross img { max-width: none; max-height: none; cursor: grab; }
+.anki-lp-lupe-leiste { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--background-modifier-border); }
+.anki-lp-lupe-leiste button svg { width: 16px; height: 16px; }
+.anki-lp-dzeile b { white-space: nowrap; }
+.anki-lp-dzeile span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-lp-notizweg svg { width: 13px; height: 13px; }
+.anki-lp-notiz button.anki-lp-leise { font-weight: 400 !important; color: var(--text-muted) !important; }
+
+/* Entschiedene Vorschläge: knapp, aufklappbar, rückgängig */
+.anki-lp-vor.is-zu { border-left-width: 3px; background: var(--lp-karte); }
+.anki-lp-vor.is-zu .anki-lp-zu { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 6px 8px 12px; color: var(--text-normal); font-size: 14px; }
+.anki-lp-zu-zeichen { color: var(--c); display: grid; place-items: center; }
+.anki-lp-zu-zeichen svg { width: 16px; height: 16px; }
+.anki-lp-zu-text span { display: block; line-height: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-lp-zu-text small { display: block; font-size: 12.5px; line-height: 17px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-lp-zu-knoepfe { display: flex; gap: 2px; }
+.anki-lp-zu-knoepfe button.is-an svg { transform: rotate(180deg); }
+.anki-lp-zu-inhalt { font-size: 14px; }
+a.anki-lp-zu-link { display: inline-block; margin-top: 8px; color: var(--lp-lern); font-weight: 700; font-size: 13.5px; cursor: pointer; text-decoration: none; }
+details.anki-lp-erledigt .anki-lp-vor { margin: 0; border: 0; border-top: 1px solid var(--lp-linie); border-radius: 0; }
+.anki-lp-erow, .anki-lp-punktfarbe { display: none; }
+
+/* Modellwahl unter dem Eingabefeld */
+.anki-lp-einfuss { flex: none; display: flex; justify-content: flex-end; padding: 4px 12px 0; border-top: 1px solid var(--lp-linie); }
+.anki-lp-einfuss + .anki-lp-ein { border-top: 0; padding-top: 2px; }
+button.anki-lp-modellwahl { height: auto; padding: 2px 6px !important; border: 0; background: none !important; box-shadow: none !important; color: var(--text-muted) !important; font-size: 12.5px; cursor: pointer; border-radius: 6px !important; }
+button.anki-lp-modellwahl:hover { color: var(--text-normal) !important; background: var(--background-modifier-hover) !important; }

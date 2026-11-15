@@ -55,6 +55,13 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		if (chat) v.oeffneChat(); else void v.zeigen();
 	}
 
+	/** Lernplan als großer Tab im Hauptbereich, mit demselben Reiter und Chat. */
+	async lernplanGross(reiter: 'durchgang' | 'chat', chatId: number | null) {
+		const leaf = this.app.workspace.getLeaf('tab');
+		await leaf.setViewState({ type: LERNPLAN_VIEW_TYPE, active: true, state: { reiter, chatId } });
+		this.app.workspace.revealLeaf(leaf);
+	}
+
 	async notizMitAufgabeVerknuepfen() {
 		const datei = this.app.workspace.getActiveFile();
 		if (!datei || datei.extension !== 'md') { new Notice('Keine Notiz geöffnet.'); return; }
@@ -95,10 +102,12 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		this.registerEditorExtension(legacyAnkiStateField);
 
 		this.registerView(LERNPLAN_VIEW_TYPE, (leaf) => new LernplanView(leaf, this));
+		this.registerHoverLinkSource(LERNPLAN_VIEW_TYPE, { display: 'Lernplan', defaultMod: true });
 		this.addCommand({ id: 'lernplan-notiz-verknuepfen', name: 'Notiz mit Lernplan-Aufgabe verknüpfen', callback: () => void this.notizMitAufgabeVerknuepfen() });
 		this.addCommand({ id: 'lernplan-durchgang-starten', name: 'Durchgang für Aufgaben starten', callback: () => void this.durchgangWaehlen() });
 		this.addCommand({ id: 'lernplan-oeffnen', name: 'Lernplan und Vorschläge öffnen', callback: () => void this.lernplanOeffnen() });
 		this.addCommand({ id: 'lernplan-chat', name: 'Lernchat öffnen', callback: () => void this.lernplanOeffnen(true) });
+		this.addCommand({ id: 'lernplan-chat-gross', name: 'Lernchat groß öffnen', callback: () => void this.lernplanGross('chat', null) });
 
 		// REGISTER FEEDBACK VIEW
 		this.registerView(
