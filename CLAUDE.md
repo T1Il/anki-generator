@@ -12,6 +12,7 @@ Obsidian plugin that generates Anki flashcards from note content using LLMs (Ant
 npm install          # Install dependencies
 npm run dev          # esbuild watch mode (rebuilds on changes)
 npm run build        # TypeScript type-check + production bundle
+npm run kartenregeln # Export card rules (default prompt + KARTEN_QUALITAET) to the Fitness-Manager card run (tools/lerndurchgang/KARTENREGELN.md) — rerun after changing them
 npm test             # Fixture tests (parser, chat, apply, Anki comparison)
 npm run version      # Bump version in manifest.json & versions.json
 git tag <version> && git push origin master <version>   # Release: the tag builds the GitHub release (BRAT)
