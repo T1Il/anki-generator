@@ -4,7 +4,7 @@ import { Card } from '../types';
 import { deleteAnkiNotes, createAnkiDeck, findAnkiNoteId, findAnkiClozeNoteId, updateAnkiNoteFields, updateAnkiClozeNoteFields, addAnkiNote, addAnkiClozeNote, storeAnkiMediaFile } from './AnkiConnect';
 import { arrayBufferToBase64, basicMarkdownToHtml, convertObsidianLatexToAnki, convertObsidianLinks } from '../utils';
 import { latexZuKlartext } from '../latexPlain';
-import { alsPng, brauchtUmwandlung, pngName } from './anhangBild';
+import { alsPng, aufWeiss, brauchtUmwandlung, pngName } from './anhangBild';
 import { containsMermaid, processMermaidBlocks } from '../mermaidRenderer';
 import { findSpecificAnkiBlock, formatCardsToString, buildFullBlock, hasCloze, parseBlockHeader, cleanBlockInner } from './ankiParser';
 
@@ -56,6 +56,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
         // --- STEP 1: Process Images (Batch) ---
         // Collect all images first
         const imageMap = new Map<string, TFile>(); // Name -> TFile
+        const umbenannt = new Map<string, string>(); // Name -> Dateiname in Anki, wenn auf Weiß gelegt
         const uniqueImageNames = new Set<string>();
 
         const extractImages = (text: string) => {
@@ -102,6 +103,13 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                         continue;
                     }
                     imageMap.set(name, imgFile);
+                    // Durchsichtige Bilder auf Weiß, sonst ist dunkle Schrift in Ankis dunkler Ansicht unlesbar.
+                    const weiss = await aufWeiss(plugin.app, imgFile);
+                    if (weiss) {
+                        umbenannt.set(name, weiss.name);
+                        filesToUpload.push({ filename: weiss.name, data: weiss.data });
+                        continue;
+                    }
                     try {
                         const fileData = await plugin.app.vault.readBinary(imgFile);
                         const base64Data = arrayBufferToBase64(fileData);
@@ -121,7 +129,7 @@ export async function syncAnkiBlock(plugin: AnkiGeneratorPlugin, originalSourceC
                         uploadedImageMap.set(f.filename, ankiName);
                         // Also map the keys from uniqueImageNames that resolved to this file
                         for (const [origName, tfile] of imageMap.entries()) {
-                            if (tfile.name === f.filename || (brauchtUmwandlung(tfile) && pngName(tfile) === f.filename)) {
+                            if (tfile.name === f.filename || umbenannt.get(origName) === f.filename || (brauchtUmwandlung(tfile) && pngName(tfile) === f.filename)) {
                                 uploadedImageMap.set(origName, ankiName);
                             }
                         }

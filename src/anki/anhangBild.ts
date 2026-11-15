@@ -92,3 +92,48 @@ async function excalidrawAlsPng(app: App, file: TFile): Promise<string | null> {
 	if (!blob) return null;
 	return arrayBufferToBase64(await blob.arrayBuffer());
 }
+
+/**
+ * Durchsichtige Bilder auf Weiß (15.11.2026): Schaubilder mit transparentem Hintergrund und dunkler Schrift
+ * waren in Ankis dunkler Ansicht unlesbar. Die Datei im Vault bleibt, nur die Anki-Kopie bekommt den weißen Grund.
+ */
+export function hatTransparenz(rgba: Uint8ClampedArray, schwelle = 250): boolean {
+	for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < schwelle) return true;
+	return false;
+}
+
+/** PNG, WebP oder SVG mit Transparenz → PNG auf Weiß (Base64); null = so lassen. Name: PNG behält ihn, sonst `.png` angehängt. */
+export async function aufWeiss(app: App, file: TFile): Promise<{ name: string; data: string } | null> {
+	const ext = file.extension.toLowerCase();
+	if (!['png', 'webp', 'svg'].includes(ext)) return null;
+	try {
+		const roh = await app.vault.readBinary(file);
+		const typ = ext === 'svg' ? 'image/svg+xml' : `image/${ext}`;
+		const url = URL.createObjectURL(new Blob([roh], { type: typ }));
+		try {
+			const bild = await new Promise<HTMLImageElement>((ok, fehler) => {
+				const i = new Image();
+				i.onload = () => ok(i);
+				i.onerror = () => fehler(new Error('Bild nicht lesbar'));
+				i.src = url;
+			});
+			const faktor = ext === 'svg' ? Math.max(1, ZIELBREITE / (bild.naturalWidth || ZIELBREITE)) : 1;
+			const b = Math.round((bild.naturalWidth || 300) * faktor), h = Math.round((bild.naturalHeight || 150) * faktor);
+			const canvas = document.createElement('canvas');
+			canvas.width = b; canvas.height = h;
+			const ctx = canvas.getContext('2d');
+			if (!ctx) return null;
+			ctx.drawImage(bild, 0, 0, b, h);
+			if (ext !== 'svg' && !hatTransparenz(ctx.getImageData(0, 0, b, h).data)) return null;
+			ctx.globalCompositeOperation = 'destination-over';
+			ctx.fillStyle = '#ffffff';
+			ctx.fillRect(0, 0, b, h);
+			const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, 'image/png'));
+			if (!blob) return null;
+			return { name: ext === 'png' ? file.name : `${file.name}.png`, data: arrayBufferToBase64(await blob.arrayBuffer()) };
+		} finally { URL.revokeObjectURL(url); }
+	} catch (e) {
+		console.error('[Anhang] Transparenzprüfung fehlgeschlagen:', file.path, e);
+		return null;
+	}
+}
