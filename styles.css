@@ -2067,3 +2067,7 @@ button.anki-lp-verweis.is-kaputt { border-color: var(--text-error) !important; c
 .anki-lp-pille.is-block { background: color-mix(in srgb, var(--lp-moos) 16%, transparent); color: var(--lp-moos); }
 .anki-lp-verweise { display: none !important; }
 .anki-lp-ohne-karten { color: var(--color-orange, #c77700); font-weight: 600; }
+a.anki-lp-zurstelle { display: inline-flex; align-items: center; gap: 3px; justify-content: flex-end; min-width: 0; color: var(--lp-lern); font-size: var(--font-ui-small); text-decoration: none; cursor: pointer; overflow: hidden; white-space: nowrap; }
+a.anki-lp-zurstelle:hover { text-decoration: underline; }
+a.anki-lp-zurstelle svg { flex: none; width: 13px; height: 13px; }
+.anki-lp-befundtext li { margin: 0 0 4px; } .anki-lp-befundtext li > p { margin: 0; } .anki-lp-befundtext ul { margin: 0 !important; }

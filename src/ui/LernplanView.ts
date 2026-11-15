@@ -83,14 +83,17 @@ export class LernplanView extends ItemView {
 	private async durchgang(el: HTMLElement) {
 		const api = this.plugin.lernplanApi;
 		const plan = await api.plan();
-		const w = plan.vorarbeit || plan.woche;
 		el.addClass('anki-lp-dg');
-		if (!w) { el.createDiv({ text: 'Keine laufende Woche.', cls: 'anki-lp-leer' }); return; }
+		const basis = plan.woche || plan.vorarbeit;
+		if (!basis) { el.createDiv({ text: 'Keine laufende Woche.', cls: 'anki-lp-leer' }); return; }
+		// Von der laufenden Woche aus mit `auch_spaeter`: so bleibt ihr Durchgang mit offenen Punkten sichtbar,
+		// auch wenn schon die Vorarbeit für die nächste Woche läuft; ein neuerer Lauf der Vorarbeit gewinnt.
+		const d = await api.durchgang(basis.kw, basis.jahr);
+		const w = (d?.kw && [plan.woche, plan.vorarbeit].find((x: any) => x?.kw === d.kw)) || plan.vorarbeit || plan.woche;
 		if (w.lernziel) {
 			const ziel = el.createDiv({ text: w.lernziel, cls: 'anki-lp-ziel', attr: { title: 'Lernziel' } });
 			ziel.onclick = () => ziel.toggleClass('is-offen', !ziel.hasClass('is-offen'));
 		}
-		const d = await api.durchgang(w.kw, w.jahr);
 		const punkte = ((d?.punkte || []) as LernPunkt[]).filter((p) => p.typ in ART);
 		const offen = punkte.filter((p) => p.status === 'offen');
 		const erledigt = punkte.filter((p) => p.status !== 'offen');
@@ -120,12 +123,17 @@ export class LernplanView extends ItemView {
 			befund.createEl('summary', { text: 'Befund' });
 			this.md(befund.createDiv({ cls: 'anki-lp-befundtext' }), d.kurzbefund);
 		}
-		for (const p of offen) this.punkt(el, p, () => void this.zeigen());
+		const offenBox = el.createDiv({ cls: 'anki-lp-offen' });
+		const zaehlen = () => {
+			const n = offenBox.querySelectorAll(':scope > .anki-lp-vor:not(.is-zu)').length;
+			links.querySelector('span')?.setText(n ? `${n} offen · ${punkte.length} Punkte` : `${punkte.length} Punkte, alles entschieden`);
+		};
+		for (const p of offen) this.punkt(offenBox, p, zaehlen);
 		if (erledigt.length) {
-			const box = el.createEl('details', { cls: 'anki-lp-erledigt' });
+			const liste = el.createEl('details', { cls: 'anki-lp-erledigt' });
 			const zahl = (s: string) => erledigt.filter((p) => p.status === s).length;
-			box.createEl('summary', { text: [`${zahl('uebernommen')} übernommen`, zahl('verworfen') && `${zahl('verworfen')} verworfen`].filter(Boolean).join(' · ') });
-			for (const p of erledigt) this.punkt(box, p, () => void this.zeigen());
+			liste.createEl('summary', { text: [`${zahl('uebernommen')} übernommen`, zahl('verworfen') && `${zahl('verworfen')} verworfen`].filter(Boolean).join(' · ') });
+			for (const p of erledigt) this.punkt(liste, p, zaehlen);
 		}
 		if (!offen.length && !laeuft) {
 			const fuss = el.createDiv({ cls: 'anki-lp-dfuss' });
@@ -147,8 +155,9 @@ export class LernplanView extends ItemView {
 		box.style.setProperty('--c', farbe);
 		const neu = (r: LernPunkt | null) => {
 			if (!r) return;
-			if (nachher && r.status !== 'konflikt') { nachher(); return; }
-			this.punktZeichnen(box, r, nachher);
+			// Nur dieser Vorschlag wechselt sein Aussehen; die Ansicht bleibt stehen. `nachher` zählt danach nach.
+			this.punktZeichnen(box, { ...p, ...r }, nachher);
+			nachher?.();
 		};
 		const titelText = p.ueberschrift || (p.pfad || '').split('/').pop()?.replace(/\.md$/, '') || art;
 		const inhalt = (ziel: HTMLElement) => {
@@ -190,7 +199,7 @@ export class LernplanView extends ItemView {
 					if (p.grund || p.grund_text) koerper.createDiv({ cls: 'anki-lp-beleg', text: `Grund: ${p.grund_text || GRUENDE.find(([k]) => k === p.grund)?.[1] || p.grund}` });
 					if (p.pfad) {
 						const a = koerper.createEl('a', { cls: 'anki-lp-zu-link', text: `In ${notiz || 'Notiz'} ansehen` });
-						a.onclick = (ev) => void this.notizAnStelle(p.pfad as string, p.typ === 'karte' ? p.vorne : p.neu, Keymap.isModEvent(ev));
+						a.onclick = (ev) => void this.zurStelle(p, Keymap.isModEvent(ev));
 					}
 				}
 				const offen = !koerper.isShown();
@@ -202,7 +211,11 @@ export class LernplanView extends ItemView {
 
 		const kopf = box.createDiv({ cls: 'anki-lp-vkopf' });
 		kopf.createEl('b', { text: art });
-		kopf.createSpan({ text: titelText });
+		if (p.pfad) {
+			const zu = kopf.createEl('a', { cls: 'anki-lp-zurstelle', text: titelText, attr: { title: `Zur Stelle in ${p.pfad.split('/').pop()?.replace(/\.md$/, '')}` } });
+			setIcon(zu.createSpan(), 'arrow-up-right');
+			zu.onclick = (ev) => void this.zurStelle(p, Keymap.isModEvent(ev));
+		} else kopf.createSpan({ text: titelText });
 		if (p.status === 'konflikt') box.createDiv({ cls: 'anki-lp-fehler anki-lp-warum', text: 'Die Stelle steht so nicht mehr in der Notiz. Bearbeiten oder verwerfen.' });
 		if (p.text) this.md(box.createDiv({ cls: 'anki-lp-warum' }), p.text, p.pfad);
 		const ansicht = box.createDiv({ cls: 'anki-lp-inhalt' });
@@ -258,18 +271,31 @@ export class LernplanView extends ItemView {
 		};
 	}
 
-	/** Notiz öffnen und, wenn der Text noch dasteht, dorthin springen und ihn markieren. */
-	private async notizAnStelle(pfad: string, text: string | undefined, neuerTab: PaneType | boolean) {
-		await this.app.workspace.openLinkText(pfad, '', neuerTab || (this.istGross() ? 'tab' : false));
-		const zeile = (text || '').split('\n').map((z) => z.trim()).find((z) => z.length > 8);
+	/**
+	 * Zur Stelle eines Vorschlags: Anker vom Server (`stelle`: #^block oder #Überschrift) öffnen, dann den
+	 * betroffenen Text markieren. Gesucht wird, was jetzt dasteht: alt (Korrektur offen), neu (übernommen),
+	 * die Zeile davor (Ergänzung), die Frage (Karte).
+	 */
+	private async zurStelle(p: LernPunkt, neuerTab: PaneType | boolean) {
+		if (!p.pfad) return;
+		let ziel = p.pfad.replace(/\.md$/, '');
+		const datei = p.stelle?.match(/[?&]file=([^&]+)/)?.[1];
+		if (datei) { try { ziel = decodeURIComponent(datei); } catch { /* Pfad bleibt */ } }
+		await this.app.workspace.openLinkText(ziel, '', neuerTab || (this.istGross() ? 'tab' : false));
 		const ed = this.app.workspace.activeEditor?.editor;
-		if (!ed || !zeile) return;
+		if (!ed) return;
 		const inhalt = ed.getValue();
-		const stelle = inhalt.indexOf(zeile.replace(/^[-*>]+\s*/, '').slice(0, 60));
-		if (stelle < 0) return;
-		const von = ed.offsetToPos(stelle), bis = ed.offsetToPos(stelle + Math.min(zeile.length, 60));
-		ed.setSelection(von, bis);
-		ed.scrollIntoView({ from: von, to: bis }, true);
+		const kandidaten: (string | null | undefined)[] = [...(p.status === 'uebernommen' ? [p.neu, p.alt] : [p.alt, p.neu]), p.nach, p.zeile, p.vorne ? `Q: ${p.vorne}` : null];
+		for (const k of kandidaten) {
+			const zeile = (k || '').split('\n').map((z) => z.trim().replace(/^[-*>]+\s*/, '')).find((z) => z.length > 6);
+			if (!zeile) continue;
+			const stelle = inhalt.indexOf(zeile.slice(0, 80));
+			if (stelle < 0) continue;
+			const von = ed.offsetToPos(stelle), bis = ed.offsetToPos(stelle + Math.min(zeile.length, 80));
+			ed.setSelection(von, bis);
+			ed.scrollIntoView({ from: von, to: bis }, true);
+			return;
+		}
 	}
 
 	private async tun<T>(fn: () => Promise<T>): Promise<T | null> {

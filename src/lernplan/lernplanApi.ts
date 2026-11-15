@@ -17,7 +17,7 @@ export function kartenText(k?: KartenStand): string {
 
 export interface LernChatLive { aktiv: boolean; schritte: string[]; text: string; einbettungen: any[]; }
 export interface LernChatKopf { id: number; titel?: string; pfad?: string | null; letzte?: string | null; fragen?: number; archiviert?: boolean; }
-export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; rueckbar?: boolean; grund?: string | null; grund_text?: string | null; notiz?: string | null; }
+export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; rueckbar?: boolean; stelle?: string | null; nach?: string | null; zeile?: string | null; grund?: string | null; grund_text?: string | null; notiz?: string | null; }
 export interface ChatEreignis { type: string; text?: string; name?: string; einbettung?: any; punkt?: LernPunkt; }
 
 export const MODELLE: [string, string][] = [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku']];
