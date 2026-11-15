@@ -47,7 +47,7 @@ export class LernplanView extends ItemView {
 	/** Markierten Text als Zitat in einen neuen Chat; die Notiz der Markierung wird der Bezug. */
 	fragenMitAuswahl(text: string) {
 		this.chatId = null;
-		this.vorlage = `${text.trim().split('\n').map((z) => `> ${z}`).join('\n')}\n\n`;
+		this.vorlage = `${text.trim().split('\n').map((z) => `> ${z.replace(/^(\s*>)+\s?/, '')}`).join('\n')}\n\n`;
 		this.oeffneChat();
 	}
 
@@ -501,7 +501,7 @@ export class LernplanView extends ItemView {
 			for (const m of c.nachrichten) this.nachricht(verlauf, m.rolle, m.content, m.einbettungen);
 			for (const p of (c.vorschlaege || []) as LernPunkt[]) if (p.typ in ART) this.punkt(verlauf, p);
 			verlauf.scrollTop = verlauf.scrollHeight;
-		} else { notizZeigen(); await liste(); }
+		} else { notizZeigen(); verlauf.createDiv({ cls: 'anki-lp-fleer', text: 'Lädt …' }); void liste().catch((e) => { verlauf.empty(); verlauf.createDiv({ cls: 'anki-lp-fehler', text: e?.message || String(e) }); }); }
 
 		const ein = el.createDiv({ cls: 'anki-lp-ein' });
 		const feld = ein.createEl('textarea', { attr: { placeholder: 'Frage', rows: '1' } });
