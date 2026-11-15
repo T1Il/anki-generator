@@ -99,7 +99,7 @@ export class BildLupe extends Modal {
 }
 
 /** Ein Bild im Chat: Klick öffnet die Lupe, Rechtsklick bzw. langes Drücken das Menü. */
-export function bildBedienbar(app: App, img: HTMLImageElement, titel: string, png: () => Promise<Blob>, extern?: string) {
+export function bildBedienbar(app: App, img: HTMLImageElement, titel: string, png: () => Promise<Blob>, extern?: string, inNotiz?: () => void) {
 	img.addClass('anki-lp-zoombar');
 	img.onclick = (e) => { e.preventDefault(); e.stopPropagation(); new BildLupe(app, img.src, titel, png).open(); };
 	img.addEventListener('contextmenu', (e) => {
@@ -107,6 +107,7 @@ export function bildBedienbar(app: App, img: HTMLImageElement, titel: string, pn
 		const m = new Menu();
 		m.addItem((i) => i.setTitle('Bild kopieren').setIcon('copy').onClick(() => kopierenMitRueckmeldung(null, png)));
 		m.addItem((i) => i.setTitle('Vergrößern').setIcon('maximize-2').onClick(() => new BildLupe(app, img.src, titel, png).open()));
+		if (inNotiz) m.addItem((i) => i.setTitle('In Notiz einfügen').setIcon('image-plus').onClick(inNotiz));
 		if (extern) m.addItem((i) => i.setTitle('In Zotero öffnen').setIcon('external-link').onClick(() => window.open(extern)));
 		m.showAtMouseEvent(e);
 	});

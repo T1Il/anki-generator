@@ -2,6 +2,7 @@ import { ItemView, Keymap, MarkdownRenderer, Menu, Notice, PaneType, setIcon, TF
 import AnkiGeneratorPlugin from '../main';
 import { chatGruppen, chatZeit, DENKTIEFEN, GRUENDE, LernChatKopf, LernPunkt, MODELLE } from '../lernplan/lernplanApi';
 import { bildAlsPng, bildBedienbar, kopierenMitRueckmeldung, svgAdresse, svgAlsPng } from './lernBild';
+import { NameModal } from './LernplanModals';
 
 
 export const LERNPLAN_VIEW_TYPE = 'anki-lernplan-view';
@@ -19,6 +20,7 @@ export class LernplanView extends ItemView {
 	private archiv = false;
 	private suche = '';
 	private notizChip: (() => void) | null = null;
+	private vorlage: string | null = null;
 	constructor(leaf: WorkspaceLeaf, private plugin: AnkiGeneratorPlugin) { super(leaf); }
 
 	getState() { return { reiter: this.reiter, chatId: this.chatId }; }
@@ -41,6 +43,13 @@ export class LernplanView extends ItemView {
 	}
 
 	oeffneChat() { this.reiter = 'chat'; void this.zeigen(); }
+
+	/** Markierten Text als Zitat in einen neuen Chat; die Notiz der Markierung wird der Bezug. */
+	fragenMitAuswahl(text: string) {
+		this.chatId = null;
+		this.vorlage = `${text.trim().split('\n').map((z) => `> ${z}`).join('\n')}\n\n`;
+		this.oeffneChat();
+	}
 
 	private offeneNotiz(): TFile | null {
 		const f = this.app.workspace.getActiveFile();
@@ -291,7 +300,7 @@ export class LernplanView extends ItemView {
 		img.alt = alt;
 		img.onload = () => {
 			rahmen.empty(); rahmen.removeClass('anki-lp-bild'); rahmen.appendChild(img);
-			bildBedienbar(this.app, img, alt, () => bildAlsPng(src), extern);
+			bildBedienbar(this.app, img, alt, () => bildAlsPng(src), extern, () => void this.bildInNotiz(() => bildAlsPng(src), alt));
 		};
 		img.onerror = () => {
 			if (versuch < 3) { window.setTimeout(() => this.bild(rahmen, src, alt, versuch + 1, extern), 8000); return; }
@@ -338,27 +347,50 @@ export class LernplanView extends ItemView {
 		} else if (e.art === 'seite') {
 			const k = karte(BLAU, '▦', e.titel || 'Abbildung', `S. ${e.seite}`);
 			this.bild(k, basis + e.bild, e.titel || '', 0, e.zotero);
-			this.bildFuss(k, () => bildAlsPng(basis + e.bild), e.zotero);
+			this.bildFuss(k, () => bildAlsPng(basis + e.bild), e.titel || `Seite ${e.seite}`, e.zotero);
 		} else if (e.art === 'bild') {
 			const k = karte(BLAU, 'N', e.titel || 'Bild', 'Notiz');
 			this.bild(k, basis + e.bild, e.titel || '');
-			this.bildFuss(k, () => bildAlsPng(basis + e.bild));
+			this.bildFuss(k, () => bildAlsPng(basis + e.bild), e.titel || 'Abbildung');
 		} else if (e.art === 'grafik') {
 			const k = karte(GRUEN, '✎', e.titel, 'Eigene Skizze');
 			const img = k.createEl('img', { cls: 'anki-lp-grafik', attr: { src: svgAdresse(e.svg), alt: e.titel } });
-			bildBedienbar(this.app, img, e.titel, () => svgAlsPng(e.svg));
-			this.bildFuss(k, () => svgAlsPng(e.svg));
+			bildBedienbar(this.app, img, e.titel, () => svgAlsPng(e.svg), undefined, () => void this.bildInNotiz(() => svgAlsPng(e.svg), e.titel));
+			this.bildFuss(k, () => svgAlsPng(e.svg), e.titel || 'Skizze');
 		} else if (e.art === 'rechnung') {
 			const k = karte(GRUEN, '=', e.ausdruck, 'Rechner');
 			k.createDiv({ cls: 'anki-lp-zeile anki-lp-stark', text: e.ergebnis?.text || e.ergebnis?.anzeige || JSON.stringify(e.ergebnis) });
 		}
 	}
 
-	private bildFuss(k: HTMLElement, png: () => Promise<Blob>, zotero?: string) {
+	/** Bild als PNG neben die Notiz (Anhangsordner aus den Obsidian-Einstellungen) und an der Schreibmarke einbetten. */
+	private async bildInNotiz(png: () => Promise<Blob>, titel: string) {
+		const pfad = this.chatPfad || this.offeneNotiz()?.path;
+		const ziel = pfad ? this.app.vault.getAbstractFileByPath(pfad) : null;
+		if (!(ziel instanceof TFile)) { new Notice('Keine Notiz offen.'); return; }
+		try {
+			const name = (titel || 'Lernchat-Abbildung').replace(/[\\/:*?"<>|#^[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Lernchat-Abbildung';
+			const ablage = await this.app.fileManager.getAvailablePathForAttachment(`${name}.png`, ziel.path);
+			const datei = await this.app.vault.createBinary(ablage, await (await png()).arrayBuffer());
+			const link = `${this.app.fileManager.generateMarkdownLink(datei, ziel.path)}\n`;
+			const ansicht = this.app.workspace.getLeavesOfType('markdown').map((l) => l.view as any).find((v) => v?.file?.path === ziel.path);
+			if (ansicht?.editor) {
+				ansicht.editor.replaceSelection(link);
+				new Notice(`Bild in „${ziel.basename}“ eingefügt`);
+			} else {
+				await navigator.clipboard.writeText(link.trim());
+				new Notice(`Bild gespeichert (${datei.name}), Link kopiert`);
+			}
+		} catch (e: any) { new Notice(`Bild nicht gespeichert: ${e?.message || e}`); }
+	}
+
+	private bildFuss(k: HTMLElement, png: () => Promise<Blob>, titel: string, zotero?: string) {
 		const fuss = k.createDiv({ cls: 'anki-lp-fuss anki-lp-grafikfuss' });
 		if (zotero) fuss.createEl('a', { cls: 'anki-lp-zotero', href: zotero, text: 'In Zotero öffnen' });
 		const kopieren = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'Kopieren' });
 		kopieren.onclick = () => kopierenMitRueckmeldung(kopieren, png);
+		const notiz = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'In Notiz' });
+		notiz.onclick = () => void this.bildInNotiz(png, titel);
 		const gross = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'Vergrößern' });
 		gross.onclick = () => (k.querySelector('img') as HTMLImageElement | null)?.click();
 	}
@@ -368,7 +400,11 @@ export class LernplanView extends ItemView {
 		el.addClass('anki-lp-chatflaeche');
 		const kopf = el.createDiv({ cls: 'anki-lp-chatkopf' });
 		const kopfText = kopf.createDiv({ cls: 'anki-lp-chatkopftext' });
-		const titel = kopfText.createDiv({ cls: 'anki-lp-chattitel', text: 'Lernchat' });
+		const titel = kopfText.createDiv({ cls: 'anki-lp-chattitel', text: 'Lernchat', attr: { title: 'Doppelklick zum Umbenennen' } });
+		titel.ondblclick = () => { if (this.chatId && chat) new NameModal(this.app, 'Chat umbenennen', chat.titel || '', async (w) => {
+			const r = await this.tun(() => api.chatAendern(this.chatId as number, { titel: w }));
+			if (r) { chat = r; titel.setText(r.titel || w); }
+		}).open(); };
 		const notiz = kopfText.createDiv({ cls: 'anki-lp-notiz' });
 		const ikon = (icon: string, name: string) => {
 			const b = kopf.createEl('button', { cls: 'anki-lp-ikon', attr: { 'aria-label': name, title: name } });
@@ -440,6 +476,10 @@ export class LernplanView extends ItemView {
 			const m = new Menu();
 			if (this.chatId && chat) {
 				const c = chat;
+				m.addItem((i) => i.setTitle('Umbenennen').setIcon('pencil').onClick(() => new NameModal(this.app, 'Chat umbenennen', c.titel || '', async (w) => {
+					const r = await this.tun(() => api.chatAendern(c.id, { titel: w }));
+					if (r) { chat = r; titel.setText(r.titel || w); }
+				}).open()));
 				m.addItem((i) => i.setTitle(c.archiviert ? 'Aus dem Archiv holen' : 'Archivieren').setIcon(c.archiviert ? 'archive-restore' : 'archive').onClick(async () => {
 					await this.tun(() => api.chatAendern(c.id, { archiviert: !c.archiviert }));
 					if (!c.archiviert) this.chatId = null;
@@ -542,6 +582,7 @@ export class LernplanView extends ItemView {
 				for (const x of ev) {
 					if (x.type === 'fehler') verlauf.createDiv({ text: x.text, cls: 'anki-lp-fehler' });
 					if (x.type === 'vorschlag' && x.punkt && x.punkt.typ in ART) this.punkt(verlauf, x.punkt);
+					if (x.type === 'titel' && x.text) { titel.setText(x.text); if (chat) chat.titel = x.text; }
 				}
 			} catch (e: any) { live.remove(); verlauf.createDiv({ text: e?.message || String(e), cls: 'anki-lp-fehler' }); } finally {
 				window.clearInterval(uhr);
@@ -551,6 +592,12 @@ export class LernplanView extends ItemView {
 		};
 		senden.onclick = () => void los();
 		feld.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void los(); } };
+		if (this.vorlage) {
+			feld.value = this.vorlage;
+			this.vorlage = null;
+			feld.style.height = `${Math.min(feld.scrollHeight, 160)}px`;
+			feld.setSelectionRange(feld.value.length, feld.value.length);
+		}
 		feld.focus();
 	}
 

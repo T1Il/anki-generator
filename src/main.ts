@@ -55,6 +55,12 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		if (chat) v.oeffneChat(); else void v.zeigen();
 	}
 
+	async lernchatMitAuswahl(text: string) {
+		await this.lernplanOeffnen();
+		const leaf = this.app.workspace.getLeavesOfType(LERNPLAN_VIEW_TYPE)[0];
+		(leaf?.view as LernplanView | undefined)?.fragenMitAuswahl(text);
+	}
+
 	/** Lernplan als großer Tab im Hauptbereich, mit demselben Reiter und Chat. */
 	async lernplanGross(reiter: 'durchgang' | 'chat', chatId: number | null) {
 		const leaf = this.app.workspace.getLeaf('tab');
@@ -107,6 +113,16 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		this.addCommand({ id: 'lernplan-durchgang-starten', name: 'Durchgang für Aufgaben starten', callback: () => void this.durchgangWaehlen() });
 		this.addCommand({ id: 'lernplan-oeffnen', name: 'Lernplan und Vorschläge öffnen', callback: () => void this.lernplanOeffnen() });
 		this.addCommand({ id: 'lernplan-chat', name: 'Lernchat öffnen', callback: () => void this.lernplanOeffnen(true) });
+		this.addCommand({ id: 'lernplan-chat-auswahl', name: 'Markierung im Lernchat fragen', editorCheckCallback: (pruefen, editor) => {
+			const text = editor.getSelection();
+			if (!text.trim()) return false;
+			if (!pruefen) void this.lernchatMitAuswahl(text);
+			return true;
+		} });
+		this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor) => {
+			const text = editor.getSelection();
+			if (text.trim()) menu.addItem((i) => i.setTitle('Im Lernchat fragen').setIcon('graduation-cap').onClick(() => void this.lernchatMitAuswahl(text)));
+		}));
 		this.addCommand({ id: 'lernplan-chat-gross', name: 'Lernchat groß öffnen', callback: () => void this.lernplanGross('chat', null) });
 
 		// REGISTER FEEDBACK VIEW

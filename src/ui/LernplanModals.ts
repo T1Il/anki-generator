@@ -98,3 +98,23 @@ export class DurchgangModal extends Modal {
 	}
 	onClose() { this.contentEl.empty(); }
 }
+
+/** Kleines Eingabefenster statt prompt(): Chat umbenennen. */
+export class NameModal extends Modal {
+	constructor(app: App, private titel: string, private wert: string, private fertig: (wert: string) => void) { super(app); }
+
+	onOpen() {
+		this.modalEl.addClass('anki-lp-fenster');
+		this.titleEl.setText(this.titel);
+		const feld = this.contentEl.createEl('input', { cls: 'anki-lp-fsuche', attr: { type: 'search', value: this.wert } });
+		feld.value = this.wert;
+		const fuss = this.contentEl.createDiv({ cls: 'anki-lp-ffuss' });
+		const ok = fuss.createEl('button', { text: 'Speichern', cls: 'mod-cta' });
+		const los = () => { const w = feld.value.trim(); if (w) { this.fertig(w); this.close(); } };
+		ok.onclick = los;
+		feld.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); los(); } };
+		window.setTimeout(() => { feld.focus(); feld.select(); }, 0);
+	}
+
+	onClose() { this.contentEl.empty(); }
+}
