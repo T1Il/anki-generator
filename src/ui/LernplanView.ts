@@ -382,7 +382,7 @@ export class LernplanView extends ItemView {
 		if (e.art === 'dosis') {
 			const k = karte(ROT, '℞', e.suche || 'Dosis');
 			for (const a of e.angaben) {
-				const z = k.createDiv({ cls: 'anki-lp-dosis' });
+				const z = k.createDiv({ cls: 'anki-lp-dosis' + ((a.text || '').length > 40 ? ' lang' : '') });
 				z.createSpan({ text: a.zielgruppe || 'Alle' });
 				z.createEl('b', { text: a.text });
 				z.createEl('small', { text: [a.beleg || a.quelle, a.seite && `S. ${a.seite}`].filter(Boolean).join(', ') });
