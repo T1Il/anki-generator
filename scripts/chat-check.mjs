@@ -529,6 +529,19 @@ console.log('\nEinfuegen, verschachtelte Fences, Diagramme:');
 		C.markiereZeilen('> [!dosierung]- Dosierung', [0], 'is-add') === '> [!dosierung]- <span class="anki-diff-mark is-add">Dosierung</span>');
 	check('Markierung: Liste und Block-ID bleiben draussen',
 		C.markiereZeilen('>- Hypoglykämie ^indikation', [0], 'is-remove') === '>- <span class="anki-diff-mark is-remove">Hypoglykämie</span> ^indikation');
+	// Tabelle: ohne Kopfzeile rendert Obsidian keine Tabelle, sondern Pipes (Anaphylaxie, 18.11.2026).
+	const tab = ['# T', '', 'Text', '', '| Buchst. | Schritt | Befund |', '| --- | --- | --- |',
+		'| ![[I.png]] | Inspektion | Quaddeln |', '| ![[P.png]] | Perkussion | Klopfschall |',
+		'| ![[P.png]] | Palpation | - |', '| ![[A.png]] | Auskultation | Stridor |',
+		'| ![[E.png]] | Exposition | Haut |', '', 'a', 'b', 'c', 'd', 'Ende'].join('\n');
+	const tv = C.berechneVergleich(tab, [], { kind: 'edit', find: '| Palpation | - |', replace: '| Palpation | Puls tachykard |' });
+	check('Vergleich: Tabelle samt Kopfzeile', tv.vorher.includes('| Buchst. | Schritt | Befund |') && tv.nachher.includes('| Buchst. | Schritt | Befund |'), tv.vorher);
+	check('Vergleich: Tabelle bis zur letzten Zeile', tv.nachher.includes('| Exposition |'), tv.nachher);
+	const tm = C.markiereZeilen(tv.nachher, tv.geaendertNachher, 'is-add');
+	check('Markierung: Tabellenzelle markiert, Einbettung bleibt',
+		tm.includes('| ![[P.png]] | <span class="anki-diff-mark is-add">Palpation</span> | <span class="anki-diff-mark is-add">Puls tachykard</span> |'), tm);
+	check('Markierung: Trennzeile unangetastet', C.markiereZeilen('| --- | :-: |', [0], 'is-add') === '| --- | :-: |');
+	check('Markierung: Tabelle im Callout', C.markiereZeilen('> | a | b |', [0], 'is-add') === '> | <span class="anki-diff-mark is-add">a</span> | <span class="anki-diff-mark is-add">b</span> |');
 	const code = '> ```mermaid\n> flowchart TD\n> ```';
 	check('Markierung: Codeblock unangetastet', C.markiereZeilen(code, [0, 1, 2], 'is-add') === code);
 }

@@ -99,14 +99,15 @@ export function ausschnitt(alt: string, neu: string): Vergleich {
 	const entfernt = a.slice(p, sa + 1);
 	const hinzu = b.slice(p, sb + 1);
 
-	// Umgebung: ein paar Zeilen, und ein angeschnittenes Callout ganz – ohne
-	// seine Kopfzeile rendert es nur als Zitat.
+	// Umgebung: ein paar Zeilen, und ein angeschnittenes Callout oder eine
+	// angeschnittene Tabelle ganz – ohne Kopfzeile rendert das eine nur als
+	// Zitat, das andere als Pipes (Anaphylaxie, 18.11.2026).
 	let von = Math.max(0, p - KONTEXT);
-	while (von > 0 && /^\s*>/.test(a[von]) && /^\s*>/.test(a[von - 1])) von--;
+	while (von > 0 && gleicherBlock(a[von - 1], a[von])) von--;
 	let bisA = Math.min(a.length - 1, sa + KONTEXT);
 	let bisB = Math.min(b.length - 1, sb + KONTEXT);
-	while (bisA < a.length - 1 && /^\s*>/.test(a[bisA]) && /^\s*>/.test(a[bisA + 1])) bisA++;
-	while (bisB < b.length - 1 && /^\s*>/.test(b[bisB]) && /^\s*>/.test(b[bisB + 1])) bisB++;
+	while (bisA < a.length - 1 && gleicherBlock(a[bisA], a[bisA + 1])) bisA++;
+	while (bisB < b.length - 1 && gleicherBlock(b[bisB], b[bisB + 1])) bisB++;
 
 	// Innerhalb des geaenderten Bereichs nur die Zeilen markieren, die es auf
 	// der anderen Seite nicht gibt – eine eingeschobene Zeile soll nicht den
@@ -121,6 +122,15 @@ export function ausschnitt(alt: string, neu: string): Vergleich {
 		geaendertVorher: wegIdx.map((i) => i + p - von),
 		geaendertNachher: neuIdx.map((i) => i + p - von)
 	};
+}
+
+const ZITAT = /^\s*>/;
+const TABELLE = /^(?:[ \t]*>)*[ \t]*\|/;
+
+/** Gehoeren zwei Nachbarzeilen zum selben Callout bzw. zur selben Tabelle? */
+function gleicherBlock(oben: string | undefined, unten: string | undefined): boolean {
+	if (oben === undefined || unten === undefined) return false;
+	return (ZITAT.test(oben) && ZITAT.test(unten)) || (TABELLE.test(oben) && TABELLE.test(unten));
 }
 
 /** Indizes der Zeilen, die nicht im laengsten gemeinsamen Teil liegen. */
@@ -164,6 +174,7 @@ export function markiereZeilen(text: string, zeilen: number[], cls: 'is-add' | '
 		const ohneZitat = zeile.replace(/^(?:[ \t]*>)+[ \t]?/, '');
 		if (/^[ \t]*(`{3,}|~{3,})/.test(ohneZitat)) { imCode = !imCode; return zeile; }
 		if (imCode || !set.has(i)) return zeile;
+		if (/^[ \t]*\|/.test(ohneZitat)) return markiereTabellenzeile(zeile, cls);
 
 		const m = zeile.match(
 			/^((?:[ \t]*>)*[ \t]*(?:\[![^\]]+\][-+]?[ \t]*)?(?:#{1,6}[ \t]+|[-*+][ \t]+(?:\[.\][ \t]+)?|\d+[.)][ \t]+)?)(.*)$/
@@ -176,4 +187,36 @@ export function markiereZeilen(text: string, zeilen: number[], cls: 'is-add' | '
 		if (!inhalt.trim() || /^\s*(\||!\[\[|\$\$|\^[A-Za-z0-9-]+\s*$)/.test(inhalt)) return zeile;
 		return `${vor}<span class="anki-diff-mark ${cls}">${inhalt}</span>${id}`;
 	}).join('\n');
+}
+
+/**
+ * Tabellenzeile zellenweise markieren: ein <span> um die ganze Zeile
+ * zerstoerte die Tabelle. Trennzeile, leere Zellen und Einbettungen
+ * (Farbquadrate) bleiben unangetastet.
+ */
+function markiereTabellenzeile(zeile: string, cls: string): string {
+	const m = zeile.match(/^((?:[ \t]*>)*[ \t]*)(\|.*)$/);
+	if (!m) return zeile;
+	const [, vor, rest] = m;
+	if (/^[\s|:-]+$/.test(rest) && rest.includes('-')) return zeile;
+	// An | trennen, aber nicht an \| und nicht in [[Link|Alias]].
+	const zellen: string[] = [];
+	let akt = '';
+	let tiefe = 0;
+	for (let i = 0; i < rest.length; i++) {
+		const c = rest[i];
+		if (c === '[' && rest[i + 1] === '[') { tiefe++; akt += '[['; i++; continue; }
+		if (c === ']' && rest[i + 1] === ']') { tiefe = Math.max(0, tiefe - 1); akt += ']]'; i++; continue; }
+		if (c === '\\' && rest[i + 1] === '|') { akt += '\\|'; i++; continue; }
+		if (c === '|' && tiefe === 0) { zellen.push(akt); akt = ''; continue; }
+		akt += c;
+	}
+	zellen.push(akt);
+	const neu = zellen.map((z, i) => {
+		if (i === 0 || i === zellen.length - 1) return z; // vor erster / nach letzter Pipe
+		const t = z.match(/^(\s*)(.*?)(\s*)$/)!;
+		if (!t[2] || /^!\[\[[^\]]*\]\]$/.test(t[2])) return z;
+		return `${t[1]}<span class="anki-diff-mark ${cls}">${t[2]}</span>${t[3]}`;
+	});
+	return vor + neu.join('|');
 }
