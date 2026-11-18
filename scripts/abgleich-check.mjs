@@ -98,6 +98,26 @@ check('Kartenqualität als eigener Baustein', typeof m.KARTEN_QUALITAET === 'str
 const mitWeb = m.buildAbgleichPrompt({ noteTitle: 'x', noteContent: '', cards: '', sources, research: true, extra: '' });
 check('erlaubt Web mit Recherche', mitWeb.includes('WebSearch') && !mitWeb.includes('Recherchiere NICHT'));
 
+console.log('Eigene Suche: Bibliothek und Vault');
+const frei = m.buildAbgleichPrompt({ noteTitle: 'Ondansetron', noteContent: 'x', cards: '', sources, research: false, extra: '',
+	zoteroStorage: storage, vaultDir: 'C:/Vault' });
+check('sucht ganze Bibliothek', frei.includes('**/.zotero-ft-cache') && frei.includes(storage));
+check('angehakte Sammlungen als Schwerpunkt', /Schwerpunkt/.test(frei));
+check('meldet Funde außerhalb der Auswahl', /Weitere Funde in Zotero/.test(frei));
+check('Vault nur Gegenprobe', frei.includes('C:/Vault') && /nie als Beleg/i.test(frei));
+check('Widersprüche zu anderen Notizen', /Widersprüche zu anderen Notizen/.test(frei));
+check('verlinkt Callouts per Block-ID', frei.includes('#^') && /Callout/.test(frei));
+const leer = m.buildAbgleichPrompt({ noteTitle: 'Ondansetron', noteContent: 'x', cards: '', sources: [], research: false, extra: '',
+	zoteroStorage: storage, vaultDir: null });
+check('ohne Auswahl: nur eigene Suche', /keine Sammlung gewählt/i.test(leer) && leer.includes('**/.zotero-ft-cache'));
+check('ohne Vault keine Vault-Anweisung', !leer.includes('Gegenprobe im Vault'));
+const alt = m.buildAbgleichPrompt({ noteTitle: 'x', noteContent: '', cards: '', sources, research: false, extra: '' });
+check('ohne Orte wie bisher', !alt.includes('Gegenprobe im Vault') && !alt.includes('**/.zotero-ft-cache'));
+const mitOrten = m.readableDirs(sources, storage, { ganzeBibliothek: true, vaultDir: 'C:/Vault' });
+check('Dirs: storage + Vault', mitOrten.includes(storage) && mitOrten.includes('C:/Vault'), JSON.stringify(mitOrten));
+const nurOrte = m.readableDirs([], storage, { ganzeBibliothek: true, vaultDir: null });
+check('Dirs ohne Quellen: storage', nurOrte.length === 1 && nurOrte[0] === storage, JSON.stringify(nurOrte));
+
 console.log('Lesbare Verzeichnisse');
 const dirs = m.readableDirs(sources, storage);
 check('storage als Ganzes', dirs[0] === storage, JSON.stringify(dirs));

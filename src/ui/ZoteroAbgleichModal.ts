@@ -42,7 +42,7 @@ export class ZoteroAbgleichModal extends Modal {
 
 		contentEl.createEl('p', {
 			cls: 'anki-zotero-hint',
-			text: 'Ein Claude-Agent liest die Quellen der gewählten Sammlungen, vergleicht sie mit der Notiz und ihren Karten und schlägt Korrekturen im Chat vor. Übernommen wird erst per Klick.'
+			text: 'Ein Claude-Agent liest die gewählten Sammlungen, sucht selbst in der ganzen Bibliothek und in deinen Notizen weiter und schlägt Korrekturen und Verknüpfungen im Chat vor. Übernommen wird erst per Klick.'
 		});
 
 		const search = contentEl.createEl('input', {
@@ -81,7 +81,6 @@ export class ZoteroAbgleichModal extends Modal {
 			.setCta()
 			.setDisabled(true)
 			.onClick(() => {
-				if (this.selected.size === 0) return;
 				this.close();
 				this.onStart({
 					collectionKeys: [...this.selected],
@@ -183,9 +182,9 @@ export class ZoteroAbgleichModal extends Modal {
 		const n = this.selected.size;
 		const items = this.all.filter((c) => this.selected.has(c.key)).reduce((s, c) => s + c.numItems, 0);
 		this.countEl.setText(n === 0
-			? 'Keine Sammlung gewählt'
+			? 'Ganze Bibliothek'
 			: `${n} Sammlung${n === 1 ? '' : 'en'} · ${items} Einträge${this.includeSub ? ' + Unterordner' : ''}`);
-		this.startBtn.setDisabled(n === 0);
+		this.startBtn.setDisabled(false);
 	}
 
 	onClose() {

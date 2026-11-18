@@ -1485,7 +1485,10 @@ export class ChatPanel extends Component {
 	private async runZoteroAbgleich(title: string, a: AbgleichAuswahl) {
 		const namen = a.collectionKeys.map((k) => collectionPath(k, a.collections)).join(', ');
 		const anfrage = [
-			`📚 **Zotero-Abgleich** mit ${namen}${a.includeSubcollections ? ' (inkl. Unterordner)' : ''}` +
+			(namen
+				? `📚 **Zotero-Abgleich** mit ${namen}${a.includeSubcollections ? ' (inkl. Unterordner)' : ''} + ganze Bibliothek`
+				: '📚 **Zotero-Abgleich** · ganze Bibliothek') +
+			' · Notizen' +
 			(a.research ? ' · mit Web-Recherche' : ''),
 			a.extra.trim() ? `\n> ${a.extra.trim().replace(/\n/g, '\n> ')}` : ''
 		].join('');
@@ -1525,10 +1528,19 @@ export class ChatPanel extends Component {
 		let sources: ZoteroSource[] = [];
 		try {
 			const { client, dataDir } = this.zoteroClient();
-			sources = await client.sources(a.collectionKeys, a.collections, a.includeSubcollections);
-			if (sources.length === 0) throw new Error('In den gewählten Sammlungen liegen keine Einträge.');
+			sources = a.collectionKeys.length
+				? await client.sources(a.collectionKeys, a.collections, a.includeSubcollections)
+				: [];
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const storage = require('path').join(dataDir, 'storage');
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const hatStorage = require('fs').existsSync(storage);
+			if (!hatStorage && sources.length === 0) throw new Error(`Zotero-Speicher nicht gefunden: ${storage}`);
+			const vaultDir = this.vaultDir();
 			const mitText = sources.filter((s) => s.attachments.some((at) => at.fullTextPath || at.filePath)).length;
-			zeile(`${sources.length} Quellen, ${mitText} davon mit Datei/Volltext`);
+			zeile(sources.length
+				? `${sources.length} Quellen, ${mitText} davon mit Datei/Volltext · dazu eigene Suche`
+				: 'Keine Sammlung gewählt – eigene Suche in Bibliothek und Notizen');
 
 			// Pfad → Quellentitel, damit der Fortschritt „liest: Fachinformation" sagt.
 			const titelZuPfad = new Map<string, string>();
@@ -1546,7 +1558,9 @@ export class ChatPanel extends Component {
 				cards,
 				sources,
 				research: a.research,
-				extra: a.extra
+				extra: a.extra,
+				zoteroStorage: hatStorage ? storage : null,
+				vaultDir
 			});
 			// Hat derselbe Agent die Quellen fuer diese Notiz zusammengestellt,
 			// pruefen wir in seiner Sitzung: er kennt dann noch, was er gelesen
@@ -1554,13 +1568,11 @@ export class ChatPanel extends Component {
 			const suche = this.sourcePath ? this.plugin.settings.quellenSitzungen?.[this.sourcePath] : undefined;
 			if (suche) zeile(`Knüpfe an die Quellensuche vom ${new Date(suche.datum).toLocaleDateString('de-DE')} an`);
 
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
-			const storage = require('path').join(dataDir, 'storage');
 			const result = await runMitSitzung({
 				cliPath: this.plugin.settings.claudeCliPath || defaultCliPath(),
 				prompt: suche ? anknuepfungAnQuellensuche(suche) + '\n\n' + prompt : prompt,
 				cwd: dataDir,
-				addDirs: readableDirs(sources, storage),
+				addDirs: readableDirs(sources, storage, { ganzeBibliothek: hatStorage, vaultDir }),
 				research: a.research,
 				model: this.plugin.settings.claudeAgentModel,
 				fortsetzen: suche?.id,
@@ -1584,9 +1596,11 @@ export class ChatPanel extends Component {
 				...(suche ? ['>', result.fortgesetzt
 					? `> Knüpft an die Quellensuche vom ${new Date(suche.datum).toLocaleDateString('de-DE')} an.`
 					: '> Die Sitzung der Quellensuche war nicht mehr da – neu gestartet.'] : []),
-				'>',
-				'> **Quellen**',
-				...sources.map((s, i) => `> ${i + 1}. ${s.title.replace(/\s+/g, ' ').trim()}`)
+				...(sources.length ? [
+					'>',
+					'> **Gewählte Quellen**',
+					...sources.map((s, i) => `> ${i + 1}. ${s.title.replace(/\s+/g, ' ').trim()}`)
+				] : [])
 			].join('\n');
 			placeholder.content = result.text.trim() + '\n' + details;
 		} catch (e: any) {

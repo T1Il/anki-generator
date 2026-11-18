@@ -11,6 +11,13 @@ export interface AbgleichAuftrag {
 	research: boolean;
 	/** Freier Zusatzauftrag aus dem Dialog. */
 	extra: string;
+	/**
+	 * Zoteros storage-Ordner: gesetzt, sucht der Agent selbst in der ganzen
+	 * Bibliothek weiter – die angehakten Sammlungen sind dann der Schwerpunkt.
+	 */
+	zoteroStorage?: string | null;
+	/** Vault-Wurzel: gesetzt, prueft der Agent gegen die anderen Notizen und verlinkt sie. */
+	vaultDir?: string | null;
 }
 
 /**
@@ -45,6 +52,32 @@ der folgende Auftrag mit seinem Antwortformat.`;
  */
 export function buildAbgleichPrompt(a: AbgleichAuftrag): string {
 	const quellen = a.sources.map((s, i) => formatSource(s, i + 1)).join('\n\n');
+	const bib = a.zoteroStorage || null;
+	const vault = a.vaultDir || null;
+	const quellenSchritt = a.sources.length
+		? `2. Arbeite JEDE Quelle unten durch${bib ? ' – sie sind dein Schwerpunkt, die Sammlungen, die der Lernende für die Notiz gewählt hat' : ''}. Bei einer Quelle mit Volltext-Cache (\`.zotero-ft-cache\`,
+   reiner Text) suche darin mit Grep gezielt nach dem Thema der Notiz (Wirkstoffname,
+   Handelsnamen, Synonyme) und lies die Fundstellen mit Read samt Umgebung. Große
+   Bücher nie komplett lesen. Ohne Cache lies die Datei selbst (PDF/HTML) mit Read.`
+		: `2. Der Lernende hat keine Sammlung gewählt – such die Quellen selbst (nächster Schritt).`;
+	const bibSchritt = bib ? `
+   **Eigene Suche in der ganzen Zotero-Bibliothek** (\`${bib}\`): such${a.sources.length ? ' danach' : ''} mit Grep über
+   \`**/.zotero-ft-cache\` nach dem Thema der Notiz, Synonymen, Handelsnamen und den Kernbegriffen
+   einzelner Aussagen. Welches Werk ein Ordner ist, zeigt der Dateiname daneben (Glob \`<Ordner>/*\`).
+   Lies die Fundstellen mit Read samt Umgebung, große Bücher nie komplett. Solche Funde sind
+   vollwertige Belege; zitiere sie als „Werk (Zotero-Ordner <Ordner>), S. x".` : '';
+	const vaultSchritt = vault ? `
+   **Gegenprobe im Vault** (\`${vault}\`): such mit Grep/Glob in den ANDEREN Lernnotizen nach den
+   Begriffen der Notiz. Die Notizen des Lernenden sind nie als Beleg zu verwenden – sie können
+   selbst falsch sein. Du nutzt sie nur, um
+   - **Widersprüche** zu finden: eine andere Notiz sagt etwas anderes als diese. Kläre mit Zotero
+     (oder Web), welche Seite stimmt, und nenn beide Stellen.
+   - **Verknüpfungen** vorzuschlagen: wo diese Notiz ein Thema berührt, das eine andere Notiz
+     ausführlich erklärt (z. B. „Immunsystem"), verlinke die passende Stelle direkt. Endet ein
+     Callout oder Absatz dort mit einer Block-ID (\`^id\` am Blockende), verlinke ihn als
+     \`[[Notiz#^id|Begriff]]\`; sonst die nächste Überschrift als \`[[Notiz#Überschrift|Begriff]]\`.
+     Nur Dateien, Überschriften und IDs, die du wirklich gelesen hast – nie geratene. Die andere
+     Notiz änderst du nicht; neue Block-IDs kannst du dort nicht anlegen.` : '';
 
 	return `Du bist ein sorgfältiger Fachlektor für Notfallmedizin und Pharmakologie.
 Du prüfst eine Lernnotiz einer Notfallsanitäter-Ausbildung gegen die Quellen,
@@ -53,10 +86,7 @@ die der Lernende dafür in Zotero gesammelt hat, und schlägst Korrekturen vor.
 # Arbeitsweise
 
 1. Lies die Notiz und die Karten unten vollständig.
-2. Arbeite JEDE Quelle durch. Bei einer Quelle mit Volltext-Cache (\`.zotero-ft-cache\`,
-   reiner Text) suche darin mit Grep gezielt nach dem Thema der Notiz (Wirkstoffname,
-   Handelsnamen, Synonyme) und lies die Fundstellen mit Read samt Umgebung. Große
-   Bücher nie komplett lesen. Ohne Cache lies die Datei selbst (PDF/HTML) mit Read.
+${quellenSchritt}${bibSchritt}${vaultSchritt}
 3. Vergleiche jede fachliche Aussage der Notiz und der Karten mit den Quellen:
    Dosierungen, Konzentrationen, Indikationen, Kontraindikationen, Wirkmechanismus,
    Wirkeintritt/-dauer, Nebenwirkungen, Interaktionen, Altersgrenzen.
@@ -85,15 +115,19 @@ Du änderst KEINE Dateien. Deine Antwort ist der einzige Weg zurück.
 - **Abweichungen**: je Punkt die Aussage der Notiz, was die Quelle sagt, und der Beleg
   als „Quelle Nr. – Titel, S. x" (Seite, wenn erkennbar).
 - **Widersprüche zwischen Quellen** und **Lücken**, falls vorhanden.
-- Zu jedem Punkt, den man beheben kann, ein Vorschlagsblock (Format unten).
+${bib ? `- **Weitere Funde in Zotero**: Werke außerhalb der gewählten Sammlungen, die du belegt hast –
+  je Werk Titel und Zotero-Ordner, damit der Lernende sie einsortieren kann.
+` : ''}${vault ? `- **Widersprüche zu anderen Notizen** (\`[[Notiz]]\`, was dort steht, was stimmt, Beleg) und
+  **Verknüpfungen**: je Link ein \`anki-edit\`-Vorschlag, der ihn an passender Stelle einbaut.
+` : ''}- Zu jedem Punkt, den man beheben kann, ein Vorschlagsblock (Format unten).
   Vorschläge nur, wo ein Beleg vorliegt – nie aus dem Gedächtnis.
 - Was in den Quellen nicht zu finden war, sag ausdrücklich (nicht raten).
 
 ${SUGGESTION_FORMAT_INSTRUCTIONS}
 ${a.extra.trim() ? `\n# Zusätzlicher Auftrag\n\n${a.extra.trim()}\n` : ''}
-# Quellen aus Zotero (${a.sources.length})
+# ${bib ? 'Gewählte Sammlungen (Schwerpunkt)' : 'Quellen aus Zotero'} (${a.sources.length})
 
-${quellen || '(keine)'}
+${quellen || (bib ? '(keine Sammlung gewählt – nur eigene Suche)' : '(keine)')}
 
 # Notiz „${a.noteTitle}"
 
@@ -134,7 +168,11 @@ function formatSource(s: ZoteroSource, nr: number): string {
  * storage-Ordner als Ganzes, dazu die Ordner verknuepfter Dateien, die
  * ausserhalb liegen. Sonst stuende je Anhang ein eigenes Verzeichnis in argv.
  */
-export function readableDirs(sources: ZoteroSource[], storageRoot: string): string[] {
+export function readableDirs(
+	sources: ZoteroSource[],
+	storageRoot: string,
+	orte: { ganzeBibliothek?: boolean; vaultDir?: string | null } = {}
+): string[] {
 	const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 	const root = norm(storageRoot);
 	const dirs = new Set<string>();
@@ -149,5 +187,7 @@ export function readableDirs(sources: ZoteroSource[], storageRoot: string): stri
 			}
 		}
 	}
+	if (orte.ganzeBibliothek && storageRoot) brauchtStorage = true;
+	if (orte.vaultDir) dirs.add(orte.vaultDir);
 	return brauchtStorage ? [storageRoot, ...dirs] : [...dirs];
 }
