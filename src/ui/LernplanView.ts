@@ -404,6 +404,22 @@ export class LernplanView extends ItemView {
 			const img = k.createEl('img', { cls: 'anki-lp-grafik', attr: { src: svgAdresse(e.svg), alt: e.titel } });
 			bildBedienbar(this.app, img, e.titel, () => svgAlsPng(e.svg), undefined, () => void this.bildInNotiz(() => svgAlsPng(e.svg), e.titel));
 			this.bildFuss(k, () => svgAlsPng(e.svg), e.titel || 'Skizze');
+		} else if (e.art === 'quelle') {
+			const k = karte(BLAU, '⊕', e.titel, [e.herausgeber, e.jahr].filter(Boolean).join(' · ') || undefined);
+			const fuss = k.createDiv({ cls: 'anki-lp-fuss anki-lp-grafikfuss' });
+			fuss.createEl('a', { cls: 'anki-lp-zotero', href: e.url, text: 'Quelle öffnen' });
+			const knopf = fuss.createEl('button', { cls: 'anki-lp-textknopf', text: 'In Zotero ablegen' });
+			knopf.onclick = async () => {
+				knopf.disabled = true;
+				knopf.setText('Lege ab …');
+				try {
+					const r = await this.plugin.lernplanApi.quelleAblegen(e);
+					knopf.setText(r.status === 'war schon drin' ? 'War schon drin' : r.seiten ? `Abgelegt · ${r.seiten} Seiten` : 'Abgelegt · ohne PDF');
+				} catch (err: any) {
+					knopf.disabled = false;
+					knopf.setText(`Nicht abgelegt: ${err?.message || err}`);
+				}
+			};
 		} else if (e.art === 'rechnung') {
 			const k = karte(GRUEN, '=', e.ausdruck, 'Rechner');
 			k.createDiv({ cls: 'anki-lp-zeile anki-lp-stark', text: e.ergebnis?.text || e.ergebnis?.anzeige || JSON.stringify(e.ergebnis) });

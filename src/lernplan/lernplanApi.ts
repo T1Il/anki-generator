@@ -78,6 +78,7 @@ export class LernplanApi {
 		return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}/neu`, 'POST', { hinweis, ...einstellung })).json.punkt;
 	}
 	async rueckmeldung(eintrag: Record<string, unknown>) { await this.ruf('/api/lernplan/rueckmeldung', 'POST', eintrag); }
+	async quelleAblegen(q: Record<string, unknown>): Promise<{ status: string; seiten: number; sammlungen: string[] }> { return (await this.ruf('/api/lernchat/quelle/ablegen', 'POST', q)).json; }
 	async chatAnlegen(felder: Record<string, unknown>) { return (await this.ruf('/api/lernchat', 'POST', felder)).json; }
 	async chatListe(archiv = false): Promise<LernChatKopf[]> { return (await this.ruf(`/api/lernchat${archiv ? '?archiv=true' : ''}`)).json.chats || []; }
 	async chatAendern(id: number, felder: { archiviert?: boolean; titel?: string; pfad?: string }): Promise<LernChatKopf> { return (await this.ruf(`/api/lernchat/${id}`, 'PATCH', felder)).json; }
