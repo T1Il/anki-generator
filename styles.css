@@ -2082,3 +2082,7 @@ button.anki-lp-neuknopf svg { width: 14px; height: 14px; }
 button.anki-lp-neuknopf.is-laeuft svg { animation: anki-lp-dreh 1s linear infinite; }
 @keyframes anki-lp-dreh { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { button.anki-lp-neuknopf.is-laeuft svg { animation: none; } }
+/* Wochen blättern im Reiter Durchgang (24.11.2026) */
+.anki-lp-dzeile > div { align-items: center; }
+.anki-lp-dzeile .anki-lp-blatt { padding: 2px; height: 24px; width: 24px; box-shadow: none; background: transparent; color: var(--text-muted); }
+.anki-lp-dzeile .anki-lp-blatt:hover { color: var(--text-normal); }

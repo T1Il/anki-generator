@@ -58,6 +58,9 @@ export class LernplanView extends ItemView {
 		return f && f.extension === 'md' ? f : null;
 	}
 
+	/** Geblätterte Woche im Reiter Durchgang; null = die laufende. */
+	private gewaehlt: { kw: number; jahr: number } | null = null;
+
 	async zeigen() {
 		const c = this.containerEl.children[1] as HTMLElement;
 		c.empty();
@@ -86,10 +89,13 @@ export class LernplanView extends ItemView {
 		el.addClass('anki-lp-dg');
 		const basis = plan.woche || plan.vorarbeit;
 		if (!basis) { el.createDiv({ text: 'Keine laufende Woche.', cls: 'anki-lp-leer' }); return; }
+		const fremd = this.gewaehlt && !(this.gewaehlt.kw === basis.kw && this.gewaehlt.jahr === basis.jahr) ? this.gewaehlt : null;
 		// Von der laufenden Woche aus mit `auch_spaeter`: so bleibt ihr Durchgang mit offenen Punkten sichtbar,
 		// auch wenn schon die Vorarbeit für die nächste Woche läuft; ein neuerer Lauf der Vorarbeit gewinnt.
-		const d = await api.durchgang(basis.kw, basis.jahr);
-		const w = (d?.kw && [plan.woche, plan.vorarbeit].find((x: any) => x?.kw === d.kw)) || plan.vorarbeit || plan.woche;
+		// Geblättert (z. B. Vorwoche): genau deren Durchgang.
+		const d = fremd ? await api.durchgang(fremd.kw, fremd.jahr, false) : await api.durchgang(basis.kw, basis.jahr);
+		const w = fremd ? await api.woche(fremd.kw, fremd.jahr)
+			: (d?.kw && [plan.woche, plan.vorarbeit].find((x: any) => x?.kw === d.kw)) || plan.vorarbeit || plan.woche;
 		if (w.lernziel) {
 			const ziel = el.createDiv({ text: w.lernziel, cls: 'anki-lp-ziel', attr: { title: 'Lernziel' } });
 			ziel.onclick = () => ziel.toggleClass('is-offen', !ziel.hasClass('is-offen'));
@@ -102,14 +108,30 @@ export class LernplanView extends ItemView {
 
 		const zeile = el.createDiv({ cls: 'anki-lp-dzeile' });
 		const links = zeile.createDiv();
+		const blaettern = (tage: number) => {
+			const ziel = isoWoche(w.von, tage);
+			if (!ziel) return;
+			this.gewaehlt = ziel.kw === basis.kw && ziel.jahr === basis.jahr ? null : ziel;
+			void this.zeigen();
+		};
+		const zurueck = links.createEl('button', { cls: 'anki-lp-ikon anki-lp-blatt', attr: { 'aria-label': 'Vorherige Woche', title: 'Vorherige Woche' } });
+		setIcon(zurueck, 'chevron-left');
+		zurueck.onclick = () => blaettern(-7);
 		links.createEl('b', { text: `KW ${w.kw}` });
+		const vor = links.createEl('button', { cls: 'anki-lp-ikon anki-lp-blatt', attr: { 'aria-label': 'Nächste Woche', title: 'Nächste Woche' } });
+		setIcon(vor, 'chevron-right');
+		vor.onclick = () => blaettern(7);
+		if (fremd) {
+			const heute = links.createEl('button', { text: 'Diese Woche', cls: 'anki-lp-textknopf anki-lp-leise' });
+			heute.onclick = () => { this.gewaehlt = null; void this.zeigen(); };
+		}
 		const stand = !d || weg ? 'kein offener Durchgang'
 			: laeuft ? 'Durchgang läuft'
 			: d.status === 'fehlgeschlagen' ? 'Durchgang fehlgeschlagen'
 			: offen.length ? `${offen.length} offen · ${punkte.length} Punkte` : `${punkte.length} Punkte, alles entschieden`;
 		links.createSpan({ text: stand, cls: laeuft ? 'is-laeuft' : '' });
 		const start = zeile.createEl('button', { text: 'Neuer Durchgang', cls: 'anki-lp-textknopf' });
-		start.onclick = () => void this.plugin.durchgangWaehlen();
+		start.onclick = () => void this.plugin.durchgangWaehlen(fremd ? { kw: w.kw, jahr: w.jahr } : undefined);
 		if (!d) return;
 		if (weg) {
 			const z = el.createEl('button', { text: 'Letzten Durchgang zeigen', cls: 'anki-lp-textknopf anki-lp-leise' });
@@ -711,4 +733,17 @@ export class LernplanView extends ItemView {
 			}).catch(() => new Notice('Kopieren ging nicht. Markiere den Text von Hand.'));
 		};
 	}
+}
+
+
+/** ISO-Woche von `von` (JJJJ-MM-TT) um `tage` verschoben. */
+function isoWoche(von: string | undefined, tage: number): { kw: number; jahr: number } | null {
+	if (!von) return null;
+	const d = new Date(`${von}T12:00:00Z`);
+	if (Number.isNaN(d.getTime())) return null;
+	d.setUTCDate(d.getUTCDate() + tage + 3 - ((d.getUTCDay() + 6) % 7));   // Donnerstag derselben Woche
+	const jahr = d.getUTCFullYear();
+	const erster = new Date(Date.UTC(jahr, 0, 4));
+	const kw = 1 + Math.round(((d.getTime() - erster.getTime()) / 86400000 - 3 + ((erster.getUTCDay() + 6) % 7)) / 7);
+	return { kw, jahr };
 }

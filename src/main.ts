@@ -76,10 +76,11 @@ export default class AnkiGeneratorPlugin extends Plugin {
 		} catch (e: any) { new Notice(e?.message || String(e)); }
 	}
 
-	async durchgangWaehlen() {
+	/** `woche`: eine geblätterte Woche; ohne die Arbeitswoche (Vorarbeit vor laufender). */
+	async durchgangWaehlen(woche?: { kw: number; jahr: number }) {
 		try {
-			const plan = await this.lernplanApi.plan();
-			const w = plan.vorarbeit || plan.woche;
+			const plan = woche ? null : await this.lernplanApi.plan();
+			const w = woche ? await this.lernplanApi.woche(woche.kw, woche.jahr) : plan.vorarbeit || plan.woche;
 			if (!w) { new Notice('Keine laufende Woche.'); return; }
 			new DurchgangModal(this.app, this.lernplanApi, w, await this.lernplanApi.pruefstand(w.kw, w.jahr), () => void this.lernplanOeffnen()).open();
 		} catch (e: any) { new Notice(e?.message || String(e)); }

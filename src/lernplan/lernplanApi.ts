@@ -72,7 +72,9 @@ export class LernplanApi {
 		return { aufgaben: j.aufgaben || {}, karten: j.karten || {} };
 	}
 	async durchgangStarten(kw: number, jahr: number, aufgaben: number[], modus: 'fakten' | 'karten' = 'fakten') { return (await this.ruf('/api/lernplan/durchgang', 'POST', { kw, jahr, aufgaben, modus })).json.durchgang; }
-	async durchgang(kw: number, jahr: number) { return (await this.ruf(`/api/lernplan/durchgang?kw=${kw}&jahr=${jahr}&auch_spaeter=true`)).json.durchgang; }
+	async durchgang(kw: number, jahr: number, auchSpaeter = true) { return (await this.ruf(`/api/lernplan/durchgang?kw=${kw}&jahr=${jahr}${auchSpaeter ? '&auch_spaeter=true' : ''}`)).json.durchgang; }
+	/** Eine beliebige Woche des Plans — zum Zurückblättern (24.11.2026). */
+	async woche(kw: number, jahr: number) { return (await this.ruf(`/api/lernplan/woche?kw=${kw}&jahr=${jahr}`)).json; }
 	async punkt(id: number, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> { return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert })).json.punkt; }
 	async karteNeu(id: number, hinweis: string, einstellung: { modell?: string; denken?: string } = {}): Promise<LernPunkt> {
 		return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}/neu`, 'POST', { hinweis, ...einstellung })).json.punkt;
