@@ -23,7 +23,7 @@ export function kartenText(k?: KartenStand): string {
 
 export interface LernChatLive { aktiv: boolean; schritte: string[]; text: string; einbettungen: any[]; }
 export interface LernChatKopf { id: number; titel?: string; pfad?: string | null; letzte?: string | null; fragen?: number; archiviert?: boolean; }
-export interface LernPunkt { id: number; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; rueckbar?: boolean; stelle?: string | null; nach?: string | null; zeile?: string | null; grund?: string | null; grund_text?: string | null; notiz?: string | null; }
+export interface LernPunkt { id: number; lernplan_notiz?: string; typ: string; status: string; ueberschrift?: string; pfad?: string; alt?: string; neu?: string; text?: string; vorne?: string; hinten?: string; belege?: { titel?: string; seite?: number }[]; rueckbar?: boolean; stelle?: string | null; nach?: string | null; zeile?: string | null; grund?: string | null; grund_text?: string | null; notiz?: string | null; }
 export interface ChatEreignis { type: string; text?: string; name?: string; einbettung?: any; punkt?: LernPunkt; }
 
 export const MODELLE: [string, string][] = [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku']];
@@ -75,6 +75,11 @@ export class LernplanApi {
 	async durchgang(kw: number, jahr: number, auchSpaeter = true) { return (await this.ruf(`/api/lernplan/durchgang?kw=${kw}&jahr=${jahr}${auchSpaeter ? '&auch_spaeter=true' : ''}`)).json.durchgang; }
 	/** Eine beliebige Woche des Plans — zum Zurückblättern (24.11.2026). */
 	async woche(kw: number, jahr: number) { return (await this.ruf(`/api/lernplan/woche?kw=${kw}&jahr=${jahr}`)).json; }
+	/** Wie `punkt`, aber auf den lokalen Notiztexten: der Server schreibt nichts und gibt die neuen Texte zurück (24.11.2026). */
+	async punktLokal(id: number, aktion: string, wert: Record<string, unknown>, lokal: Record<string, string>): Promise<{ punkt: LernPunkt; schreiben: { pfad: string; text: string }[] }> {
+		const j = (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert, lokal })).json;
+		return { punkt: j.punkt, schreiben: j.schreiben || [] };
+	}
 	async punkt(id: number, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> { return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}`, 'POST', { aktion, ...wert })).json.punkt; }
 	async karteNeu(id: number, hinweis: string, einstellung: { modell?: string; denken?: string } = {}): Promise<LernPunkt> {
 		return (await this.ruf(`/api/lernplan/durchgang/punkt/${id}/neu`, 'POST', { hinweis, ...einstellung })).json.punkt;

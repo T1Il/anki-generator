@@ -209,7 +209,7 @@ export class LernplanView extends ItemView {
 			if (p.status === 'verworfen' || p.rueckbar) {
 				const r = knoepfe.createEl('button', { cls: 'anki-lp-ikon', attr: { 'aria-label': 'Rückgängig', title: p.status === 'verworfen' ? 'Wieder öffnen' : 'Rückgängig: Notiz auf den Stand davor' } });
 				setIcon(r, 'undo-2');
-				r.onclick = async () => neu(await this.tun(() => api.punkt(p.id, 'zuruecknehmen')));
+				r.onclick = async () => neu(await this.tun(() => this.imVault(p, 'zuruecknehmen')));
 			}
 			const koerper = box.createDiv({ cls: 'anki-lp-inhalt anki-lp-zu-inhalt' });
 			koerper.hide();
@@ -299,7 +299,7 @@ export class LernplanView extends ItemView {
 			const wert: Record<string, string> = {};
 			if (imEdit) for (const k in felder) wert[k] = felder[k].value;
 			uebern.disabled = true;
-			const r = await this.tun(() => api.punkt(p.id, 'uebernehmen', wert));
+			const r = await this.tun(() => this.imVault(p, 'uebernehmen', wert));
 			uebern.disabled = false;
 			if (r?.status === 'konflikt') new Notice('Die Stelle steht so nicht mehr in der Notiz.');
 			neu(r);
@@ -337,6 +337,34 @@ export class LernplanView extends ItemView {
 			ed.scrollIntoView({ from: von, to: bis }, true);
 			return;
 		}
+	}
+
+	/**
+	 * Übernehmen/Zurücknehmen im eigenen Vault (24.11.2026): die betroffenen Notizen gehen mit, der Server
+	 * rechnet darauf und schreibt nichts — das Server-Obsidian steht z. B. bei jedem APK-Bau still. Geschrieben
+	 * wird hier, und nur, wenn die Notiz seit dem Absenden unverändert ist.
+	 */
+	private async imVault(p: LernPunkt, aktion: string, wert: Record<string, unknown> = {}): Promise<LernPunkt> {
+		const lokal: Record<string, string> = {};
+		for (const pfad of [p.pfad, p.lernplan_notiz]) {
+			const f = pfad ? this.app.vault.getAbstractFileByPath(pfad) : null;
+			if (pfad && f instanceof TFile) lokal[pfad] = await this.app.vault.read(f);
+		}
+		const r = await this.plugin.lernplanApi.punktLokal(p.id, aktion, wert, lokal);
+		const fehler: string[] = [];
+		for (const s of r.schreiben) {
+			const f = this.app.vault.getAbstractFileByPath(s.pfad);
+			try {
+				if (f instanceof TFile) {
+					await this.app.vault.process(f, (jetzt) => {
+						if (s.pfad in lokal && jetzt !== lokal[s.pfad]) throw new Error('inzwischen geändert');
+						return s.text;
+					});
+				} else await this.app.vault.create(s.pfad, s.text);
+			} catch (e: any) { fehler.push(`${s.pfad.split('/').pop()?.replace(/\.md$/, '')}: ${e?.message || e}`); }
+		}
+		if (fehler.length) new Notice(`Nicht geschrieben — ${fehler.join('; ')}. Rückgängig und nochmal übernehmen.`, 10000);
+		return r.punkt;
 	}
 
 	private async tun<T>(fn: () => Promise<T>): Promise<T | null> {
