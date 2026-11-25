@@ -65,6 +65,11 @@ A plugin for Obsidian that generates Anki flashcards from your notes using Large
 ### Zotero cross-check (Claude agent, desktop only)
 - The **library** button in the chat header opens a picker for Zotero collections
   (the collection named like the note is preselected, subcollections optional).
+- Sources the note already cites are picked up automatically (toggle "Zitierte Quellen
+  der Notiz", on by default): `zotero://select|open-pdf/…` links (incl. `?page=`) and
+  Better BibTeX citations `[@citekey, p. x]`. They go into the agent's context first,
+  with the cited pages, and the agent checks whether each cited passage really supports
+  the statement. Citations Zotero can't resolve are passed on as open citations.
 - A Claude agent (`claude -p`, the Claude CLI) reads the sources — Zotero's full-text
   cache first, then PDF/HTML — and compares them with the note and its cards:
   errors, contradictions between sources, gaps, badly posed cards.
