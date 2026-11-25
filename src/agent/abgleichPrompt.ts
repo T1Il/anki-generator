@@ -1,5 +1,5 @@
 import { SUGGESTION_FORMAT_INSTRUCTIONS } from '../chat/suggestions';
-import type { ZoteroSource } from '../zotero/zoteroClient';
+import { AUS_DER_NOTIZ, ZoteroSource } from '../zotero/zoteroClient';
 
 export interface AbgleichAuftrag {
 	noteTitle: string;
@@ -18,6 +18,8 @@ export interface AbgleichAuftrag {
 	zoteroStorage?: string | null;
 	/** Vault-Wurzel: gesetzt, prueft der Agent gegen die anderen Notizen und verlinkt sie. */
 	vaultDir?: string | null;
+	/** Zitate der Notiz, die Zotero nicht aufloesen konnte (Anzeige wie in der Notiz). */
+	offeneZitate?: string[];
 }
 
 /**
@@ -54,8 +56,16 @@ export function buildAbgleichPrompt(a: AbgleichAuftrag): string {
 	const quellen = a.sources.map((s, i) => formatSource(s, i + 1)).join('\n\n');
 	const bib = a.zoteroStorage || null;
 	const vault = a.vaultDir || null;
+	const zitiert = a.sources.filter((s) => s.zitiertAn).length;
+	const offen = a.offeneZitate ?? [];
+	const zitatSchritt = zitiert || offen.length ? `
+   **Die Notiz zitiert selbst Quellen**${zitiert ? ` (unten mit „${AUS_DER_NOTIZ}" und den zitierten Stellen)` : ''}.
+   Prüf bei jeder, ob die zitierte Stelle die Aussage der Notiz wirklich trägt: Steht es dort so,
+   stimmt die Seite, ist die Quelle die aktuelle Fassung? Ein falscher oder zu schwacher Beleg ist
+   ein Befund wie ein Fachfehler.${offen.length ? `
+   Nicht in Zotero gefunden (such sie per Grep, sonst nenne sie im Befund): ${offen.join(', ')}` : ''}` : '';
 	const quellenSchritt = a.sources.length
-		? `2. Arbeite JEDE Quelle unten durch${bib ? ' – sie sind dein Schwerpunkt, die Sammlungen, die der Lernende für die Notiz gewählt hat' : ''}. Bei einer Quelle mit Volltext-Cache (\`.zotero-ft-cache\`,
+		? `2. Arbeite JEDE Quelle unten durch${bib ? ' – sie sind dein Schwerpunkt: die in der Notiz zitierten und die Sammlungen, die der Lernende gewählt hat' : ''}. Bei einer Quelle mit Volltext-Cache (\`.zotero-ft-cache\`,
    reiner Text) suche darin mit Grep gezielt nach dem Thema der Notiz (Wirkstoffname,
    Handelsnamen, Synonyme) und lies die Fundstellen mit Read samt Umgebung. Große
    Bücher nie komplett lesen. Ohne Cache lies die Datei selbst (PDF/HTML) mit Read.`
@@ -86,7 +96,7 @@ die der Lernende dafür in Zotero gesammelt hat, und schlägst Korrekturen vor.
 # Arbeitsweise
 
 1. Lies die Notiz und die Karten unten vollständig.
-${quellenSchritt}${bibSchritt}${vaultSchritt}
+${quellenSchritt}${zitatSchritt}${bibSchritt}${vaultSchritt}
 3. Vergleiche jede fachliche Aussage der Notiz und der Karten mit den Quellen:
    Dosierungen, Konzentrationen, Indikationen, Kontraindikationen, Wirkmechanismus,
    Wirkeintritt/-dauer, Nebenwirkungen, Interaktionen, Altersgrenzen.
@@ -145,6 +155,9 @@ function formatSource(s: ZoteroSource, nr: number): string {
 	const kopf = [`## Quelle ${nr}: ${s.title}`];
 	const meta = [s.creators, s.date, s.itemType, `Sammlung: ${s.collectionName}`].filter(Boolean).join(' · ');
 	if (meta) kopf.push(meta);
+	if (s.zitiertAn) kopf.push(s.zitiertAn.length
+		? `In der Notiz zitiert an: ${s.zitiertAn.join(', ')}`
+		: 'In der Notiz zitiert (ohne Stellenangabe)');
 	if (s.url) kopf.push(`URL: ${s.url}`);
 
 	const dateien = s.attachments.map((at) => {

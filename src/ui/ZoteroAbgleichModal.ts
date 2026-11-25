@@ -7,6 +7,8 @@ export interface AbgleichAuswahl {
 	includeSubcollections: boolean;
 	research: boolean;
 	extra: string;
+	/** Die Quellen, die die Notiz selbst zitiert, mitnehmen. */
+	notizQuellen: boolean;
 }
 
 /**
@@ -21,6 +23,7 @@ export class ZoteroAbgleichModal extends Modal {
 	private includeSub = true;
 	private research = false;
 	private extra = '';
+	private notizQuellen = true;
 	private filter = '';
 	private listEl!: HTMLElement;
 	private countEl!: HTMLElement;
@@ -30,7 +33,9 @@ export class ZoteroAbgleichModal extends Modal {
 		app: App,
 		private client: ZoteroClient,
 		private noteTitle: string,
-		private onStart: (a: AbgleichAuswahl) => void
+		private onStart: (a: AbgleichAuswahl) => void,
+		/** Anzahl der Zitate in der Notiz (Zotero-Links und [@citekey]). */
+		private zitate = 0
 	) {
 		super(app);
 	}
@@ -62,6 +67,13 @@ export class ZoteroAbgleichModal extends Modal {
 			.setName('Unterordner einbeziehen')
 			.addToggle((t) => t.setValue(this.includeSub).onChange((v) => { this.includeSub = v; this.updateCount(); }));
 
+		if (this.zitate > 0) {
+			new Setting(contentEl)
+				.setName('Zitierte Quellen der Notiz')
+				.setDesc(`${this.zitate} gefunden`)
+				.addToggle((t) => t.setValue(this.notizQuellen).onChange((v) => { this.notizQuellen = v; this.updateCount(); }));
+		}
+
 		new Setting(contentEl)
 			.setName('Weiter recherchieren')
 			.setDesc('Der Agent darf zusätzlich im Web suchen (Leitlinien, Fachinformation). Solche Belege werden als „außerhalb Zotero" markiert.')
@@ -87,7 +99,8 @@ export class ZoteroAbgleichModal extends Modal {
 					collections: this.all,
 					includeSubcollections: this.includeSub,
 					research: this.research,
-					extra: this.extra
+					extra: this.extra,
+					notizQuellen: this.zitate > 0 && this.notizQuellen
 				});
 			});
 
@@ -181,9 +194,10 @@ export class ZoteroAbgleichModal extends Modal {
 	private updateCount() {
 		const n = this.selected.size;
 		const items = this.all.filter((c) => this.selected.has(c.key)).reduce((s, c) => s + c.numItems, 0);
-		this.countEl.setText(n === 0
+		const zitiert = this.zitate > 0 && this.notizQuellen ? `${this.zitate} zitiert · ` : '';
+		this.countEl.setText(zitiert + (n === 0
 			? 'Ganze Bibliothek'
-			: `${n} Sammlung${n === 1 ? '' : 'en'} · ${items} Einträge${this.includeSub ? ' + Unterordner' : ''}`);
+			: `${n} Sammlung${n === 1 ? '' : 'en'} · ${items} Einträge${this.includeSub ? ' + Unterordner' : ''}`));
 		this.startBtn.setDisabled(false);
 	}
 

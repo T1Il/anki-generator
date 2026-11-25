@@ -38,6 +38,7 @@ fs.writeFileSync(entry, [
 	`export * from ${src('src/agent/quellenPrompt.ts')};`,
 	`export * from ${src('src/agent/verstehenPrompt.ts')};`,
 	`export * from ${src('src/zotero/zoteroClient.ts')};`,
+	`export * from ${src('src/zotero/notizZitate.ts')};`,
 	`export * from ${src('src/chat/suggestions.ts')};`,
 	`export * from ${src('src/anki/ankiParser.ts')};`
 ].join('\n'));
@@ -117,6 +118,30 @@ const mitOrten = m.readableDirs(sources, storage, { ganzeBibliothek: true, vault
 check('Dirs: storage + Vault', mitOrten.includes(storage) && mitOrten.includes('C:/Vault'), JSON.stringify(mitOrten));
 const nurOrte = m.readableDirs([], storage, { ganzeBibliothek: true, vaultDir: null });
 check('Dirs ohne Quellen: storage', nurOrte.length === 1 && nurOrte[0] === storage, JSON.stringify(nurOrte));
+
+console.log('Zitate in der Notiz');
+const zit = m.zitateInNotiz([
+	'- [S1-Leitlinie Atemweg](zotero://select/library/items/7ZZPZQ6Q) ([pdf](zotero://open-pdf/library/items/7ZZPZQ6Q)) — S. 6',
+	'Siehe <a href="zotero://open-pdf/library/items/IZUL4CRQ?page=237">Buch</a> und [pdf](zotero://open-pdf/library/items/7ZZPZQ6Q?page=33).',
+	'Dosis laut [@wehlingKlinischePharmakologie2011, p. 268] und [@SAA2025; @wehlingKlinischePharmakologie2011, p. 270].',
+	'Gruppe zotero://select/groups/123/items/AAAAAAAA zählt nicht, Mail till@example.org auch nicht.'
+].join('\n'));
+const nach = (id) => zit.find((z) => z.id === id);
+check('Link-Schlüssel erkannt, doppelte zusammengelegt', zit.filter((z) => z.id === '7ZZPZQ6Q').length === 1, JSON.stringify(zit));
+check('Seite aus ?page=', nach('7ZZPZQ6Q')?.stellen.includes('S. 33') && nach('IZUL4CRQ')?.stellen.includes('S. 237'));
+check('Linktext als Titel, nicht „pdf"', nach('7ZZPZQ6Q')?.titel === 'S1-Leitlinie Atemweg', JSON.stringify(nach('7ZZPZQ6Q')));
+check('citekey mit beiden Stellen', nach('wehlingKlinischePharmakologie2011')?.art === 'citekey'
+	&& nach('wehlingKlinischePharmakologie2011')?.stellen.join('|') === 'p. 268|p. 270', JSON.stringify(nach('wehlingKlinischePharmakologie2011')));
+check('Mehrfachzitat [@a; @b]', !!nach('SAA2025'));
+check('Gruppen und Mailadressen ignoriert', !nach('AAAAAAAA') && !zit.some((z) => z.id.startsWith('example')), JSON.stringify(zit));
+
+const mitZit = m.buildAbgleichPrompt({ noteTitle: 'x', noteContent: '', cards: '', research: false, extra: '',
+	sources: [{ ...sources[0], collectionName: m.AUS_DER_NOTIZ, zitiertAn: ['S. 237'] }, sources[1]],
+	offeneZitate: ['@fehltInZotero2020'] });
+check('zitierte Quelle mit Stelle im Prompt', mitZit.includes('In der Notiz zitiert an: S. 237'));
+check('Auftrag: Beleg prüfen', /zitierte Stelle die Aussage der Notiz wirklich trägt/.test(mitZit));
+check('offene Zitate genannt', mitZit.includes('@fehltInZotero2020'));
+check('ohne Zitate kein Zitat-Auftrag', !alt.includes('Die Notiz zitiert selbst'));
 
 console.log('Lesbare Verzeichnisse');
 const dirs = m.readableDirs(sources, storage);

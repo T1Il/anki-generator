@@ -16,6 +16,7 @@ import { setHistory, clearHistory, appendFeedbackToCache } from '../../chat/chat
 import { ohneAlteKarten } from '../../anki/legacyStrip';
 import { getAnkiBlocks,parseCardsFromBlockSource, formatCardsToExistingCardsString } from '../../anki/ankiParser';
 import { ZoteroClient, ZoteroSource, collectionPath } from '../../zotero/zoteroClient';
+import { NotizZitat, zitateInNotiz } from '../../zotero/notizZitate';
 import { ZoteroAbgleichModal, AbgleichAuswahl } from '../ZoteroAbgleichModal';
 import { MedikamentQuellenModal } from '../MedikamentQuellenModal';
 import { anknuepfungAnQuellensuche, buildAbgleichPrompt, readableDirs } from '../../agent/abgleichPrompt';
@@ -160,7 +161,7 @@ export class ChatPanel extends Component {
 		if (Platform.isDesktopApp) {
 			const zoteroBtn = new ButtonComponent(controls);
 			zoteroBtn.setIcon('library').setTooltip('Mit Zotero-Quellen abgleichen (Claude-Agent)');
-			zoteroBtn.onClick(() => this.openZoteroAbgleich());
+			zoteroBtn.onClick(() => void this.openZoteroAbgleich());
 
 			const karteBtn = new ButtonComponent(controls);
 			karteBtn.setIcon('network').setTooltip('Konzeptkarte: Zusammenhänge erklären (Claude-Agent). Text im Eingabefeld = Schwerpunkt');
@@ -1460,7 +1461,7 @@ export class ChatPanel extends Component {
 		return { client: new ZoteroClient(s.zoteroApiUrl || 'http://localhost:23119/api', dataDir), dataDir };
 	}
 
-	private openZoteroAbgleich() {
+	private async openZoteroAbgleich() {
 		if (!this.sourcePath) {
 			new Notice('Keine Notiz zum Abgleichen.');
 			return;
@@ -1472,7 +1473,9 @@ export class ChatPanel extends Component {
 		const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
 		const title = file instanceof TFile ? file.basename : this.sourcePath;
 		const { client } = this.zoteroClient();
-		new ZoteroAbgleichModal(this.plugin.app, client, title, (a) => void this.runZoteroAbgleich(title, a)).open();
+		const zitate = file instanceof TFile ? zitateInNotiz(await this.plugin.app.vault.cachedRead(file)) : [];
+		new ZoteroAbgleichModal(this.plugin.app, client, title,
+			(a) => void this.runZoteroAbgleich(title, a, zitate), zitate.length).open();
 	}
 
 	/**
@@ -1482,12 +1485,15 @@ export class ChatPanel extends Component {
 	 * Vorschlagsbloecke werden also genauso angezeigt und per Klick
 	 * uebernommen wie die des normalen Chats – der Agent selbst schreibt nichts.
 	 */
-	private async runZoteroAbgleich(title: string, a: AbgleichAuswahl) {
+	private async runZoteroAbgleich(title: string, a: AbgleichAuswahl, zitate: NotizZitat[] = []) {
 		const namen = a.collectionKeys.map((k) => collectionPath(k, a.collections)).join(', ');
+		const mitZitaten = a.notizQuellen && zitate.length > 0;
 		const anfrage = [
+			'📚 **Zotero-Abgleich** ' +
+			(mitZitaten ? `· ${zitate.length} Zitate der Notiz ` : '') +
 			(namen
-				? `📚 **Zotero-Abgleich** mit ${namen}${a.includeSubcollections ? ' (inkl. Unterordner)' : ''} + ganze Bibliothek`
-				: '📚 **Zotero-Abgleich** · ganze Bibliothek') +
+				? `${mitZitaten ? '+' : 'mit'} ${namen}${a.includeSubcollections ? ' (inkl. Unterordner)' : ''} + ganze Bibliothek`
+				: `${mitZitaten ? '+' : '·'} ganze Bibliothek`) +
 			' · Notizen' +
 			(a.research ? ' · mit Web-Recherche' : ''),
 			a.extra.trim() ? `\n> ${a.extra.trim().replace(/\n/g, '\n> ')}` : ''
@@ -1528,9 +1534,20 @@ export class ChatPanel extends Component {
 		let sources: ZoteroSource[] = [];
 		try {
 			const { client, dataDir } = this.zoteroClient();
-			sources = a.collectionKeys.length
-				? await client.sources(a.collectionKeys, a.collections, a.includeSubcollections)
-				: [];
+			// Die in der Notiz zitierten Quellen zuerst – sie sind, was die Notiz behauptet zu belegen.
+			let offeneZitate: string[] = [];
+			if (mitZitaten) {
+				zeile(`Löse ${zitate.length} Zitate der Notiz auf…`);
+				const { quellen, offen } = await client.notizQuellen(zitate);
+				sources = quellen;
+				offeneZitate = offen.map((z) => (z.art === 'citekey' ? '@' : 'zotero:') + z.id + (z.titel ? ` („${z.titel}“)` : ''));
+				zeile(`${quellen.length} zitierte Quellen erkannt` + (offen.length ? ` · ${offen.length} nicht in Zotero gefunden` : ''));
+			}
+			if (a.collectionKeys.length) {
+				const schon = new Set(sources.map((s) => s.key));
+				const aus = await client.sources(a.collectionKeys, a.collections, a.includeSubcollections);
+				sources = sources.concat(aus.filter((s) => !schon.has(s.key)));
+			}
 			// eslint-disable-next-line @typescript-eslint/no-var-requires
 			const storage = require('path').join(dataDir, 'storage');
 			// eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -1560,7 +1577,8 @@ export class ChatPanel extends Component {
 				research: a.research,
 				extra: a.extra,
 				zoteroStorage: hatStorage ? storage : null,
-				vaultDir
+				vaultDir,
+				offeneZitate
 			});
 			// Hat derselbe Agent die Quellen fuer diese Notiz zusammengestellt,
 			// pruefen wir in seiner Sitzung: er kennt dann noch, was er gelesen
@@ -1599,7 +1617,7 @@ export class ChatPanel extends Component {
 				...(sources.length ? [
 					'>',
 					'> **Gewählte Quellen**',
-					...sources.map((s, i) => `> ${i + 1}. ${s.title.replace(/\s+/g, ' ').trim()}`)
+					...sources.map((s, i) => `> ${i + 1}. ${s.title.replace(/\s+/g, ' ').trim()}${s.zitiertAn ? ' _(in der Notiz zitiert)_' : ''}`)
 				] : [])
 			].join('\n');
 			placeholder.content = result.text.trim() + '\n' + details;
